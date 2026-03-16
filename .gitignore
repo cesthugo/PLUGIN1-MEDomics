@@ -1,0 +1,26 @@
+# ── Données médicales (fichiers .dcm potentiellement lourds / sensibles) ──────
+data/
+
+# ── Environnements virtuels Python ────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# ── Poids des modèles IA (binaires lourds) ────────────────────────────────────
+pythonCode/modules/starhe_plugin/models/
+
+# ── Fichiers temporaires du pipeline ──────────────────────────────────────────
+pythonCode/modules/starhe_plugin/temp/
+
+# ── Dossiers générés par les outils ───────────────────────────────────────────
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# ── IDE & OS ───────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+Thumbs.db
+.DS_Store

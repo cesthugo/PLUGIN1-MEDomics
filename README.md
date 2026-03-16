@@ -167,7 +167,7 @@ pythonCode/modules/starhe_plugin/models/
 from starhe_plugin.pipeline import run_pipeline
 
 results = run_pipeline(
-    dicom_path="F:\STAGE\PROJET\PLUGIN1-MEDomics\data\01-0003-D-G_Bmode.dcm",
+    dicom_path="chemin/vers/votre_fichier.dcm",  # déposer le .dcm dans data/
     anonymize_mode="hash",   # ou "remove"
     run_risk=True,
     run_detect=True
