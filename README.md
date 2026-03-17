@@ -1,7 +1,7 @@
 # 🔬 STARHE Plugin — MEDomics Extension
 
 > **ST**ratification du risque et détection précoce du **C**arcinome **H**épatocellulaire (**E**chographie)  
-> Module d'analyse de ciné-clips échographiques intégré à la plateforme [MEDomics](https://github.com/MEDomics-UdeS/MEDomics).
+> Module d'analyse de ciné-clips échographiques intégré à la plateforme [MEDomics](https://medomicslab.gitbook.io/medomics-docs).
 
 ---
 
@@ -16,7 +16,7 @@ Il repose sur deux modèles d'intelligence artificielle développés dans le cad
 | **STARHE-RISK** | C3D (3D-CNN) | Stratification du risque (score 0–1 : faible / élevé) |
 | **STARHE-DETECT** | DINO-DETR | Détection et localisation de lésions hépatiques |
 
-Le pipeline complet gère l'ensemble du flux : lecture DICOM → extraction de frames → anonymisation → crop → inférence IA → persistance MongoDB.
+Le pipeline complet gère l'ensemble du flux : lecture DICOM → extraction de frames → anonymisation → prétraitement prepUS (crop + backscan) → inférence IA → persistance MongoDB.
 
 ---
 
@@ -50,7 +50,8 @@ Le plug-in s'inscrit dans l'architecture full-stack de MEDomics :
 - 🖥 **Frontend** : React / Next.js (portage UI à venir)
 - ⚡ **Shell** : Electron
 - 🔀 **API** : Go Server (blueprints REST)
-- 🐍 **Moteur d'inférence** : Python 3.10+ (pydicom, OpenCV, PyTorch)
+- 🐍 **Moteur d'inférence** : Python 3.13 (pydicom, OpenCV, PyTorch)
+- 🧹 **Prétraitement** : [prepUS](https://github.com/MEDomics-UdeS/prepUS) — crop + scan conversion
 - 🗄 **Base de données** : MongoDB (local, port 27017)
 - 🔗 **Communication Go ↔ Python** : stdout JSON (`go_print`)
 
@@ -63,47 +64,45 @@ f:\STAGE\PROJET\PLUGIN1-MEDomics\
 │
 ├── README.md                          # Ce fichier
 ├── TODOLIST.md                        # Carnet de bord opérationnel
+├── MEDomicsLab_LOGO.png               # Logo affiché dans l'UI prototype
+├── run_tkinter.ps1                    # Lanceur du prototype (venv Python 3.13)
 │
-├── pythonCode/
-│   └── modules/
-│       └── starhe_plugin/             # 📦 Racine du plug-in Python
-│           │
-│           ├── __init__.py            # Hooks on_load / on_unload (MEDomics lifecycle)
-│           ├── config.py              # Constantes, chemins, hyperparamètres
-│           ├── pipeline.py            # Orchestrateur principal du flux de traitement
-│           ├── requirements.txt       # Dépendances Python
-│           │
-│           ├── ai/                    # 🤖 Wrappers des modèles IA
-│           │   ├── __init__.py
-│           │   ├── starhe_risk.py     # Modèle C3D — classification du risque CHC
-│           │   └── starhe_detect.py   # Modèle DINO-DETR — détection de lésions
-│           │
-│           ├── db/                    # 🗄 Couche de persistance MongoDB
-│           │   ├── __init__.py
-│           │   └── mongo_client.py    # CRUD : save_result, get_result, list_results
-│           │
-│           ├── dicom/                 # 🏥 Traitement des fichiers DICOM
-│           │   ├── __init__.py
-│           │   ├── reader.py          # Lecture .dcm, extraction de frames, normalisation
-│           │   ├── crop.py            # Détection ROI + crop de la zone échographique
-│           │   └── anonymizer.py      # Anonymisation / hachage des tags sensibles
-│           │
-│           ├── ui/                    # 🖼 Prototype de validation (Tkinter)
-│           │   ├── __init__.py
-│           │   └── prototype_tkinter.py  # GUI complète : navigation frames, IA, console
-│           │
-│           └── utils/                 # 🔧 Utilitaires
-│               ├── __init__.py
-│               └── go_print.py        # Protocole JSON stdout → Go Server
-│
-└── (à venir)
-    ├── go_server/
-    │   └── blueprints/
-    │       └── starhe.go              # Routes REST exposant le pipeline Python
-    └── renderer/
-        └── src/
-            └── components/
-                └── starhe/            # Portage React de l'UI Tkinter
+└── pythonCode/
+    └── modules/
+        └── starhe_plugin/             # 📦 Racine du plug-in Python
+            │
+            ├── __init__.py            # Hooks on_load / on_unload (MEDomics lifecycle)
+            ├── config.py              # Constantes, chemins, hyperparamètres
+            ├── pipeline.py            # Orchestrateur principal du flux de traitement
+            ├── requirements.txt       # Dépendances Python
+            │
+            ├── ai/                    # 🤖 Wrappers des modèles IA (stubs)
+            │   ├── __init__.py
+            │   ├── starhe_risk.py     # Modèle C3D — classification du risque CHC
+            │   └── starhe_detect.py   # Modèle DINO-DETR — détection de lésions
+            │
+            ├── db/                    # 🗄 Couche de persistance MongoDB
+            │   ├── __init__.py
+            │   └── mongo_client.py    # CRUD : save_result, get_result, list_results
+            │
+            ├── dicom/                 # 🏥 Traitement des fichiers DICOM
+            │   ├── __init__.py
+            │   ├── reader.py          # Lecture .dcm, extraction de frames, normalisation
+            │   ├── anonymizer.py      # Anonymisation / hachage des tags sensibles
+            │   ├── prepus_bridge.py   # ✅ CŒUR — intégration API prepUS (crop + backscan)
+            │   └── crop.py            # Algo maison (fallback si prepUS indisponible)
+            │
+            ├── ui/                    # 🖼 Prototype de validation (Tkinter)
+            │   ├── __init__.py
+            │   └── prototype_tkinter.py  # GUI MEDomics-style : DICOM, prepUS, IA, console
+            │
+            └── utils/                 # 🔧 Utilitaires
+                ├── __init__.py
+                └── go_print.py        # Protocole JSON stdout → Go Server
+
+# Dépendance externe (hors dépôt)
+F:\STAGE\Pre-processing ultrasound\prepus\
+    └── prepUS/                        # Package prepUS (installé via pip --no-deps)
 ```
 
 ---
@@ -117,18 +116,34 @@ f:\STAGE\PROJET\PLUGIN1-MEDomics\
   - **`hash`** : remplacement par SHA-256 tronqué (16 chars) — traçabilité conservée
   - **`remove`** : suppression complète du tag
 
-### ✂️ Preprocessing — Crop automatique
-- Détection de la **zone d'intérêt (ROI)** par seuillage de luminosité, opérations morphologiques et analyse de contours (OpenCV)
-- Suppression automatique du cadre et des annotations de la machine échographique
-- Application cohérente du même ROI à toutes les frames d'un ciné-clip
+### 🧹 Prétraitement — prepUS (`prepus_bridge.py`)
+Intégration directe de l'API `prepUS.removeLayoutFile` :
+1. Les frames DICOM sont exportées vers un MP4 temporaire (OpenCV)
+2. `removeLayoutFile` détecte les pixels statiques (UI, texte, règles) par analyse temporelle
+3. Le masque binaire est rogné → coordonnées de crop stockées dans `info.json`
+4. **Backscan activé** : conversion scan inverse → image rectangulaire 512×512 (idéale pour l'IA)
+5. **Backscan désactivé** : crop seul depuis les coordonnées `info.json`
+6. Le dossier temporaire est nettoyé automatiquement
+
+La checkbox **Backscan (512×512)** dans l'UI permet de basculer en temps réel entre les deux vues sans relancer le traitement.
 
 ### 🤖 Inférence IA
-- **STARHE-RISK** : normalise un clip en `(16, 112, 112)` frames, passe par le modèle C3D, retourne un score de risque `[0.0–1.0]` et un label `low_risk` / `high_risk`
+- **STARHE-RISK** : normalise un clip en `(16, 112, 112)` frames, passe par le modèle C3D, retourne un score de risque `[0.0–1.0]` et un label `Faible` / `Élevé`
 - **STARHE-DETECT** : redimensionne chaque frame à `800×800`, passe par DINO-DETR, retourne des bounding boxes avec score de confiance et label de lésion (seuil configurable : `0.45`)
+- ⚠️ Les deux modèles sont actuellement des **stubs** — les vrais poids `.pth` ne sont pas encore intégrés
 
 ### 🗄 Stockage des Résultats
 - Persistance dans MongoDB : chemins de fichiers, nombre de frames, coordonnées ROI, score de risque, détections, mode d'anonymisation, horodatage
 - API CRUD : `save_result`, `get_result`, `list_results`, `delete_result`
+
+### 🖼 Interface Prototype (Tkinter)
+- Thème **MEDomics v1.8.0** : sidebar `#151521`, fond principal `#f4f6fb`, bleu `#1565C0`
+- Logo **MEDomicsLab_LOGO.png** intégré dans le header
+- Navigation frames avec scrollbar horizontale et lecture automatique (~22 fps)
+- Boutons **✂ Appliquer Crop** et **🧼 Prétraitement prepUS** (avec thread dédié)
+- Bascule temps-réel backscan ↔ crop par la checkbox
+- Toggle thème clair / sombre
+- Console de logs colorée intégrée
 
 ### 🔗 Communication Go ↔ Python
 - Protocole `go_print` : émission de **lignes JSON préfixées** vers stdout
@@ -141,19 +156,25 @@ f:\STAGE\PROJET\PLUGIN1-MEDomics\
 ## 🚀 Guide d'Exécution
 
 ### Prérequis
-- Python 3.10+
+- Python 3.13 (venv dans `pythonCode/modules/starhe_plugin/.venv`)
 - MongoDB (service local sur `localhost:27017`)
 - Go 1.21+ (pour le serveur MEDomics)
 - Node.js 18+ (pour le frontend)
+- prepUS installé dans le venv : voir ci-dessous
 
 ### 1️⃣ Installer les dépendances Python
 
-```bash
-cd f:\STAGE\PROJET\PLUGIN1-MEDomics\pythonCode\modules\starhe_plugin
-pip install -r requirements.txt
+```powershell
+cd pythonCode\modules\starhe_plugin
+py -3.13 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+
+# prepUS et ses dépendances (ordre important)
+.venv\Scripts\pip install sonocrop --no-deps
+.venv\Scripts\pip install "F:\STAGE\Pre-processing ultrasound\prepus" --no-deps
 ```
 
-### 2️⃣ Placer les poids des modèles
+### 2️⃣ Placer les poids des modèles *(non disponibles — stubs actifs)*
 
 ```
 pythonCode/modules/starhe_plugin/models/
@@ -161,35 +182,29 @@ pythonCode/modules/starhe_plugin/models/
 └── starhe_detect_dino_detr.pth
 ```
 
-### 3️⃣ Lancer le pipeline Python (test standalone)
+### 3️⃣ Lancer le prototype Tkinter
+
+```powershell
+# Depuis la racine du projet
+.\run_tkinter.ps1
+```
+
+### 4️⃣ Lancer le pipeline Python (test standalone)
 
 ```python
 from starhe_plugin.pipeline import run_pipeline
 
 results = run_pipeline(
-    dicom_path="chemin/vers/votre_fichier.dcm",  # déposer le .dcm dans data/
-    anonymize_mode="hash",   # ou "remove"
-    run_risk=True,
-    run_detect=True
+    dicom_path="F:\\STAGE\\DATA\\01-0009-F-Y_Bmode.dcm",
+    anon_mode="hash",
+    run_detection=True
 )
 print(results)
-```
-
-### 4️⃣ Lancer le prototype Tkinter (validation UI)
-
-> ⚠️ **Important** : ne pas utiliser `python` directement — le terminal peut avoir le mauvais venv actif (Python 3.14, Tcl/Tk cassé).  
-> Utiliser le script launcher à la racine qui appelle **toujours** le bon exécutable Python 3.13 :
-
-```powershell
-# Depuis la racine du projet (peu importe le venv actif)
-cd F:\STAGE\PROJET\PLUGIN1-MEDomics
-.\run_tkinter.ps1
 ```
 
 ### 5️⃣ Lancer le serveur Go (MEDomics — à venir)
 
 ```bash
-# Depuis la racine du projet MEDomics forké
 go run main.go
 ```
 
@@ -203,12 +218,11 @@ npm run dev
 
 ## ⚙️ Configuration
 
-Tous les paramètres configurables sont centralisés dans [`pythonCode/modules/starhe_plugin/config.py`](pythonCode/modules/starhe_plugin/config.py) :
+Tous les paramètres configurables sont centralisés dans [`config.py`](pythonCode/modules/starhe_plugin/config.py) :
 
 | Paramètre | Valeur par défaut | Description |
 |---|---|---|
-| `CROP_BLACK_THRESHOLD` | `10` | Seuil luminosité pour détection fond noir |
-| `CROP_MIN_CONTENT_RATIO` | `0.01` | Ratio min pixels utiles par ligne/colonne |
+| `CROP_BLACK_THRESHOLD` | `10` | Seuil luminosité pour détection fond noir (fallback crop.py) |
 | `C3D_INPUT_DEPTH` | `16` | Nombre de frames pour C3D |
 | `C3D_INPUT_HEIGHT/WIDTH` | `112` | Taille spatiale input C3D |
 | `DINO_INPUT_SIZE` | `(800, 800)` | Taille input DINO-DETR |
@@ -217,11 +231,5 @@ Tous les paramètres configurables sont centralisés dans [`pythonCode/modules/s
 
 ---
 
-## 👥 Contributeurs
+*Version du plug-in : `0.1.0` — Stack MEDomics : Electron / React / Go / Python 3.13 / MongoDB*
 
-- **MEDomics Team** — Architecture plateforme
-- **Projet STARHE** — Modèles IA (STARHE-RISK, STARHE-DETECT)
-
----
-
-*Version du plug-in : `0.1.0` — Stack MEDomics : Electron / React / Go / Python / MongoDB*

@@ -1,24 +1,30 @@
 """
 ui/prototype_tkinter.py — Prototype de validation STARHE
 =========================================================
-Objectif : valider le flux utilisateur AVANT le portage React.
+Interface inspirée de MEDomics v1.8.0 :
+  - Barre de titre sombre (#151521) avec logo MEDomics
+  - Sidebar gauche sombre (280 px) : contrôles et résultats
+  - Zone principale claire (#f4f6fb) : visionneuse DICOM + console
+  - Palette MEDomics : bleu primaire #1565C0, cartes blanches, Segoe UI
 
-Fenêtre principale :
-  ┌──────────────────────────────────────────────────────────────┐
-  │  STARHE Plugin — Prototype de validation                     │
-  ├──────────────────────┬───────────────────────────────────────┤
-  │  Panneau de contrôle │  Visionneuse (frame + bbox)           │
-  │  ─────────────────── │  ─────────────────────────────────────│
-  │  [Charger DICOM]     │                                       │
-  │  [← ] Frame [X/N] [→]│    <canvas Tkinter>                  │
-  │  [Appliquer Crop]    │                                       │
-  │  [Lancer Analyse IA] │                                       │
-  │  ─────────────────── │                                       │
-  │  Résultats :         ├───────────────────────────────────────┤
-  │  Risque : —          │  Log console                         │
-  │  Détections : —      │  ─────────────────────────────────────│
-  │                      │  <zone de texte scrollable>           │
-  └──────────────────────┴───────────────────────────────────────┘
+Mise en page :
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  ⬡ MEDomics  │  STARHE — Détection cancer du foie        v0.1 │  ← header sombre
+  ├───────────────┬─────────────────────────────────────────────────┤
+  │  SIDEBAR      │  ZONE PRINCIPALE (#f4f6fb)                      │
+  │  (#151521)    │  ┌─────────────────────────────────────────┐   │
+  │  FICHIER ──── │  │  Visionneuse DICOM (fond sombre)         │   │
+  │   Charger     │  │                                          │   │
+  │  NAVIGATION ─ │  └─────────────────────────────────────────┘   │
+  │   ◀  X/N  ▶  │  Console ─────────────────────────────────────  │
+  │   ▶ Play      │  ▌ log messages...                             │
+  │  PRÉ-TRAIT ── │                                                  │
+  │   ✂ Crop      │                                                  │
+  │   🔒 Anon     │                                                  │
+  │  ANALYSE IA ─ │                                                  │
+  │   🧠 Lancer   │                                                  │  ← bleu #1565C0
+  │  RÉSULTATS ── │                                                  │
+  └───────────────┴─────────────────────────────────────────────────┘
 
 Dépendances :
   pip install pydicom opencv-python-headless Pillow
@@ -41,25 +47,45 @@ if _MODULES_DIR not in sys.path:
 
 from starhe_plugin.dicom.reader     import load_dicom, extract_frames, frame_to_uint8
 from starhe_plugin.dicom.crop       import crop_clip
+from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus
 from starhe_plugin.dicom.anonymizer import anonymize
-from starhe_plugin.config           import DATA_DIR
+from starhe_plugin.config           import DATA_DIR, PROJECT_ROOT
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-CANVAS_W = 560
-CANVAS_H = 480
-APP_TITLE = "STARHE Plugin — Prototype de validation"
-BG_COLOR  = "#1e1e2e"
-FG_COLOR  = "#cdd6f4"
-ACCENT    = "#89b4fa"
-BTN_BG    = "#313244"
-BTN_FG    = "#cdd6f4"
-SUCCESS   = "#a6e3a1"
-WARNING   = "#fab387"
-DANGER    = "#f38ba8"
+# ─── Palette MEDomics ──────────────────────────────────────────────────────
+SIDEBAR_BG  = "#151521"   # fond barre latérale (très sombre)
+SIDEBAR_SEC = "#1e1d2f"   # sections / séparateurs sidebar
+SIDEBAR_HOV = "#252438"   # hover sidebar
+MAIN_BG     = "#f4f6fb"   # fond zone principale
+CARD_BG     = "#ffffff"   # fond cartes / panneaux
+CANVAS_BG   = "#0d1117"   # visionneuse DICOM (toujours sombre)
+LOG_BG      = "#111118"   # fond console log
+BLUE        = "#1565C0"   # bleu primaire MEDomics (CTA)
+BLUE_HOV    = "#1976D2"   # hover bouton primaire
+BLUE_TEXT   = "#1565C0"   # titres sections zone claire
+SBAR_FG     = "#e2e8f0"   # texte clair sur fond sombre
+SBAR_MUTED  = "#7c8899"   # texte secondaire sidebar
+MAIN_FG     = "#1a202c"   # texte principal zone claire
+BORDER      = "#cbd5e0"   # bordure cartes
+SUCCESS_FG  = "#4ade80"   # vert console
+WARN_FG     = "#fb923c"   # orange console
+DANGER_FG   = "#f87171"   # rouge console
+
+CANVAS_W  = 640
+CANVAS_H  = 500
+APP_TITLE = "STARHE Plugin — Détection CHC  |  MEDomics"
+
+FONT_TITLE  = ("Segoe UI", 12, "bold")
+FONT_SEC    = ("Segoe UI",  7, "bold")
+FONT_BODY   = ("Segoe UI",  9)
+FONT_SMALL  = ("Segoe UI",  8)
+FONT_MONO   = ("Consolas",  8)
+FONT_BTN    = ("Segoe UI",  9,  "bold")
+FONT_BTN_P  = ("Segoe UI", 10, "bold")
 
 
 def _ndarray_to_photoimage(arr: np.ndarray, max_w: int, max_h: int) -> ImageTk.PhotoImage:
@@ -95,156 +121,350 @@ class STARHEApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
-        self.configure(bg=BG_COLOR)
+        self.configure(bg=MAIN_BG)
         self.resizable(True, True)
-        self.minsize(900, 600)
+        self.minsize(1020, 680)
 
         # ── État interne ──────────────────────────────────────────────────────
-        self._frames_raw    : np.ndarray | None = None  # (T, H, W, 3) uint8
-        self._frames_cropped: np.ndarray | None = None
-        self._roi           : tuple | None      = None
-        self._frame_idx     : int               = 0
+        self._frames_raw      : np.ndarray | None = None  # (T, H, W, 3) uint8
+        self._frames_cropped  : np.ndarray | None = None
+        self._frames_backscan : np.ndarray | None = None  # résultat backscan prepUS
+        self._frames_crop_only: np.ndarray | None = None  # résultat crop-seulement prepUS
+        self._roi             : tuple | None      = None
+        self._frame_idx       : int               = 0
         self._detections    : list[dict]        = []
         self._show_cropped  : bool              = False
         self._photo_ref     = None   # garde la référence PyImage en vie
         self._playing       : bool              = False
         self._play_after_id = None   # ID retourné par self.after()
+        self._dark_mode     : bool              = False   # thème clair par défaut
+
+        # ttk style pour le Scale de navigation (doit être créé après super().__init__)
+        _sty = ttk.Style()
+        _sty.theme_use("clam")
+        _sty.configure("Sidebar.Horizontal.TScale",
+                       background=SIDEBAR_BG,
+                       troughcolor=SIDEBAR_SEC,
+                       sliderthickness=12, sliderlength=14)
 
         self._build_ui()
-        self._log("Bienvenue dans STARHE Plugin — Prototype Tkinter.")
-        self._log("Chargez un fichier DICOM (.dcm) pour commencer.")
+        self._log("Bienvenue dans STARHE Plugin  —  interface MEDomics.")
+        self._log("Chargez un fichier DICOM (.dcm) dans le panneau latéral pour commencer.")
 
     # ── Construction UI ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Barre de titre personnalisée (label uniquement, Tk gère la vraie barre)
-        header = tk.Label(self, text="🩻  STARHE Plugin — Détection cancer du foie",
-                          bg=BG_COLOR, fg=ACCENT,
-                          font=("Segoe UI", 13, "bold"), pady=8)
+        # ── Barre de titre MEDomics ─────────────────────────────────────────────
+        header = tk.Frame(self, bg=SIDEBAR_BG, height=50)
         header.pack(fill="x")
+        header.pack_propagate(False)
 
-        # Séparateur
-        ttk.Separator(self, orient="horizontal").pack(fill="x")
+        # Logo MEDomics : image PNG réelle
+        _logo_path = os.path.join(PROJECT_ROOT, "MEDomicsLab_LOGO.png")
+        self._logo_img = None   # garde la référence pour éviter le GC
+        try:
+            _pil_logo = Image.open(_logo_path).convert("RGBA")
+            # Fond header (#151521) pour remplacer la transparence PNG
+            _bg = Image.new("RGBA", _pil_logo.size, "#151521")
+            _bg.paste(_pil_logo, mask=_pil_logo.split()[3])
+            _pil_logo = _bg.convert("RGB")
+            _pil_logo.thumbnail((38, 38), Image.LANCZOS)
+            self._logo_img = ImageTk.PhotoImage(_pil_logo)
+            tk.Label(header, image=self._logo_img,
+                     bg=SIDEBAR_BG).pack(side="left", padx=(10, 4), pady=6)
+        except Exception:
+            # Fallback : initiales "M" si le fichier est absent
+            tk.Label(header, text="M", bg="#1565C0", fg="#fff",
+                     font=("Segoe UI", 14, "bold"), width=2,
+                     relief="flat").pack(side="left", padx=(10, 4), pady=6)
 
-        # Corps principal : panneau gauche + droit
-        body = tk.Frame(self, bg=BG_COLOR)
-        body.pack(fill="both", expand=True, padx=8, pady=8)
+        tk.Label(header, text=" │ ", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=("Segoe UI", 13)).pack(side="left")
+        tk.Label(header, text="STARHE — Détection cancer du foie",
+                 bg=SIDEBAR_BG, fg=SBAR_FG,
+                 font=("Segoe UI", 11)).pack(side="left")
+        tk.Label(header, text="v0.1.0-prototype", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=("Segoe UI", 8)).pack(side="right", padx=16)
 
-        self._build_left_panel(body)
-        self._build_right_panel(body)
+        # Ligne de séparation 1 px (like MEDomics divider)
+        tk.Frame(self, bg="#0a0a14", height=1).pack(fill="x")
 
-    def _build_left_panel(self, parent):
-        left = tk.Frame(parent, bg=BG_COLOR, width=240)
-        left.pack(side="left", fill="y", padx=(0, 8))
-        left.pack_propagate(False)
+        # Corps : sidebar sombre + zone principale claire
+        body = tk.Frame(self, bg=MAIN_BG)
+        body.pack(fill="both", expand=True)
 
-        def section(title):
-            tk.Label(left, text=title, bg=BG_COLOR, fg=ACCENT,
-                     font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x", pady=(10, 2))
-            ttk.Separator(left, orient="horizontal").pack(fill="x")
+        self._build_sidebar(body)
+        tk.Frame(body, bg="#0a0a14", width=1).pack(side="left", fill="y")
+        self._build_main(body)
 
-        # ── Section : Fichier ─────────────────────────────────────────────────
-        section("FICHIER DICOM")
-        self._btn_load = self._btn(left, "📂  Charger DICOM", self._on_load_dicom)
-        self._btn_load.pack(fill="x", pady=3)
+    def _build_sidebar(self, parent):
+        """Barre latérale sombre style MEDomics."""
+        sb = tk.Frame(parent, bg=SIDEBAR_BG, width=270)
+        sb.pack(side="left", fill="y")
+        sb.pack_propagate(False)
 
-        self._label_file = tk.Label(left, text="Aucun fichier", bg=BG_COLOR,
-                                    fg=FG_COLOR, font=("Segoe UI", 8),
-                                    wraplength=220, anchor="w", justify="left")
-        self._label_file.pack(fill="x")
+        # ── Bouton thème en bas (doit être packé AVANT le contenu scrollable) ──
+        sb_footer = tk.Frame(sb, bg="#0d0d1a", height=46)
+        sb_footer.pack(side="bottom", fill="x")
+        sb_footer.pack_propagate(False)
+        self._sb_theme_btn = tk.Button(
+            sb_footer, text="🌙   Thème sombre",
+            command=self._toggle_theme,
+            bg="#0d0d1a", fg=SBAR_MUTED,
+            relief="flat", bd=0,
+            activebackground=SIDEBAR_HOV, activeforeground=SBAR_FG,
+            font=FONT_SMALL, cursor="hand2", anchor="w", padx=14
+        )
+        self._sb_theme_btn.pack(fill="both", expand=True)
 
-        # Infos DICOM
-        self._info_var = tk.StringVar(value="—")
-        tk.Label(left, textvariable=self._info_var, bg=BG_COLOR, fg=FG_COLOR,
-                 font=("Consolas", 8), justify="left", anchor="nw",
-                 wraplength=220).pack(fill="x", pady=(4, 0))
+        # ── Contenu principal de la sidebar ──────────────────────────────────
+        sc = tk.Frame(sb, bg=SIDEBAR_BG)  # sc = sidebar content
+        sc.pack(side="top", fill="both", expand=True)
 
-        # ── Section : Navigation frames ───────────────────────────────────────
-        section("NAVIGATION")
-        nav = tk.Frame(left, bg=BG_COLOR)
-        nav.pack(fill="x", pady=3)
-        self._btn(nav, "◀", self._prev_frame, width=4).pack(side="left")
-        self._frame_label = tk.Label(nav, text="0 / 0", bg=BG_COLOR, fg=FG_COLOR,
-                                     font=("Segoe UI", 9), width=8)
+        def _sh(title: str):
+            frm = tk.Frame(sc, bg=SIDEBAR_BG)
+            frm.pack(fill="x", padx=12, pady=(14, 3))
+            tk.Label(frm, text=title.upper(), bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                     font=FONT_SEC, anchor="w").pack(side="left")
+            tk.Frame(sc, bg=SIDEBAR_SEC, height=1).pack(fill="x")
+
+        # ─── FICHIER DICOM ───────────────────────────────────────────────────
+        _sh("Fichier DICOM")
+        self._btn_load = self._sbtn(sc, "📂   Charger un fichier DICOM",
+                                    self._on_load_dicom)
+        self._btn_load.pack(fill="x", padx=10, pady=(6, 3))
+
+        self._label_file = tk.Label(sc, text="Aucun fichier sélectionné",
+                                    bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                                    font=FONT_SMALL, wraplength=240,
+                                    anchor="w", justify="left")
+        self._label_file.pack(fill="x", padx=14)
+
+        self._info_var = tk.StringVar(value="")
+        tk.Label(sc, textvariable=self._info_var, bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=FONT_MONO, justify="left", anchor="nw",
+                 wraplength=240).pack(fill="x", padx=14, pady=(2, 0))
+
+        # ─── NAVIGATION ──────────────────────────────────────────────────────
+        _sh("Navigation")
+        nav_row = tk.Frame(sc, bg=SIDEBAR_BG)
+        nav_row.pack(fill="x", padx=10, pady=(6, 2))
+        self._sibtn(nav_row, "◀", self._prev_frame).pack(side="left")
+        self._frame_label = tk.Label(nav_row, text="— / —",
+                                     bg=SIDEBAR_BG, fg=SBAR_FG,
+                                     font=FONT_BODY, width=8, anchor="center")
         self._frame_label.pack(side="left", expand=True)
-        self._btn(nav, "▶", self._next_frame, width=4).pack(side="right")
+        self._sibtn(nav_row, "▶", self._next_frame).pack(side="right")
 
-        self._btn_play = self._btn(left, "▶  Play", self._toggle_play)
-        self._btn_play.pack(fill="x", pady=(1, 4))
+        # Scrollbar horizontale de navigation entre les frames
+        self._frame_scale = ttk.Scale(sc, orient="horizontal",
+                                      from_=0, to=1, value=0,
+                                      command=self._on_scale_drag,
+                                      style="Sidebar.Horizontal.TScale")
+        self._frame_scale.pack(fill="x", padx=10, pady=(2, 2))
 
-        # ── Section : Prétraitement ───────────────────────────────────────────
-        section("PRÉ-TRAITEMENT")
-        self._btn(left, "✂  Appliquer Crop", self._on_crop).pack(fill="x", pady=3)
+        self._btn_play = self._sbtn(sc, "▶   Play", self._toggle_play)
+        self._btn_play.pack(fill="x", padx=10, pady=(2, 6))
+
+        # ─── PRÉ-TRAITEMENT ──────────────────────────────────────────────────
+        _sh("Pré-traitement")
+        self._sbtn(sc, "✂   Appliquer Crop",
+                   self._on_crop).pack(fill="x", padx=10, pady=(6, 3))
+
+        # Bouton prepUS removeLayout
+        self._sbtn(sc, "🧼   Prétraitement prepUS",
+                   self._on_prepus_preprocess).pack(fill="x", padx=10, pady=(0, 3))
+
+        # Options prepUS
+        prepus_opts = tk.Frame(sc, bg=SIDEBAR_BG)
+        prepus_opts.pack(fill="x", padx=16, pady=(0, 4))
+        self._prepus_bsc = tk.BooleanVar(value=True)
+        tk.Checkbutton(prepus_opts, text="Backscan (512×512)",
+                       variable=self._prepus_bsc,
+                       command=self._on_bsc_toggle,
+                       bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
+                       activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
+                       cursor="hand2", font=FONT_SMALL).pack(anchor="w")
+
         self._crop_toggle = tk.BooleanVar(value=False)
-        tk.Checkbutton(left, text="Afficher image rognée",
-                       variable=self._crop_toggle,
-                       bg=BG_COLOR, fg=FG_COLOR, selectcolor=BTN_BG,
-                       activebackground=BG_COLOR, activeforeground=FG_COLOR,
-                       command=self._refresh_canvas).pack(anchor="w")
+        tk.Checkbutton(sc, text="Afficher image rognée",
+                       variable=self._crop_toggle, command=self._refresh_canvas,
+                       bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
+                       activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
+                       cursor="hand2", font=FONT_SMALL).pack(anchor="w", padx=16)
 
+        tk.Label(sc, text="Mode anonymisation :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=FONT_SMALL).pack(anchor="w", padx=16, pady=(8, 2))
         self._anon_mode = tk.StringVar(value="hash")
-        tk.Label(left, text="Mode anonymisation :", bg=BG_COLOR, fg=FG_COLOR,
-                 font=("Segoe UI", 8)).pack(anchor="w", pady=(6, 0))
-        for mode, label in (("hash", "Hachage SHA-256"), ("remove", "Suppression"),
-                             ("none", "Désactivée")):
-            tk.Radiobutton(left, text=label, variable=self._anon_mode, value=mode,
-                           bg=BG_COLOR, fg=FG_COLOR, selectcolor=BTN_BG,
-                           activebackground=BG_COLOR).pack(anchor="w")
+        for val, lbl in (("hash", "Hachage SHA-256"),
+                         ("remove", "Suppression"),
+                         ("none", "Désactivée")):
+            tk.Radiobutton(sc, text=lbl, variable=self._anon_mode, value=val,
+                           bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
+                           activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
+                           cursor="hand2", font=FONT_SMALL).pack(anchor="w", padx=26)
 
-        self._btn(left, "🔒  Anonymiser", self._on_anonymize).pack(fill="x", pady=(6, 3))
+        self._sbtn(sc, "🔒   Anonymiser",
+                   self._on_anonymize).pack(fill="x", padx=10, pady=(6, 6))
 
-        # ── Section : Analyse IA ──────────────────────────────────────────────
-        section("ANALYSE IA")
-        self._btn(left, "🧠  Lancer Analyse STARHE",
-                  self._on_run_pipeline, accent=True).pack(fill="x", pady=3)
+        # ─── ANALYSE IA ──────────────────────────────────────────────────────
+        _sh("Analyse IA")
+        self._pbtn(sc, "🧠   Lancer l'analyse STARHE",
+                   self._on_run_pipeline).pack(fill="x", padx=10, pady=(8, 6))
 
-        # Résultats
-        section("RÉSULTATS")
-        self._risk_var  = tk.StringVar(value="Risque : —")
-        self._det_var   = tk.StringVar(value="Détections : —")
-        tk.Label(left, textvariable=self._risk_var,  bg=BG_COLOR, fg=FG_COLOR,
-                 font=("Consolas", 9), anchor="w").pack(fill="x")
-        tk.Label(left, textvariable=self._det_var,   bg=BG_COLOR, fg=FG_COLOR,
-                 font=("Consolas", 9), anchor="w").pack(fill="x")
+        # ─── RÉSULTATS ───────────────────────────────────────────────────────
+        _sh("Résultats")
+        self._risk_var = tk.StringVar(value="Risque CHC : —")
+        self._det_var  = tk.StringVar(value="Lésions détectées : —")
+        tk.Label(sc, textvariable=self._risk_var, bg=SIDEBAR_BG, fg=SBAR_FG,
+                 font=FONT_MONO, anchor="w").pack(fill="x", padx=14, pady=(6, 1))
+        tk.Label(sc, textvariable=self._det_var,  bg=SIDEBAR_BG, fg=SBAR_FG,
+                 font=FONT_MONO, anchor="w").pack(fill="x", padx=14, pady=(1, 10))
 
-    def _build_right_panel(self, parent):
-        right = tk.Frame(parent, bg=BG_COLOR)
-        right.pack(side="left", fill="both", expand=True)
+    def _build_main(self, parent):
+        """Zone principale claire : carte visionneuse + console."""
+        self._main_frame = tk.Frame(parent, bg=MAIN_BG)
+        self._main_frame.pack(side="left", fill="both", expand=True)
+        main = self._main_frame
 
-        # Canvas d'affichage
-        canvas_frame = tk.Frame(right, bg="#11111b", relief="sunken", bd=1)
-        canvas_frame.pack(fill="both", expand=True)
+        # ── Carte visionneuse DICOM ──────────────────────────────────────────
+        # bd=0 : pas de bordure visible, la carte se fond dans le fond de l'écran
+        self._card = tk.Frame(main, bg=CARD_BG, bd=0, relief="flat")
+        self._card.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+        card = self._card
 
-        self._canvas = tk.Canvas(canvas_frame, bg="#11111b",
+        # En-tête de la carte
+        self._card_hdr = tk.Frame(card, bg=CARD_BG, height=34)
+        self._card_hdr.pack(fill="x")
+        self._card_hdr.pack_propagate(False)
+        self._card_hdr_lbl = tk.Label(self._card_hdr, text="Visionneuse DICOM",
+                                       bg=CARD_BG, fg=BLUE_TEXT,
+                                       font=("Segoe UI", 9, "bold"))
+        self._card_hdr_lbl.pack(side="left", padx=12, pady=8)
+        self._card_divider = tk.Frame(card, bg=BORDER, height=1)
+        self._card_divider.pack(fill="x")
+
+        # Canvas DICOM (fond sombre à l'intérieur de la carte)
+        canvas_wrap = tk.Frame(card, bg=CANVAS_BG)
+        canvas_wrap.pack(fill="both", expand=True)
+        self._canvas = tk.Canvas(canvas_wrap, bg=CANVAS_BG,
                                  highlightthickness=0,
                                  width=CANVAS_W, height=CANVAS_H)
         self._canvas.pack(fill="both", expand=True)
         self._canvas_text = self._canvas.create_text(
             CANVAS_W // 2, CANVAS_H // 2,
-            text="Aucun DICOM chargé\nCliquez sur « Charger DICOM »",
-            fill="#585b70", font=("Segoe UI", 13), justify="center"
+            text="Aucun DICOM chargé\n\nUtilisez  « Charger un fichier DICOM »  dans le panneau latéral",
+            fill="#2a2a3e", font=("Segoe UI", 12), justify="center"
         )
 
-        # Zone de log
-        tk.Label(right, text="Console", bg=BG_COLOR, fg=ACCENT,
-                 font=("Segoe UI", 8, "bold"), anchor="w").pack(fill="x", pady=(6, 0))
+        # ── Console log ──────────────────────────────────────────────────────
+        self._log_hdr_frame = tk.Frame(main, bg=MAIN_BG)
+        self._log_hdr_frame.pack(fill="x", padx=14, pady=(0, 2))
+        self._log_hdr_lbl = tk.Label(self._log_hdr_frame, text="Console",
+                                      bg=MAIN_BG, fg=BLUE_TEXT,
+                                      font=("Segoe UI", 9, "bold"))
+        self._log_hdr_lbl.pack(side="left")
         self._log_widget = scrolledtext.ScrolledText(
-            right, height=8, bg="#11111b", fg="#6c7086",
-            font=("Consolas", 8), state="disabled", relief="flat",
-            insertbackground=FG_COLOR
+            main, height=7, bg=LOG_BG, fg="#8892a4",
+            font=FONT_MONO, state="disabled", relief="flat",
+            insertbackground=SBAR_FG, bd=0
         )
-        self._log_widget.pack(fill="x")
+        self._log_widget.pack(fill="x", padx=14, pady=(0, 10))
 
-    def _btn(self, parent, text, command, width=None, accent=False):
-        kw = dict(text=text, command=command, bg=ACCENT if accent else BTN_BG,
-                  fg="#1e1e2e" if accent else BTN_FG,
-                  relief="flat", activebackground=BTN_BG,
-                  activeforeground=FG_COLOR,
-                  font=("Segoe UI", 9, "bold" if accent else "normal"),
-                  padx=8, pady=5, cursor="hand2")
-        if width:
-            kw["width"] = width
-        return tk.Button(parent, **kw)
+    def _sbtn(self, parent, text: str, command) -> tk.Button:
+        """Bouton secondaire sidebar (fond SIDEBAR_SEC, texte clair)."""
+        return tk.Button(parent, text=text, command=command,
+                         bg=SIDEBAR_SEC, fg=SBAR_FG,
+                         relief="flat", bd=0,
+                         activebackground=SIDEBAR_HOV,
+                         activeforeground="#ffffff",
+                         font=FONT_BTN, padx=10, pady=6,
+                         cursor="hand2", anchor="w")
+
+    def _sibtn(self, parent, text: str, command) -> tk.Button:
+        """Petit bouton icône carré pour la navigation."""
+        return tk.Button(parent, text=text, command=command,
+                         bg=SIDEBAR_SEC, fg=SBAR_FG,
+                         relief="flat", bd=0,
+                         activebackground=BLUE, activeforeground="#ffffff",
+                         font=("Segoe UI", 10, "bold"), width=4, pady=4,
+                         cursor="hand2")
+
+    def _pbtn(self, parent, text: str, command) -> tk.Button:
+        """Bouton primaire bleu MEDomics (CTA équivalent de 'Set Workspace')."""
+        return tk.Button(parent, text=text, command=command,
+                         bg=BLUE, fg="#ffffff",
+                         relief="flat", bd=0,
+                         activebackground=BLUE_HOV,
+                         activeforeground="#ffffff",
+                         font=FONT_BTN_P, padx=10, pady=8,
+                         cursor="hand2", anchor="w")
+
+    # ── Thème clair / sombre ──────────────────────────────────────────────────
+
+    def _toggle_theme(self):
+        self._dark_mode = not self._dark_mode
+        if self._dark_mode:
+            mb  = "#1a1a2e"   # fond zone principale → sombre
+            cb  = "#16213e"   # fond carte
+            cft = "#89b4fa"   # titres (bleu clair)
+            div = "#2a2a4e"   # séparateur
+            lbg = LOG_BG      # console (inchangé)
+            icon, lbl = "☀", "Thème clair"
+        else:
+            mb  = MAIN_BG
+            cb  = CARD_BG
+            cft = BLUE_TEXT
+            div = BORDER
+            lbg = LOG_BG
+            icon, lbl = "🌙", "Thème sombre"
+
+        self.configure(bg=mb)
+        self._main_frame .configure(bg=mb)
+        self._card       .configure(bg=cb)
+        self._card_hdr   .configure(bg=cb)
+        self._card_hdr_lbl.configure(bg=cb, fg=cft)
+        self._card_divider.configure(bg=div)
+        self._log_hdr_frame.configure(bg=mb)
+        self._log_hdr_lbl  .configure(bg=mb, fg=cft)
+        self._log_widget   .configure(bg=lbg)
+        self._sb_theme_btn .configure(text=f"{icon}   {lbl}")
+
+    # ── Bascule backscan / crop-seulement ─────────────────────────────────────
+
+    def _on_bsc_toggle(self):
+        """Bascule la vue entre backscan et crop-seulement si les deux sont disponibles."""
+        if self._frames_backscan is None and self._frames_crop_only is None:
+            return  # prepUS pas encore exécuté, la checkbox n'est qu'un paramètre
+        want_bsc = self._prepus_bsc.get()
+        if want_bsc and self._frames_backscan is not None:
+            self._frames_cropped = self._frames_backscan
+            self._log("Vue → backscan (512×512)")
+        elif not want_bsc and self._frames_crop_only is not None:
+            self._frames_cropped = self._frames_crop_only
+            self._log("Vue → crop seulement")
+        else:
+            self._log("Version demandée non disponible — relancez prepUS avec ce mode.",
+                      level="warning")
+            return
+        self._crop_toggle.set(True)
+        self._refresh_canvas()
+
+    # ── Scale de navigation ───────────────────────────────────────────────────
+
+    def _on_scale_drag(self, val: str):
+        """Appelé à chaque déplacement du curseur de la scrollbar de navigation."""
+        if self._frames_raw is None:
+            return
+        n   = len(self._frames_raw)
+        idx = max(0, min(n - 1, int(float(val))))
+        if idx == self._frame_idx:
+            return
+        if self._playing:
+            self._toggle_play()   # pause à la navigation manuelle
+        self._frame_idx = idx
+        self._frame_label.config(text=f"{idx + 1} / {n}")
+        self._refresh_canvas()
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
@@ -253,10 +473,10 @@ class STARHEApp(tk.Tk):
             return
         self._playing = not self._playing
         if self._playing:
-            self._btn_play.config(text="⏸  Pause")
+            self._btn_play.config(text="⏸   Pause")
             self._play_step()
         else:
-            self._btn_play.config(text="▶  Play")
+            self._btn_play.config(text="▶   Play")
             if self._play_after_id is not None:
                 self.after_cancel(self._play_after_id)
                 self._play_after_id = None
@@ -290,12 +510,15 @@ class STARHEApp(tk.Tk):
             else:
                 frames = np.stack([frame_to_uint8(f) for f in frames])
 
-            self._frames_raw     = frames
-            self._frames_cropped = None
-            self._roi            = None
-            self._frame_idx      = 0
-            self._detections     = []
+            self._frames_raw       = frames
+            self._frames_cropped   = None
+            self._frames_backscan  = None
+            self._frames_crop_only = None
+            self._roi              = None
+            self._frame_idx        = 0
+            self._detections       = []
             self._crop_toggle.set(False)
+            self._prepus_bsc.set(True)   # réinitialise backscan=on à chaque nouveau fichier
 
             # Affiche métadonnées
             name  = str(getattr(ds, "PatientName",   "N/A"))
@@ -304,12 +527,15 @@ class STARHEApp(tk.Tk):
             rows  = int(getattr(ds, "Rows",           0))
             cols  = int(getattr(ds, "Columns",        0))
             self._info_var.set(
-                f"Patient : {name}\nID : {pid}\nModalité : {mod}\n"
-                f"Taille : {rows}×{cols}\nFrames : {len(frames)}"
+                f"Patient : {name}\nID      : {pid}\nModalité: {mod}\n"
+                f"Taille  : {rows}×{cols}\nFrames  : {len(frames)}"
             )
-            self._label_file.config(text=os.path.basename(path))
+            self._label_file.config(text=os.path.basename(path), fg=SBAR_FG)
             if self._playing:
                 self._toggle_play()  # stoppe la lecture si un autre DICOM était en cours
+            # Recalibre la scrollbar sur la durée du nouveau clip
+            self._frame_scale.configure(to=max(1, len(frames) - 1))
+            self._frame_scale.set(0)
             self._update_frame_label()
             self._refresh_canvas()
             self._log(f"DICOM chargé — {len(frames)} frame(s), {rows}×{cols} px.")
@@ -322,20 +548,84 @@ class STARHEApp(tk.Tk):
         if self._frames_raw is None:
             messagebox.showwarning("Aucun DICOM", "Chargez d'abord un fichier DICOM.")
             return
-        self._log("Application du crop echographique…")
-        try:
-            cropped, roi = crop_clip(self._frames_raw)
-            self._frames_cropped = cropped
-            self._roi            = roi
-            self._crop_toggle.set(True)
-            self._refresh_canvas()
-            x0, y0, x1, y1 = roi
-            self._log(f"Crop appliqué — ROI : ({x0},{y0}) → ({x1},{y1}) "
-                      f"| {cropped.shape[2]}×{cropped.shape[1]} px.")
-        except Exception as exc:
-            messagebox.showerror("Erreur Crop", str(exc))
-            self._log(f"ERREUR crop : {exc}", level="error")
+        import threading
+        self._log("Crop prepUS (removeLayout, backscan=off) en cours…")
+        t = threading.Thread(target=self._run_crop_thread, daemon=True)
+        t.start()
 
+    def _run_crop_thread(self):
+        try:
+            processed, _, info = preprocess_with_prepus(
+                self._frames_raw,
+                fps=22.0,
+                thresh=-1.0,
+                back_scan_conversion=False,
+            )
+            import numpy as _np
+            rgb = _np.stack([processed, processed, processed], axis=-1)
+            self._frames_crop_only = rgb
+            self._frames_backscan  = None
+            self._frames_cropped   = rgb
+            self._roi = None
+            self.after(0, lambda: self._crop_toggle.set(True))
+            self.after(0, self._refresh_canvas)
+            shape_str = f"{processed.shape[2]}×{processed.shape[1]}"
+            msg = f"Crop appliqué — {processed.shape[0]} frames, {shape_str} px"
+            if info and "crop" in info:
+                c = info["crop"]
+                msg += f" | y=[{c['ymin']},{c['ymax']}] x=[{c['xmin']},{c['xmax']}]"
+            self._log(msg, level="success")
+        except Exception as exc:
+            self._log(f"ERREUR crop : {exc}", level="error")
+    def _on_prepus_preprocess(self):
+        """Lance prepUS.removeLayoutFile dans un thread pour ne pas bloquer l'UI."""
+        if self._frames_raw is None:
+            messagebox.showwarning("Aucun DICOM", "Chargez d'abord un fichier DICOM.")
+            return
+        import threading
+        self._log("Prétraitement prepUS (removeLayout) en cours…")
+        t = threading.Thread(target=self._run_prepus_thread, daemon=True)
+        t.start()
+
+    def _run_prepus_thread(self):
+        try:
+            bsc = self._prepus_bsc.get()
+            self._log(f"  → removeLayoutFile | backscan={'on' if bsc else 'off'}…")
+            processed, crop_only, info = preprocess_with_prepus(
+                self._frames_raw,
+                fps=22.0,
+                thresh=-1.0,
+                back_scan_conversion=bsc,
+                backscan_width=512,
+                backscan_height=512,
+            )
+            import numpy as _np
+
+            def _rgb(arr):
+                return _np.stack([arr, arr, arr], axis=-1)
+
+            if bsc:
+                self._frames_backscan  = _rgb(processed)
+                self._frames_crop_only = _rgb(crop_only) if crop_only is not None else None
+                self._frames_cropped   = self._frames_backscan
+            else:
+                self._frames_backscan  = None
+                self._frames_crop_only = _rgb(processed)
+                self._frames_cropped   = self._frames_crop_only
+
+            self._roi = None
+            self.after(0, lambda: self._crop_toggle.set(True))
+            self.after(0, self._refresh_canvas)
+            shape_str = f"{processed.shape[2]}×{processed.shape[1]}"
+            msg = f"prepUS terminé — {processed.shape[0]} frames, {shape_str} px"
+            if info and "crop" in info:
+                c = info["crop"]
+                msg += f" | crop y=[{c['ymin']},{c['ymax']}] x=[{c['xmin']},{c['xmax']}]"
+            if bsc and self._frames_crop_only is not None:
+                msg += "  ·  ☑ bascule crop/backscan disponible"
+            self._log(msg, level="success")
+        except Exception as exc:
+            self._log(f"ERREUR prepUS : {exc}", level="error")
     def _on_anonymize(self):
         path = filedialog.askopenfilename(
             title="Sélectionner le DICOM à anonymiser",
@@ -380,8 +670,7 @@ class STARHEApp(tk.Tk):
             risk_result = STARHERiskModel().predict(frames)
             score = risk_result["risk_score"]
             label = risk_result["risk_label"]
-            color = SUCCESS if label == "Faible" else DANGER
-            self._risk_var.set(f"Risque : {label}  ({score:.1%})")
+            self._risk_var.set(f"Risque CHC : {label}  ({score:.1%})")
             self._log(f"  → RISK : {label} | score={score:.3f}", level="success")
 
             # STARHE-DETECT
@@ -390,7 +679,7 @@ class STARHEApp(tk.Tk):
             mid  = len(frames) // 2
             dets = STARHEDetectModel().predict(frames[mid])
             self._detections = dets
-            self._det_var.set(f"Détections : {len(dets)}")
+            self._det_var.set(f"Lésions détectées : {len(dets)}")
             self._log(f"  → DETECT : {len(dets)} lésion(s) trouvée(s).", level="success")
 
             # Rafraîchit le canvas avec les bbox
@@ -459,21 +748,23 @@ class STARHEApp(tk.Tk):
 
     def _update_frame_label(self):
         if self._frames_raw is None:
-            self._frame_label.config(text="0 / 0")
+            self._frame_label.config(text="— / —")
             return
         n = len(self._frames_raw)
         self._frame_label.config(text=f"{self._frame_idx + 1} / {n}")
+        # Synchronise le curseur de la scrollbar avec l'index courant
+        self._frame_scale.set(self._frame_idx)
 
     # ── Log ───────────────────────────────────────────────────────────────────
 
     def _log(self, message: str, level: str = "info"):
         color_map = {
-            "info"   : FG_COLOR,
-            "success": SUCCESS,
-            "warning": WARNING,
-            "error"  : DANGER,
+            "info"   : "#8892a4",
+            "success": SUCCESS_FG,
+            "warning": WARN_FG,
+            "error"  : DANGER_FG,
         }
-        color = color_map.get(level, FG_COLOR)
+        color = color_map.get(level, "#8892a4")
         prefix = {"info": "ℹ", "success": "✓", "warning": "⚠", "error": "✗"}.get(level, "·")
 
         self._log_widget.configure(state="normal")

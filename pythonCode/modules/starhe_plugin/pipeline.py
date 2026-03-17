@@ -5,7 +5,7 @@ Enchaîne toutes les étapes :
   1. Chargement DICOM
   2. Extraction des frames
   3. Anonymisation
-  4. Crop (suppression du cadre échographe)
+  4. Prétraitement prepUS (removeLayout + backscan)
   5. Inférence STARHE-RISK
   6. Inférence STARHE-DETECT (frame médian uniquement)
   7. Sauvegarde MongoDB
@@ -13,25 +13,32 @@ Enchaîne toutes les étapes :
 Point d'entrée appelé par le blueprint Go.
 """
 
-from starhe_plugin.dicom.reader     import load_dicom, extract_frames, frame_to_uint8
-from starhe_plugin.dicom.crop       import crop_clip
-from starhe_plugin.dicom.anonymizer import anonymize
-from starhe_plugin.ai.starhe_risk   import STARHERiskModel
-from starhe_plugin.ai.starhe_detect import STARHEDetectModel
-from starhe_plugin.db.mongo_client  import save_result
-from starhe_plugin.utils.go_print   import go_print, go_progress, go_result
+import numpy as np
+
+from starhe_plugin.dicom.reader        import load_dicom, extract_frames, frame_to_uint8
+from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus
+from starhe_plugin.dicom.anonymizer    import anonymize
+from starhe_plugin.ai.starhe_risk      import STARHERiskModel
+from starhe_plugin.ai.starhe_detect    import STARHEDetectModel
+from starhe_plugin.db.mongo_client     import save_result
+from starhe_plugin.utils.go_print      import go_print, go_progress, go_result
 
 
 def run_pipeline(dicom_path: str,
                  anon_mode: str = "hash",
-                 run_detection: bool = True) -> dict:
+                 run_detection: bool = True,
+                 back_scan_conversion: bool = True,
+                 backscan_width: int = 512,
+                 backscan_height: int = 512) -> dict:
     """
     Exécute le pipeline complet STARHE sur un fichier DICOM.
 
     Paramètres :
-      dicom_path     : chemin absolu du fichier .dcm
-      anon_mode      : "hash" | "remove" | "none"
-      run_detection  : si False, saute STARHE-DETECT (plus rapide)
+      dicom_path           : chemin absolu du fichier .dcm
+      anon_mode            : "hash" | "remove" | "none"
+      run_detection        : si False, saute STARHE-DETECT (plus rapide)
+      back_scan_conversion : active la conversion scan inverse prepUS (recommandé)
+      backscan_width/height: dimensions de sortie du backscan (défaut 512×512)
 
     Retourne un dict de résultats qui est aussi émis via go_result().
     """
@@ -49,33 +56,45 @@ def run_pipeline(dicom_path: str,
 
     # ── 3. Extraction des frames ──────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Extraction des frames…")
-    frames_raw = extract_frames(ds)  # (T, H, W) ou (T, H, W, 3)
-    frames_u8  = frame_to_uint8(frames_raw[0])  # normalise pour crop base
+    frames_raw = extract_frames(ds)   # (T, H, W) ou (T, H, W, 3)
 
-    # ── 4. Crop ───────────────────────────────────────────────────────────────
-    go_progress(step := step + 1, TOTAL_STEPS, "Détection et suppression du cadre échographe…")
-    # Normalise d'abord tous les frames en uint8 pour le crop
-    import numpy as np
-    frames_norm = np.stack([frame_to_uint8(f) for f in frames_raw])  # (T, H, W) uint8
-    # Assure 3 canaux pour le crop (requis par OpenCV)
+    # Normalise → (T, H, W, 3) uint8 RGB (format attendu par preprocess_with_prepus)
+    frames_norm = np.stack([frame_to_uint8(f) for f in frames_raw])   # (T, H, W) uint8
     if frames_norm.ndim == 3:
         frames_rgb = np.stack([frames_norm] * 3, axis=-1)   # (T, H, W, 3)
     else:
-        frames_rgb = frames_norm
+        frames_rgb = frames_norm   # (T, H, W, 3)
 
-    frames_cropped, roi = crop_clip(frames_rgb)   # (T, H', W', 3)
+    # ── 4. Prétraitement prepUS ───────────────────────────────────────────────
+    go_progress(step := step + 1, TOTAL_STEPS,
+                "Prétraitement prepUS (removeLayout + backscan)…")
+    backscan_frames, crop_only_frames, info = preprocess_with_prepus(
+        frames_rgb,
+        back_scan_conversion=back_scan_conversion,
+        backscan_width=backscan_width,
+        backscan_height=backscan_height,
+    )
+    # Utilise le backscan si dispo (meilleur pour l'IA), sinon le crop seul
+    processed = backscan_frames if backscan_frames is not None else crop_only_frames
+    # (T, H', W') gris → (T, H', W', 3) RGB pour les modèles IA
+    frames_processed = np.stack([processed, processed, processed], axis=-1)
+
+    roi = None
+    if info and "crop" in info:
+        c = info["crop"]
+        roi = (c["xmin"], c["ymin"], c["xmax"], c["ymax"])
 
     # ── 5. STARHE-RISK ────────────────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Inférence STARHE-RISK (C3D)…")
     risk_model  = STARHERiskModel()
-    risk_result = risk_model.predict(frames_cropped)
+    risk_result = risk_model.predict(frames_processed)
 
     # ── 6. STARHE-DETECT (frame médian) ───────────────────────────────────────
     detections = []
     if run_detection:
         go_progress(step := step + 1, TOTAL_STEPS, "Inférence STARHE-DETECT (DINO-DETR)…")
         detect_model = STARHEDetectModel()
-        mid_frame    = frames_cropped[len(frames_cropped) // 2]
+        mid_frame    = frames_processed[len(frames_processed) // 2]
         detections   = detect_model.predict(mid_frame)
     else:
         step += 1
@@ -84,8 +103,8 @@ def run_pipeline(dicom_path: str,
     # ── 7. Sauvegarde MongoDB ─────────────────────────────────────────────────
     doc_id = save_result(
         file_path  = dicom_path,
-        num_frames = len(frames_cropped),
-        roi        = list(roi),
+        num_frames = len(frames_processed),
+        roi        = list(roi) if roi else [],
         risk       = risk_result,
         detections = detections,
         anon_mode  = anon_mode,
@@ -93,10 +112,47 @@ def run_pipeline(dicom_path: str,
 
     output = {
         "doc_id"     : doc_id,
-        "num_frames" : len(frames_cropped),
-        "roi"        : list(roi),
+        "num_frames" : len(frames_processed),
+        "roi"        : list(roi) if roi else [],
         "risk"       : risk_result,
         "detections" : detections,
     }
     go_result(output)
     return output
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        prog="python -m starhe_plugin.pipeline",
+        description="Lance le pipeline STARHE complet sur un fichier DICOM.",
+    )
+    parser.add_argument("dicom_path",
+                        help="Chemin absolu du fichier .dcm")
+    parser.add_argument("--anon_mode", default="hash",
+                        choices=["hash", "remove", "none"],
+                        help="Mode d'anonymisation DICOM (défaut : hash)")
+    parser.add_argument("--no_detection", action="store_true",
+                        help="Désactiver STARHE-DETECT (plus rapide)")
+    parser.add_argument("--no_backscan", action="store_true",
+                        help="Désactiver la conversion scan inverse prepUS")
+    parser.add_argument("--backscan_width",  type=int, default=512,
+                        help="Largeur de sortie backscan (défaut : 512)")
+    parser.add_argument("--backscan_height", type=int, default=512,
+                        help="Hauteur de sortie backscan (défaut : 512)")
+
+    args = parser.parse_args()
+    try:
+        run_pipeline(
+            dicom_path          = args.dicom_path,
+            anon_mode           = args.anon_mode,
+            run_detection       = not args.no_detection,
+            back_scan_conversion= not args.no_backscan,
+            backscan_width      = args.backscan_width,
+            backscan_height     = args.backscan_height,
+        )
+    except Exception as exc:
+        go_print("error", f"Pipeline échoué : {exc}")
+        sys.exit(1)
