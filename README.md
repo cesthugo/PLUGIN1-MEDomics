@@ -121,11 +121,9 @@ Intégration directe de l'API `prepUS.removeLayoutFile` :
 1. Les frames DICOM sont exportées vers un MP4 temporaire (OpenCV)
 2. `removeLayoutFile` détecte les pixels statiques (UI, texte, règles) par analyse temporelle
 3. Le masque binaire est rogné → coordonnées de crop stockées dans `info.json`
-4. **Backscan activé** : conversion scan inverse → image rectangulaire 512×512 (idéale pour l'IA)
-5. **Backscan désactivé** : crop seul depuis les coordonnées `info.json`
+4. **Toujours avec backscan activé** : production de `backscan_video.mp4` (512×512) **et** `video.mp4` (crop masqué) en une seule passe
+5. La checkbox **Backscan (512×512)** dans l'UI bascule en temps réel entre les deux vues sans relancer le traitement
 6. Le dossier temporaire est nettoyé automatiquement
-
-La checkbox **Backscan (512×512)** dans l'UI permet de basculer en temps réel entre les deux vues sans relancer le traitement.
 
 ### 🤖 Inférence IA
 - **STARHE-RISK** : normalise un clip en `(16, 112, 112)` frames, passe par le modèle C3D, retourne un score de risque `[0.0–1.0]` et un label `Faible` / `Élevé`
@@ -140,8 +138,10 @@ La checkbox **Backscan (512×512)** dans l'UI permet de basculer en temps réel 
 - Thème **MEDomics v1.8.0** : sidebar `#151521`, fond principal `#f4f6fb`, bleu `#1565C0`
 - Logo **MEDomicsLab_LOGO.png** intégré dans le header
 - Navigation frames avec scrollbar horizontale et lecture automatique (~22 fps)
-- Boutons **✂ Appliquer Crop** et **🧼 Prétraitement prepUS** (avec thread dédié)
-- Bascule temps-réel backscan ↔ crop par la checkbox
+- Bouton **⚙ Pré-Traitement** — lance prepUS avec `back_scan_conversion=True` dans un thread dédié ; la checkbox **Backscan (512×512)** détermine le mode d'**affichage** (backscan 512×512 *vs* crop masqué), sans relancer le traitement
+- Badge de mode en temps réel sur la carte (`ORIGINAL` / `BACKSCAN 512×512` / `CROP + MASQUE`)
+- En-têtes de section avec barre d'accent bleue (style MEDomics)
+- Résultats colorés dynamiquement (vert risque faible, rouge risque élevé)
 - Toggle thème clair / sombre
 - Console de logs colorée intégrée
 

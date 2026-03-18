@@ -1,6 +1,6 @@
 # 📋 TODOLIST — Plug-in STARHE / MEDomics
 > Carnet de bord opérationnel du projet.  
-> Dernière mise à jour : **17 mars 2026**
+> Dernière mise à jour : **18 mars 2026**
 
 ---
 
@@ -50,11 +50,15 @@
 - [x] **Logo MEDomicsLab_LOGO.png** intégré dans le header (PNG avec gestion transparence)
 - [x] **Navigation** — Boutons ◀/▶, lecture automatique ~22 fps, scrollbar horizontale ttk
 - [x] **Toggle thème clair/sombre** (bouton footer sidebar, sidebar toujours sombre)
-- [x] **Bouton ✂ Appliquer Crop** — prepUS backscan=off dans un thread
-- [x] **Bouton 🧼 Prétraitement prepUS** — prepUS backscan=on dans un thread
-- [x] **Checkbox Backscan** — bascule temps-réel entre vue backscan et crop sans relancer le traitement
-- [x] **Reset automatique** — checkbox remise à `True` (backscan=on) à chaque nouveau fichier DICOM
-- [x] **Console de logs colorée** — niveaux info/success/warning/error avec couleurs différenciées
+- [x] **Bouton unique ⚙ Pré-Traitement** — remplace les deux anciens boutons (✂ Crop + 🧼 prepUS) ; toujours `back_scan_conversion=True`, la checkbox contrôle l'affichage
+- [x] **Badge de mode** sur l'en-tête de la carte (`ORIGINAL` / `BACKSCAN 512×512` / `CROP + MASQUE`)
+- [x] **En-têtes de section** avec barre d'accent bleue gauche (style MEDomics) et texte en gras
+- [x] **Résultats colorés dynamiquement** — vert risque faible, rouge risque élevé, orange/vert lésions
+- [x] **Ombre portée simulée** sur la carte visionneuse DICOM + bordure subtile
+- [x] **Indicateur d'état** du pré-traitement (en cours / terminé / erreur) sous le bouton
+- [x] **Compteur de frames** navigation en gros caractères blancs
+- [x] **Checkbox renommée** `Afficher résultat pré-traitement` (plus claire qu'`image rognée`)
+- [x] **Sidebar scrollable** — Canvas + Scrollbar, affichage correct même en petite fenêtre
 
 ---
 
@@ -136,7 +140,7 @@
 > 1. Export numpy → MP4 temporaire (OpenCV)  
 > 2. `removeLayoutFile(mp4, out_dir, ...)` — détection pixels statiques + masquage + crop  
 > 3. Lecture `backscan_video.mp4` et/ou `video.mp4` depuis `out_dir`  
-> 4. Si backscan=False : crop reconstructit depuis `info.json` + frames originaux  
+> 4. Toujours appelé avec `back_scan_conversion=True` → les deux sorties sont disponibles en une passe  
 > 5. Retourne `(backscan_array, crop_only_array, info_dict)` — nettoyage du dossier temporaire  
 > ⚠️ prepUS doit être installé avec `--no-deps` pour éviter les conflits OpenCV
 

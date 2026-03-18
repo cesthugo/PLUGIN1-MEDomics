@@ -189,17 +189,53 @@ def preprocess_with_prepus(
             source = "masqué/rogné"
 
         elif info is not None and "crop" in info:
-            # backscan=False : pas de vidéo prepUS → crop depuis les coordonnées info.json
+            # backscan=False : prepUS ne sauvegarde pas de vidéo →
+            # crop rectangulaire depuis info.json + masque binaire pour
+            # supprimer les annotations UI statiques dans la zone rognée.
             c = info["crop"]
             ymin, ymax = int(c["ymin"]), int(c["ymax"])
             xmin, xmax = int(c["xmin"]), int(c["xmax"])
             go_print("info",
                      f"prepus_bridge: backscan off — crop y=[{ymin}:{ymax}] x=[{xmin}:{xmax}]")
-            cropped_rgb = frames[:, ymin:ymax, xmin:xmax, :]
+
+            cropped_rgb = frames[:, ymin:ymax, xmin:xmax, :].copy()
+
+            # ── Charge et applique le masque prepUS (pixels dynamiques = zone US) ──
+            # prepUS sauve « cropped_mask.png » quand save_cropped_mask=True.
+            # Le masque est blanc (255) sur la zone échographique, noir (0) sur les
+            # pixels statiques (annotations, texte, règles de la machine).
+            go_print("info",
+                     f"prepus_bridge: fichiers dans out_dir: {sorted(os.listdir(out_dir))}")
+            mask_applied = False
+            for mask_name in ("cropped_mask.png", "mask.png", "cropped_mask.jpg"):
+                mask_path = os.path.join(out_dir, mask_name)
+                if not os.path.exists(mask_path):
+                    continue
+                m = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                if m is None:
+                    continue
+                fh, fw = cropped_rgb.shape[1], cropped_rgb.shape[2]
+                if m.shape != (fh, fw):
+                    m = cv2.resize(m, (fw, fh), interpolation=cv2.INTER_NEAREST)
+                # 1 = garder (zone US dynamique), 0 = zéro (UI statique)
+                mask_bin = (m > 0).astype(np.uint8)           # (H, W)
+                cropped_rgb = (
+                    cropped_rgb * mask_bin[np.newaxis, :, :, np.newaxis]
+                ).astype(np.uint8)
+                go_print("info",
+                         f"prepus_bridge: masque '{mask_name}' appliqué ({m.shape})")
+                mask_applied = True
+                break
+
+            if not mask_applied:
+                go_print("warning",
+                         "prepus_bridge: aucun masque trouvé — crop seul (annota"
+                         "tions UI possiblement visibles).")
+
             out_array = np.stack([
                 cv2.cvtColor(f.astype(np.uint8), cv2.COLOR_RGB2GRAY) for f in cropped_rgb
             ], axis=0)
-            source = "crop-manuel (backscan off)"
+            source = "crop" + (" + masque" if mask_applied else "") + " (backscan off)"
 
         else:
             raise FileNotFoundError(

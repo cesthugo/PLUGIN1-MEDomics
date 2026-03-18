@@ -73,7 +73,11 @@ MAIN_FG     = "#1a202c"   # texte principal zone claire
 BORDER      = "#cbd5e0"   # bordure cartes
 SUCCESS_FG  = "#4ade80"   # vert console
 WARN_FG     = "#fb923c"   # orange console
-DANGER_FG   = "#f87171"   # rouge console
+DANGER_FG    = "#f87171"   # rouge console
+CARD_BORDER  = "#e2e8f0"   # bordure visible des cartes
+CARD_SHADOW  = "#d4d9e4"   # ombre portée simulée (cadre derrière carte)
+RISK_LOW_FG  = "#4ade80"   # vert — risque faible CHC
+RISK_HIGH_FG = "#f87171"   # rouge — risque élevé CHC
 
 CANVAS_W  = 640
 CANVAS_H  = 500
@@ -86,6 +90,7 @@ FONT_SMALL  = ("Segoe UI",  8)
 FONT_MONO   = ("Consolas",  8)
 FONT_BTN    = ("Segoe UI",  9,  "bold")
 FONT_BTN_P  = ("Segoe UI", 10, "bold")
+FONT_NAV    = ("Segoe UI", 13, "bold")  # compteur de frames de navigation
 
 
 def _ndarray_to_photoimage(arr: np.ndarray, max_w: int, max_h: int) -> ImageTk.PhotoImage:
@@ -217,16 +222,40 @@ class STARHEApp(tk.Tk):
         )
         self._sb_theme_btn.pack(fill="both", expand=True)
 
-        # ── Contenu principal de la sidebar ──────────────────────────────────
-        sc = tk.Frame(sb, bg=SIDEBAR_BG)  # sc = sidebar content
-        sc.pack(side="top", fill="both", expand=True)
+        # ── Zone scrollable pour le contenu principal ─────────────────────────
+        _sb_canvas = tk.Canvas(sb, bg=SIDEBAR_BG, highlightthickness=0, bd=0)
+        _sb_vbar   = ttk.Scrollbar(sb, orient="vertical", command=_sb_canvas.yview)
+        _sb_canvas.configure(yscrollcommand=_sb_vbar.set)
+        _sb_vbar  .pack(side="right", fill="y")
+        _sb_canvas.pack(side="left",  fill="both", expand=True)
+
+        sc = tk.Frame(_sb_canvas, bg=SIDEBAR_BG)
+        _sc_id = _sb_canvas.create_window((0, 0), window=sc, anchor="nw")
+
+        def _sb_on_frame_configure(event, c=_sb_canvas):
+            c.configure(scrollregion=c.bbox("all"))
+
+        def _sb_on_canvas_configure(event, c=_sb_canvas, wid=_sc_id):
+            c.itemconfigure(wid, width=event.width)
+
+        sc        .bind("<Configure>", _sb_on_frame_configure)
+        _sb_canvas.bind("<Configure>", _sb_on_canvas_configure)
+
+        # Défilement à la molette quand la souris survole la sidebar
+        def _sb_scroll(event, c=_sb_canvas):
+            c.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        _sb_canvas.bind("<Enter>", lambda _: _sb_canvas.bind_all("<MouseWheel>", _sb_scroll))
+        _sb_canvas.bind("<Leave>", lambda _: _sb_canvas.unbind_all("<MouseWheel>"))
 
         def _sh(title: str):
+            """En-tête de section sidebar avec barre d'accent bleu gauche."""
             frm = tk.Frame(sc, bg=SIDEBAR_BG)
-            frm.pack(fill="x", padx=12, pady=(14, 3))
-            tk.Label(frm, text=title.upper(), bg=SIDEBAR_BG, fg=SBAR_MUTED,
-                     font=FONT_SEC, anchor="w").pack(side="left")
-            tk.Frame(sc, bg=SIDEBAR_SEC, height=1).pack(fill="x")
+            frm.pack(fill="x", pady=(16, 4))
+            tk.Frame(frm, bg=BLUE, width=3).pack(side="left", fill="y")
+            tk.Label(frm, text=f"  {title.upper()}", bg=SIDEBAR_BG, fg="#9ca3af",
+                     font=("Segoe UI", 7, "bold"), anchor="w") \
+              .pack(side="left", fill="x", expand=True, pady=5)
 
         # ─── FICHIER DICOM ───────────────────────────────────────────────────
         _sh("Fichier DICOM")
@@ -251,8 +280,8 @@ class STARHEApp(tk.Tk):
         nav_row.pack(fill="x", padx=10, pady=(6, 2))
         self._sibtn(nav_row, "◀", self._prev_frame).pack(side="left")
         self._frame_label = tk.Label(nav_row, text="— / —",
-                                     bg=SIDEBAR_BG, fg=SBAR_FG,
-                                     font=FONT_BODY, width=8, anchor="center")
+                                     bg=SIDEBAR_BG, fg="#ffffff",
+                                     font=FONT_NAV, width=8, anchor="center")
         self._frame_label.pack(side="left", expand=True)
         self._sibtn(nav_row, "▶", self._next_frame).pack(side="right")
 
@@ -268,16 +297,19 @@ class STARHEApp(tk.Tk):
 
         # ─── PRÉ-TRAITEMENT ──────────────────────────────────────────────────
         _sh("Pré-traitement")
-        self._sbtn(sc, "✂   Appliquer Crop",
-                   self._on_crop).pack(fill="x", padx=10, pady=(6, 3))
+        self._btn_preprocess = self._sbtn(sc, "⚙   Pré-Traitement",
+                                          self._on_preprocess)
+        self._btn_preprocess.pack(fill="x", padx=10, pady=(6, 2))
 
-        # Bouton prepUS removeLayout
-        self._sbtn(sc, "🧼   Prétraitement prepUS",
-                   self._on_prepus_preprocess).pack(fill="x", padx=10, pady=(0, 3))
+        # Indicateur d'état du pré-traitement
+        self._preprocess_status = tk.Label(sc, text="",
+                                           bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                                           font=FONT_SMALL, anchor="w")
+        self._preprocess_status.pack(fill="x", padx=14, pady=(0, 4))
 
-        # Options prepUS
+        # Options pré-traitement
         prepus_opts = tk.Frame(sc, bg=SIDEBAR_BG)
-        prepus_opts.pack(fill="x", padx=16, pady=(0, 4))
+        prepus_opts.pack(fill="x", padx=16, pady=(0, 2))
         self._prepus_bsc = tk.BooleanVar(value=True)
         tk.Checkbutton(prepus_opts, text="Backscan (512×512)",
                        variable=self._prepus_bsc,
@@ -287,7 +319,7 @@ class STARHEApp(tk.Tk):
                        cursor="hand2", font=FONT_SMALL).pack(anchor="w")
 
         self._crop_toggle = tk.BooleanVar(value=False)
-        tk.Checkbutton(sc, text="Afficher image rognée",
+        tk.Checkbutton(sc, text="Afficher résultat pré-traitement",
                        variable=self._crop_toggle, command=self._refresh_canvas,
                        bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
                        activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
@@ -314,12 +346,21 @@ class STARHEApp(tk.Tk):
 
         # ─── RÉSULTATS ───────────────────────────────────────────────────────
         _sh("Résultats")
-        self._risk_var = tk.StringVar(value="Risque CHC : —")
-        self._det_var  = tk.StringVar(value="Lésions détectées : —")
-        tk.Label(sc, textvariable=self._risk_var, bg=SIDEBAR_BG, fg=SBAR_FG,
-                 font=FONT_MONO, anchor="w").pack(fill="x", padx=14, pady=(6, 1))
-        tk.Label(sc, textvariable=self._det_var,  bg=SIDEBAR_BG, fg=SBAR_FG,
-                 font=FONT_MONO, anchor="w").pack(fill="x", padx=14, pady=(1, 10))
+        risk_row = tk.Frame(sc, bg=SIDEBAR_BG)
+        risk_row.pack(fill="x", padx=14, pady=(6, 1))
+        tk.Label(risk_row, text="Risque CHC :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=FONT_SMALL, anchor="w").pack(side="left")
+        self._risk_lbl = tk.Label(risk_row, text="—", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                                   font=("Segoe UI", 9, "bold"), anchor="w")
+        self._risk_lbl.pack(side="left", padx=(6, 0))
+
+        det_row = tk.Frame(sc, bg=SIDEBAR_BG)
+        det_row.pack(fill="x", padx=14, pady=(1, 12))
+        tk.Label(det_row, text="Lésions :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=FONT_SMALL, anchor="w").pack(side="left")
+        self._det_lbl = tk.Label(det_row, text="—", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                                  font=("Segoe UI", 9, "bold"), anchor="w")
+        self._det_lbl.pack(side="left", padx=(6, 0))
 
     def _build_main(self, parent):
         """Zone principale claire : carte visionneuse + console."""
@@ -327,20 +368,28 @@ class STARHEApp(tk.Tk):
         self._main_frame.pack(side="left", fill="both", expand=True)
         main = self._main_frame
 
-        # ── Carte visionneuse DICOM ──────────────────────────────────────────
-        # bd=0 : pas de bordure visible, la carte se fond dans le fond de l'écran
-        self._card = tk.Frame(main, bg=CARD_BG, bd=0, relief="flat")
-        self._card.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+        # ── Carte visionneuse DICOM (avec ombre portée simulée + bordure subtile) ───
+        self._card_wrap = tk.Frame(main, bg=CARD_SHADOW, bd=0)
+        self._card_wrap.pack(fill="both", expand=True, padx=13, pady=(10, 4))
+        self._card = tk.Frame(self._card_wrap, bg=CARD_BG, bd=0,
+                              highlightbackground=CARD_BORDER, highlightthickness=1)
+        self._card.pack(fill="both", expand=True, padx=1, pady=1)
         card = self._card
 
         # En-tête de la carte
-        self._card_hdr = tk.Frame(card, bg=CARD_BG, height=34)
+        self._card_hdr = tk.Frame(card, bg=CARD_BG, height=36)
         self._card_hdr.pack(fill="x")
         self._card_hdr.pack_propagate(False)
         self._card_hdr_lbl = tk.Label(self._card_hdr, text="Visionneuse DICOM",
                                        bg=CARD_BG, fg=BLUE_TEXT,
                                        font=("Segoe UI", 9, "bold"))
         self._card_hdr_lbl.pack(side="left", padx=12, pady=8)
+        # Badge indiquant le mode d'affichage courant
+        self._mode_badge = tk.Label(self._card_hdr, text="ORIGINAL",
+                                     bg="#dbeafe", fg="#1d4ed8",
+                                     font=("Segoe UI", 7, "bold"),
+                                     padx=7, pady=2)
+        self._mode_badge.pack(side="left", padx=(6, 0))
         self._card_divider = tk.Frame(card, bg=BORDER, height=1)
         self._card_divider.pack(fill="x")
 
@@ -429,6 +478,13 @@ class STARHEApp(tk.Tk):
         self._log_hdr_lbl  .configure(bg=mb, fg=cft)
         self._log_widget   .configure(bg=lbg)
         self._sb_theme_btn .configure(text=f"{icon}   {lbl}")
+        if hasattr(self, "_card_wrap"):
+            self._card_wrap.configure(bg="#c8cdd8" if self._dark_mode else CARD_SHADOW)
+        if hasattr(self, "_mode_badge"):
+            if self._dark_mode:
+                self._mode_badge.configure(bg="#1e3a5f", fg="#90caf9")
+            else:
+                self._mode_badge.configure(bg="#dbeafe", fg="#1d4ed8")
 
     # ── Bascule backscan / crop-seulement ─────────────────────────────────────
 
@@ -544,88 +600,70 @@ class STARHEApp(tk.Tk):
             messagebox.showerror("Erreur de chargement", str(exc))
             self._log(f"ERREUR : {exc}", level="error")
 
-    def _on_crop(self):
+    def _on_preprocess(self):
+        """Lance le pré-traitement prepUS dans un thread (backscan selon checkbox)."""
         if self._frames_raw is None:
             messagebox.showwarning("Aucun DICOM", "Chargez d'abord un fichier DICOM.")
             return
-        import threading
-        self._log("Crop prepUS (removeLayout, backscan=off) en cours…")
-        t = threading.Thread(target=self._run_crop_thread, daemon=True)
-        t.start()
-
-    def _run_crop_thread(self):
-        try:
-            processed, _, info = preprocess_with_prepus(
-                self._frames_raw,
-                fps=22.0,
-                thresh=-1.0,
-                back_scan_conversion=False,
-            )
-            import numpy as _np
-            rgb = _np.stack([processed, processed, processed], axis=-1)
-            self._frames_crop_only = rgb
-            self._frames_backscan  = None
-            self._frames_cropped   = rgb
-            self._roi = None
-            self.after(0, lambda: self._crop_toggle.set(True))
-            self.after(0, self._refresh_canvas)
-            shape_str = f"{processed.shape[2]}×{processed.shape[1]}"
-            msg = f"Crop appliqué — {processed.shape[0]} frames, {shape_str} px"
-            if info and "crop" in info:
-                c = info["crop"]
-                msg += f" | y=[{c['ymin']},{c['ymax']}] x=[{c['xmin']},{c['xmax']}]"
-            self._log(msg, level="success")
-        except Exception as exc:
-            self._log(f"ERREUR crop : {exc}", level="error")
-    def _on_prepus_preprocess(self):
-        """Lance prepUS.removeLayoutFile dans un thread pour ne pas bloquer l'UI."""
-        if self._frames_raw is None:
-            messagebox.showwarning("Aucun DICOM", "Chargez d'abord un fichier DICOM.")
-            return
-        import threading
-        self._log("Prétraitement prepUS (removeLayout) en cours…")
+        self._btn_preprocess.config(state="disabled")
+        self._preprocess_status.config(text="⟳  Traitement en cours…", fg=WARN_FG)
+        self._log("Pré-traitement prepUS (removeLayout) en cours…")
         t = threading.Thread(target=self._run_prepus_thread, daemon=True)
         t.start()
 
     def _run_prepus_thread(self):
+        """
+        Toujours lancé avec back_scan_conversion=True pour obtenir les deux sorties :
+          - backscan_video.mp4 → image rectangulaire 512×512 (scan inverse)
+          - video.mp4          → crop masqué par prepUS (annotations supprimées)
+        La checkbox détermine uniquement ce qui est AFFICHÉ après le traitement.
+        """
         try:
-            bsc = self._prepus_bsc.get()
-            self._log(f"  → removeLayoutFile | backscan={'on' if bsc else 'off'}…")
-            processed, crop_only, info = preprocess_with_prepus(
+            want_bsc = self._prepus_bsc.get()
+            self._log(f"  → removeLayoutFile | backscan=on "
+                      f"| affichage={'backscan' if want_bsc else 'crop masqué'}…")
+            backscan_arr, crop_only_arr, info = preprocess_with_prepus(
                 self._frames_raw,
                 fps=22.0,
                 thresh=-1.0,
-                back_scan_conversion=bsc,
+                back_scan_conversion=True,   # toujours True → produit video.mp4 masqué
                 backscan_width=512,
                 backscan_height=512,
             )
             import numpy as _np
 
-            def _rgb(arr):
-                return _np.stack([arr, arr, arr], axis=-1)
+            def _rgb(a):
+                return _np.stack([a, a, a], axis=-1)
 
-            if bsc:
-                self._frames_backscan  = _rgb(processed)
-                self._frames_crop_only = _rgb(crop_only) if crop_only is not None else None
-                self._frames_cropped   = self._frames_backscan
-            else:
-                self._frames_backscan  = None
-                self._frames_crop_only = _rgb(processed)
-                self._frames_cropped   = self._frames_crop_only
+            self._frames_backscan  = _rgb(backscan_arr)
+            self._frames_crop_only = _rgb(crop_only_arr) if crop_only_arr is not None \
+                                     else self._frames_backscan
 
+            # Affiche selon la préférence de la checkbox
+            self._frames_cropped = self._frames_backscan if want_bsc \
+                                   else self._frames_crop_only
             self._roi = None
-            self.after(0, lambda: self._crop_toggle.set(True))
-            self.after(0, self._refresh_canvas)
-            shape_str = f"{processed.shape[2]}×{processed.shape[1]}"
-            msg = f"prepUS terminé — {processed.shape[0]} frames, {shape_str} px"
+
+            ref = backscan_arr if want_bsc \
+                  else (crop_only_arr if crop_only_arr is not None else backscan_arr)
+            shape_str = f"{ref.shape[2]}×{ref.shape[1]}"
+            msg = f"Pré-traitement terminé — {ref.shape[0]} frames, {shape_str} px"
             if info and "crop" in info:
                 c = info["crop"]
                 msg += f" | crop y=[{c['ymin']},{c['ymax']}] x=[{c['xmin']},{c['xmax']}]"
-            if bsc and self._frames_crop_only is not None:
-                msg += "  ·  ☑ bascule crop/backscan disponible"
+            msg += "  ·  ☑ bascule backscan/crop disponible"
+
+            self.after(0, lambda: self._crop_toggle.set(True))
+            self.after(0, self._refresh_canvas)
+            self.after(0, lambda: self._btn_preprocess.config(state="normal"))
+            self.after(0, lambda: self._preprocess_status.config(
+                text="✓  Terminé", fg=SUCCESS_FG))
             self._log(msg, level="success")
         except Exception as exc:
-            self._log(f"ERREUR prepUS : {exc}", level="error")
+            self.after(0, lambda: self._btn_preprocess.config(state="normal"))
+            self.after(0, lambda: self._preprocess_status.config(
+                text="✗  Erreur", fg=DANGER_FG))
+            self._log(f"ERREUR pré-traitement : {exc}", level="error")
     def _on_anonymize(self):
         path = filedialog.askopenfilename(
             title="Sélectionner le DICOM à anonymiser",
@@ -670,7 +708,11 @@ class STARHEApp(tk.Tk):
             risk_result = STARHERiskModel().predict(frames)
             score = risk_result["risk_score"]
             label = risk_result["risk_label"]
-            self._risk_var.set(f"Risque CHC : {label}  ({score:.1%})")
+            risk_fg = RISK_HIGH_FG if any(
+                w in label.lower() for w in ("élevé", "high")
+            ) else RISK_LOW_FG
+            self.after(0, lambda l=label, s=score, c=risk_fg:
+                       self._risk_lbl.config(text=f"{l}  ({s:.1%})", fg=c))
             self._log(f"  → RISK : {label} | score={score:.3f}", level="success")
 
             # STARHE-DETECT
@@ -679,7 +721,9 @@ class STARHEApp(tk.Tk):
             mid  = len(frames) // 2
             dets = STARHEDetectModel().predict(frames[mid])
             self._detections = dets
-            self._det_var.set(f"Lésions détectées : {len(dets)}")
+            det_fg = WARN_FG if len(dets) > 0 else SUCCESS_FG
+            self.after(0, lambda n=len(dets), c=det_fg:
+                       self._det_lbl.config(text=str(n), fg=c))
             self._log(f"  → DETECT : {len(dets)} lésion(s) trouvée(s).", level="success")
 
             # Rafraîchit le canvas avec les bbox
@@ -722,6 +766,16 @@ class STARHEApp(tk.Tk):
 
         photo = _ndarray_to_photoimage(frame, cw, ch)
         self._photo_ref = photo       # éviter le GC
+
+        # Met à jour le badge de mode d'affichage
+        if use_cropped and self._frames_backscan is not None and self._prepus_bsc.get():
+            mode_txt = "BACKSCAN 512×512"
+        elif use_cropped:
+            mode_txt = "CROP + MASQUE"
+        else:
+            mode_txt = "ORIGINAL"
+        if hasattr(self, "_mode_badge"):
+            self._mode_badge.config(text=mode_txt)
 
         self._canvas.delete("all")
         self._canvas.create_image(cw // 2, ch // 2, anchor="center", image=photo)
