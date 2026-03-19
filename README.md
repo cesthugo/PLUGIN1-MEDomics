@@ -100,9 +100,9 @@ f:\STAGE\PROJET\PLUGIN1-MEDomics\
                 ├── __init__.py
                 └── go_print.py        # Protocole JSON stdout → Go Server
 
-# Dépendance externe (hors dépôt)
-F:\STAGE\Pre-processing ultrasound\prepus\
-    └── prepUS/                        # Package prepUS (installé via pip --no-deps)
+# Dépendance externe vendorisée (incluse dans le dépôt)
+third_party/prepUS/
+    └── prepUS/                        # Package prepUS — copie locale, aucune dépendance machine
 ```
 
 ---
@@ -166,12 +166,13 @@ Intégration directe de l'API `prepUS.removeLayoutFile` :
 
 ```powershell
 cd pythonCode\modules\starhe_plugin
-py -3.13 -m venv .venv
+python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 
-# prepUS et ses dépendances (ordre important)
+# prepUS et ses dépendances (vendorisés dans third_party/)
+# run_tkinter.ps1 s'en charge automatiquement, ou manuellement :
 .venv\Scripts\pip install sonocrop --no-deps
-.venv\Scripts\pip install "F:\STAGE\Pre-processing ultrasound\prepus" --no-deps
+.venv\Scripts\pip install third_party\prepUS --no-deps
 ```
 
 ### 2️⃣ Placer les poids des modèles *(non disponibles — stubs actifs)*

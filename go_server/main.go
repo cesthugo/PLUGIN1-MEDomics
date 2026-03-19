@@ -1,11 +1,12 @@
 // main.go — Point d'entrée du serveur Go STARHE
 //
 // Expose 4 endpoints REST :
-//   POST   /starhe/analyze        → Lance pipeline.py (SSE streaming)
-//   GET    /starhe/results        → Liste les résultats MongoDB
-//   GET    /starhe/results/{id}   → Récupère un résultat par ID
-//   DELETE /starhe/results/{id}   → Supprime un résultat
-//   GET    /health                → Healthcheck
+//
+//	POST   /starhe/analyze        → Lance pipeline.py (SSE streaming)
+//	GET    /starhe/results        → Liste les résultats MongoDB
+//	GET    /starhe/results/{id}   → Récupère un résultat par ID
+//	DELETE /starhe/results/{id}   → Supprime un résultat
+//	GET    /health                → Healthcheck
 package main
 
 import (

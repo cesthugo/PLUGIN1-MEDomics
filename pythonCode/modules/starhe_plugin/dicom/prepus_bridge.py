@@ -34,27 +34,33 @@ import numpy as np
 from starhe_plugin.utils.go_print import go_print
 
 
-# ── Localisation du package prepUS (chemin relatif au projet) ──────────────────
-_PREPUS_ROOT = os.path.abspath(
+# ── Chemin vers le package prepUS vendorisé (inclus dans le projet) ────────────
+# Priorité 1 : prepUS déjà installé dans le venv (pip install third_party/prepUS)
+# Priorité 2 : source vendorisée dans third_party/prepUS/ (fallback sys.path)
+_VENDOR_PREPUS = os.path.abspath(
     os.path.join(
-        os.path.dirname(__file__),              # starhe_plugin/dicom/
-        "..", "..", "..", "..",                  # → F:\STAGE\PROJET
-        "..", "Pre-processing ultrasound", "prepus",
+        os.path.dirname(__file__),   # starhe_plugin/dicom/
+        "..", "..", "..", "..",       # → racine du dépôt (PLUGIN1-MEDomics/)
+        "third_party", "prepUS",
     )
 )
 
 
 def _ensure_importable() -> None:
-    """Vérifie que prepUS est importable ; sinon lève ImportError avec message clair."""
+    """
+    Vérifie que prepUS est importable.
+    Tente d'abord l'import normal (venv), puis ajoute third_party/prepUS
+    au sys.path si nécessaire.
+    """
     try:
         from prepUS.cli import removeLayoutFile  # noqa: F401
         return
     except ImportError:
         pass
 
-    # Tentative d'ajout du chemin local au sys.path
-    if os.path.isdir(_PREPUS_ROOT) and _PREPUS_ROOT not in sys.path:
-        sys.path.insert(0, _PREPUS_ROOT)
+    # Fallback : code source vendorisé dans third_party/prepUS/
+    if os.path.isdir(_VENDOR_PREPUS) and _VENDOR_PREPUS not in sys.path:
+        sys.path.insert(0, _VENDOR_PREPUS)
         try:
             from prepUS.cli import removeLayoutFile  # noqa: F401
             return
@@ -63,9 +69,10 @@ def _ensure_importable() -> None:
 
     raise ImportError(
         "Le package prepUS est introuvable.\n"
-        f"  Chemin cherché : {_PREPUS_ROOT}\n"
-        "  Installation : pip install <chemin_vers_prepus>\n"
-        "  Dépendances requises : sonocrop, fire, rich, scipy"
+        f"  Source vendorisée attendue dans : {_VENDOR_PREPUS}\n"
+        "  Installation : pip install third_party/prepUS --no-deps\n"
+        "  Dépendances requises : sonocrop, fire, rich, scipy\n"
+        "  (run_tkinter.ps1 s'en charge automatiquement)"
     )
 
 

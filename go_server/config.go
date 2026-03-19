@@ -2,8 +2,9 @@
 //
 // Toutes les valeurs peuvent être surchargées via variables d'environnement.
 // Exemple :
-//   $env:PORT = "9090"
-//   $env:STARHE_PYTHON_EXE = "C:\Python313\python.exe"
+//
+//	$env:PORT = "9090"
+//	$env:STARHE_PYTHON_EXE = "C:\Python313\python.exe"
 package main
 
 import "os"
