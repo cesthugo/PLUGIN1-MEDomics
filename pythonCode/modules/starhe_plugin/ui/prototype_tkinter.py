@@ -81,7 +81,7 @@ RISK_HIGH_FG = "#f87171"   # rouge — risque élevé CHC
 
 CANVAS_W  = 640
 CANVAS_H  = 500
-APP_TITLE = "STARHE Plugin — Détection CHC  |  MEDomics"
+APP_TITLE = "MEDomics Visualization  |  STARHE - Detection CHC"
 
 FONT_TITLE  = ("Segoe UI", 12, "bold")
 FONT_SEC    = ("Segoe UI",  7, "bold")
@@ -153,7 +153,7 @@ class STARHEApp(tk.Tk):
                        sliderthickness=12, sliderlength=14)
 
         self._build_ui()
-        self._log("Bienvenue dans STARHE Plugin  —  interface MEDomics.")
+        self._log("Bienvenue dans MEDomics Visualization  —  plugin STARHE.")
         self._log("Chargez un fichier DICOM (.dcm) dans le panneau latéral pour commencer.")
 
     # ── Construction UI ───────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ class STARHEApp(tk.Tk):
 
         tk.Label(header, text=" │ ", bg=SIDEBAR_BG, fg=SBAR_MUTED,
                  font=("Segoe UI", 13)).pack(side="left")
-        tk.Label(header, text="STARHE — Détection cancer du foie",
+        tk.Label(header, text="MEDomics Visualization  —  STARHE",
                  bg=SIDEBAR_BG, fg=SBAR_FG,
                  font=("Segoe UI", 11)).pack(side="left")
         tk.Label(header, text="v0.1.0-prototype", bg=SIDEBAR_BG, fg=SBAR_MUTED,
