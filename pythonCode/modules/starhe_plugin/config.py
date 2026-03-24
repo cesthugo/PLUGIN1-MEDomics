@@ -22,29 +22,26 @@ TEMP_DIR     = os.path.join(BASE_DIR, "temp")
 for _d in (DATA_DIR, MODELS_DIR, TEMP_DIR):
     os.makedirs(_d, exist_ok=True)
 
-# ── Poids des modèles IA ──────────────────────────────────────────────────────
-STARHE_RISK_WEIGHTS   = os.path.join(MODELS_DIR, "starhe_risk_c3d.pth")
-STARHE_DETECT_WEIGHTS = os.path.join(MODELS_DIR, "starhe_detect_dino_detr.pth")
+# ── Modèles STARHE (artefacts entraînés — chemin local machine) ───────────────
+# Répertoire racine du dépôt starhe partagé (contient le package Python `starhe`)
+STARHE_SHARE_ROOT  = r"F:\STAGE\starhe_share\starhe_share"
+# Sous-dossier models/
+STARHE_MODELS_ROOT = os.path.join(STARHE_SHARE_ROOT, "models")
 
-# ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
-# Seuil de luminosité (0–255) en dessous duquel un pixel est considéré comme
-# appartenant au fond noir de l'échographe
-CROP_BLACK_THRESHOLD = 10
+# Classification (STARHE-RISK) — C3D via mmaction2
+STARHE_RISK_CONFIG     = os.path.join(STARHE_MODELS_ROOT, "classification", "c3d_starhe.py")
+STARHE_RISK_CHECKPOINT = os.path.join(STARHE_MODELS_ROOT, "classification", "best_acc_mean_cls_f1_epoch_14.pth")
 
-# Pourcentage minimal de pixels non-noirs requis pour valider une ligne/colonne
-# comme faisant partie de la zone utile
-CROP_MIN_CONTENT_RATIO = 0.01
-
-# Taille cible des clips pour le modèle C3D (T x H x W)
-C3D_INPUT_DEPTH  = 16
-C3D_INPUT_HEIGHT = 112
-C3D_INPUT_WIDTH  = 112
-
-# Taille cible pour DINO-DETR
-DINO_INPUT_SIZE = (800, 800)
+# Détection (STARHE-DETECT) — RTMDet via mmdet
+STARHE_DETECT_CONFIG     = os.path.join(STARHE_MODELS_ROOT, "det", "bs_4", "rtmdet_starhe.py")
+STARHE_DETECT_CHECKPOINT = os.path.join(STARHE_MODELS_ROOT, "det", "bs_4", "best_coco_bbox_mAP_50_iter_2100.pth")
 
 # Score de confiance minimum pour afficher une détection
 DETECT_SCORE_THRESHOLD = 0.45
+
+# ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
+CROP_BLACK_THRESHOLD   = 10
+CROP_MIN_CONTENT_RATIO = 0.01
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
 MONGO_URI        = "mongodb://localhost:27017/"

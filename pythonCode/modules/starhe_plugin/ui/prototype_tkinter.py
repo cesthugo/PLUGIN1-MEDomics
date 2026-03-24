@@ -81,7 +81,7 @@ RISK_HIGH_FG = "#f87171"   # rouge — risque élevé CHC
 
 CANVAS_W  = 640
 CANVAS_H  = 500
-APP_TITLE = "MEDomics Visualization  |  STARHE - Detection CHC"
+APP_TITLE = "Plugin1 Hugo  |  STARHE - Detection CHC"
 
 FONT_TITLE  = ("Segoe UI", 12, "bold")
 FONT_SEC    = ("Segoe UI",  7, "bold")
@@ -106,12 +106,12 @@ def _ndarray_to_photoimage(arr: np.ndarray, max_w: int, max_h: int) -> ImageTk.P
 
 def _draw_detections_on_array(frame: np.ndarray,
                                detections: list[dict]) -> np.ndarray:
-    """Superpose les bboxes de détection sur une copie du frame (sans OpenCV)."""
+    """Superpose les bboxes de détection sur une copie du frame."""
     import cv2
     vis = frame.copy()
     for det in detections:
-        x0, y0, x1, y1 = det["bbox"]
-        color = (255, 80, 80) if "maligne" in det["label"] else (80, 200, 80)
+        x0, y0, x1, y1 = (int(v) for v in det["bbox"])   # float → int requis par cv2
+        color = (255, 80, 80) if "tumor" in det["label"] else (80, 200, 80)
         cv2.rectangle(vis, (x0, y0), (x1, y1), color, 2)
         cv2.putText(vis, f"{det['label']} {det['score']:.2f}",
                     (x0, max(y0 - 6, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
@@ -153,7 +153,7 @@ class STARHEApp(tk.Tk):
                        sliderthickness=12, sliderlength=14)
 
         self._build_ui()
-        self._log("Bienvenue dans MEDomics Visualization  —  plugin STARHE.")
+        self._log("Bienvenue dans Plugin1 Hugo  —  plugin STARHE.")
         self._log("Chargez un fichier DICOM (.dcm) dans le panneau latéral pour commencer.")
 
     # ── Construction UI ───────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ class STARHEApp(tk.Tk):
 
         tk.Label(header, text=" │ ", bg=SIDEBAR_BG, fg=SBAR_MUTED,
                  font=("Segoe UI", 13)).pack(side="left")
-        tk.Label(header, text="MEDomics Visualization  —  STARHE",
+        tk.Label(header, text="Plugin1 Hugo  —  STARHE",
                  bg=SIDEBAR_BG, fg=SBAR_FG,
                  font=("Segoe UI", 11)).pack(side="left")
         tk.Label(header, text="v0.1.0-prototype", bg=SIDEBAR_BG, fg=SBAR_MUTED,
@@ -324,20 +324,6 @@ class STARHEApp(tk.Tk):
                        bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
                        activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
                        cursor="hand2", font=FONT_SMALL).pack(anchor="w", padx=16)
-
-        tk.Label(sc, text="Mode anonymisation :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
-                 font=FONT_SMALL).pack(anchor="w", padx=16, pady=(8, 2))
-        self._anon_mode = tk.StringVar(value="hash")
-        for val, lbl in (("hash", "Hachage SHA-256"),
-                         ("remove", "Suppression"),
-                         ("none", "Désactivée")):
-            tk.Radiobutton(sc, text=lbl, variable=self._anon_mode, value=val,
-                           bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
-                           activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
-                           cursor="hand2", font=FONT_SMALL).pack(anchor="w", padx=26)
-
-        self._sbtn(sc, "🔒   Anonymiser",
-                   self._on_anonymize).pack(fill="x", padx=10, pady=(6, 6))
 
         # ─── ANALYSE IA ──────────────────────────────────────────────────────
         _sh("Analyse IA")
@@ -557,6 +543,8 @@ class STARHEApp(tk.Tk):
         self._log(f"Chargement : {os.path.basename(path)}")
         try:
             ds = load_dicom(path)
+            ds = anonymize(ds)  # suppression automatique des métadonnées sensibles
+            self._log("Anonymisation automatique : métadonnées sensibles supprimées.")
             frames = extract_frames(ds)
 
             # Normalise → (T, H, W, 3) uint8
@@ -576,15 +564,12 @@ class STARHEApp(tk.Tk):
             self._crop_toggle.set(False)
             self._prepus_bsc.set(True)   # réinitialise backscan=on à chaque nouveau fichier
 
-            # Affiche métadonnées
-            name  = str(getattr(ds, "PatientName",   "N/A"))
-            pid   = str(getattr(ds, "PatientID",     "N/A"))
-            mod   = str(getattr(ds, "Modality",      "N/A"))
-            rows  = int(getattr(ds, "Rows",           0))
-            cols  = int(getattr(ds, "Columns",        0))
+            # Affiche métadonnées non-sensibles
+            mod   = str(getattr(ds, "Modality",  "N/A"))
+            rows  = int(getattr(ds, "Rows",       0))
+            cols  = int(getattr(ds, "Columns",    0))
             self._info_var.set(
-                f"Patient : {name}\nID      : {pid}\nModalité: {mod}\n"
-                f"Taille  : {rows}×{cols}\nFrames  : {len(frames)}"
+                f"Modalité : {mod}\nTaille   : {rows}×{cols}\nFrames   : {len(frames)}"
             )
             self._label_file.config(text=os.path.basename(path), fg=SBAR_FG)
             if self._playing:
@@ -664,28 +649,6 @@ class STARHEApp(tk.Tk):
             self.after(0, lambda: self._preprocess_status.config(
                 text="✗  Erreur", fg=DANGER_FG))
             self._log(f"ERREUR pré-traitement : {exc}", level="error")
-    def _on_anonymize(self):
-        path = filedialog.askopenfilename(
-            title="Sélectionner le DICOM à anonymiser",
-            initialdir=DATA_DIR,
-            filetypes=[("Fichiers DICOM", "*.dcm"), ("Tous fichiers", "*.*")]
-        )
-        if not path:
-            return
-        mode = self._anon_mode.get()
-        out_path = path.replace(".dcm", f"_anon_{mode}.dcm")
-        try:
-            import pydicom
-            ds = pydicom.dcmread(path, force=False)
-            ds = anonymize(ds, mode=mode)
-            ds.save_as(out_path)
-            self._log(f"Anonymisation ({mode}) → {os.path.basename(out_path)}", level="success")
-            messagebox.showinfo("Anonymisation terminée",
-                                f"Fichier sauvegardé :\n{out_path}")
-        except Exception as exc:
-            messagebox.showerror("Erreur Anonymisation", str(exc))
-            self._log(f"ERREUR anonymisation : {exc}", level="error")
-
     def _on_run_pipeline(self):
         """Lance l'analyse IA dans un thread pour ne pas bloquer l'UI."""
         if self._frames_raw is None:
@@ -726,6 +689,11 @@ class STARHEApp(tk.Tk):
                        self._det_lbl.config(text=str(n), fg=c))
             self._log(f"  → DETECT : {len(dets)} lésion(s) trouvée(s).", level="success")
 
+            # Si détections trouvées et pré-traitement disponible → affiche en mode cropped
+            # pour que les bbox soient dans le bon espace de coordonnées
+            if dets and self._frames_cropped is not None:
+                self.after(0, lambda: self._crop_toggle.set(True))
+
             # Rafraîchit le canvas avec les bbox
             self.after(0, self._refresh_canvas)
 
@@ -744,8 +712,9 @@ class STARHEApp(tk.Tk):
         idx    = min(self._frame_idx, len(frames) - 1)
         frame  = frames[idx].copy()
 
-        # Superpose les détections avant le padding (coordonnées image rognée)
-        if self._detections and use_cropped:
+        # Superpose les détections sur le frame actif
+        # (les bbox sont dans l'espace du frame traité — cropped si disponible, raw sinon)
+        if self._detections:
             frame = _draw_detections_on_array(frame, self._detections)
 
         # Pad au format original : le crop ne change pas le zoom d'affichage,

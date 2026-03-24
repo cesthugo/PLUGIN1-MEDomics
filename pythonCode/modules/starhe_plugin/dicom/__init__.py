@@ -4,7 +4,7 @@ from starhe_plugin.dicom.crop            import (detect_ultrasound_roi,
                                                   detect_ultrasound_roi_temporal,
                                                   crop_frame, crop_clip)
 from starhe_plugin.dicom.prepus_bridge   import preprocess_with_prepus
-from starhe_plugin.dicom.anonymizer      import anonymize, anonymize_file
+from starhe_plugin.dicom.anonymizer      import anonymize
 
 __all__ = [
     "load_dicom", "extract_frames", "is_cine_clip", "frame_to_uint8",

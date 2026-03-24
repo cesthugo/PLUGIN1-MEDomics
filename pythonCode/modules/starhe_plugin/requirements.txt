@@ -10,6 +10,14 @@ opencv-python-headless>=4.9.0.80
 # ── IA / Deep Learning ───────────────────────────────────────────────────────
 torch>=2.2.0
 torchvision>=0.17.0
+einops>=0.7.0
+
+# ── Frameworks ML (ne sont pas sur PyPI pour Python 3.13 — installation manuelle)
+# mmengine>=0.10.0      pip install mmengine
+# mmcv>=2.2.0           copie manuelle des fichiers Python (pas de .pyd disponible)
+# mmdet>=3.3.0          pip install mmdet --no-deps
+# mmaction2>=1.2.0      pip install mmaction2 --no-deps
+mmengine>=0.10.0
 
 # ── Base de données ───────────────────────────────────────────────────────────
 pymongo>=4.6.0
