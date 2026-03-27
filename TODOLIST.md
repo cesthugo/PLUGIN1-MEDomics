@@ -1,6 +1,6 @@
 # 📋 TODOLIST — Plug-in STARHE / MEDomics
 > Carnet de bord opérationnel du projet.  
-> Dernière mise à jour : **18 mars 2026**
+> Dernière mise à jour : **25 mars 2026**
 
 ---
 
@@ -60,6 +60,24 @@
 - [x] **Checkbox renommée** `Afficher résultat pré-traitement` (plus claire qu'`image rognée`)
 - [x] **Sidebar scrollable** — Canvas + Scrollbar, affichage correct même en petite fenêtre
 
+### 🖼 Prototype Tkinter — Fonctionnalités avancées UI (mars 2026)
+- [x] **Vitesse de lecture configurable** — Champ FPS dans la sidebar (`_fps_var`, `_on_fps_change`) ; délai recalculé à chaque frame en `1000 / fps` ms
+- [x] **Mode boucle** — Checkbox `Boucle` (`_loop_var`) ; arrêt propre en fin de séquence si décoché
+- [x] **Bouton Revenir au début** (`_reset_video`) — Stoppe la lecture et revient au frame 0
+- [x] **Menu contextuel clic droit** — 7 entrées avec indicateur `✓` du mode actif :
+  - Pan / Zoom, Outil de mesure, Défilement de séries, Contraste, Luminosité, Réinitialiser la vue
+- [x] **Pan / Zoom interactif** — Mode `pan` : clic-glisser déplace l'image, molette zoome (×1.1 / ÷1.1) ; curseur `fleur`
+- [x] **Outil de mesure en mm** — Mode `measure` : clic-glisser trace une ligne jaune en overlay avec distance en mm (calibrée depuis `SequenceOfUltrasoundRegions` → `PixelSpacing` → fallback px) ; curseur `crosshair`
+- [x] **Défilement de séries** — Mode `series` : molette navigue frame par frame ; curseur `sb_v_double_arrow`
+- [x] **Dialogs Contraste / Luminosité** (`_AdjustDialog`) — Fenêtre flottante avec `Scale` + bouton Reset ; singletons (une seule fenêtre à la fois)
+- [x] **Réinitialisation de vue** (`_reset_view`) — Zoom=1, pan=0, contraste=1.0, luminosité=0, overlay mesure effacé
+- [x] **Pixel spacing automatique** — Extraction à l'import DICOM : `PixelSpacing` → `ImagerPixelSpacing` → `SequenceOfUltrasoundRegions` (PhysicalDeltaX/Y cm×10→mm) ; affiché dans la sidebar info
+- [x] **Mesure affichée uniquement en mm** — Label `"X.X mm"` (plus de combiné mm/px)
+
+### 🏥 Module DICOM — Extensions (mars 2026)
+- [x] **Support fichiers sans extension** — `pydicom.dcmread(path, force=True)` dans `reader.py` ; filtre boîte de dialogue mis à jour (`*.dcm *`)
+- [x] **`remove_pixel_burnin(frames)`** dans `anonymizer.py` — Suppression automatique du bandeau imageur (PHI pixel burn-in) par analyse de luminosité ligne par ligne ; exporté depuis `dicom/__init__.py` ; appelé systématiquement à l'import dans `_on_load_dicom`
+
 ---
 
 ## 🚧 Tâches en Cours
@@ -68,7 +86,7 @@
 - [ ] **Tests du pipeline bout en bout** — Valider `run_pipeline()` avec un fichier `.dcm` réel sur données hépatiques
 
 ### 🖼 Prototype Tkinter
-- [ ] **Validation flux complet** — Charger un DICOM → prepUS crop+backscan → inférence IA (stub) → affichage résultats
+- [ ] **Validation flux complet avec Canon Aplio i700** — Charger un fichier `A0000` → vérifier suppression bandeau + calibration mm → prepUS crop+backscan → inférence IA (stub) → affichage résultats
 - [ ] **Recueil de retours utilisateur** — Identifier les ajustements UX avant portage en React
 
 ---

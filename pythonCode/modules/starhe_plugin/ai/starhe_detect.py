@@ -1,23 +1,24 @@
 """
-ai/starhe_detect.py — Wrapper STARHE-DETECT (RTMDet via subprocess)
-===================================================================
-Stratégie : appel externe au script `ai/models/_rtmdet_runner.py`
-  via subprocess (Python du venv).
+ai/starhe_detect.py — Wrapper STARHE-DETECT (RTMDet ou DINO via subprocess)
+============================================================================
+Stratégie : appel externe au script runner via subprocess (Python du venv).
 
   - Aucun import de mmdet / mmcv côté plugin principal
   - Le runner applique ses propres stubs et patches Python 3.13
   - Les résultats sont échangés via un fichier JSON temporaire
 
-Commande lancée :
-  python ai/models/_rtmdet_runner.py \\
-      --config  <rtmdet_starhe.py>        \\
-      --ckpt    <best_xxx.pth>            \\
-      --image   <frame_tmp.png>           \\
-      --out     <results.json>            \\
-      --score-thr 0.001
+Backend sélectionné par DETECT_BACKEND dans config.py :
+  "rtmdet" (défaut) → ai/models/_rtmdet_runner.py
+  "dino"            → ai/models/_dino_runner.py
 
+RTMDet :
   Config     : models/det/bs_4/rtmdet_starhe.py
   Checkpoint : models/det/bs_4/best_coco_bbox_mAP_50_iter_2100.pth
+
+DINO :
+  Config     : starhe_share/configs/custom/dino_starhe.py
+  Checkpoint : models/det/bs_4/best_coco_bbox_mAP_50_iter_2100.pth
+  Nécessite  : STARHE_SHARE_ROOT (package `starhe` enregistré dans le runner)
 """
 
 import os
@@ -31,27 +32,34 @@ import numpy as np
 import cv2
 
 from starhe_plugin.config import (
+    DETECT_BACKEND,
     STARHE_DETECT_CONFIG,
     STARHE_DETECT_CHECKPOINT,
+    STARHE_DINO_CONFIG,
+    STARHE_DINO_CHECKPOINT,
+    STARHE_SHARE_ROOT,
     DETECT_SCORE_THRESHOLD,
 )
 from starhe_plugin.utils.go_print import go_print
 
-# Chemin absolu vers le script runner (même dossier que ce fichier + models/)
-_RUNNER_SCRIPT = Path(__file__).parent / "models" / "_rtmdet_runner.py"
+# Chemins vers les scripts runner (même dossier que ce fichier + models/)
+_RTMDET_RUNNER = Path(__file__).parent / "models" / "_rtmdet_runner.py"
+_DINO_RUNNER   = Path(__file__).parent / "models" / "_dino_runner.py"
 
 
 # ─── Fonction principale ──────────────────────────────────────────────────────
 
 def run_inference(image_path: str,
-                  score_thr: float = DETECT_SCORE_THRESHOLD) -> list:
+                  score_thr: float = DETECT_SCORE_THRESHOLD,
+                  backend: str = DETECT_BACKEND) -> list:
     """
-    Lance RTMDet sur une image via le script runner (subprocess).
+    Lance l'inférence de détection sur une image via subprocess.
 
     Parameters
     ----------
     image_path : chemin vers le fichier image (JPEG, PNG…)
     score_thr  : seuil de confiance minimum
+    backend    : "rtmdet" ou "dino" (priorité sur DETECT_BACKEND de config.py)
 
     Returns
     -------
@@ -67,17 +75,31 @@ def run_inference(image_path: str,
     os.close(tmp_fd)
 
     try:
-        cmd = [
-            sys.executable,
-            str(_RUNNER_SCRIPT),
-            "--config",    str(STARHE_DETECT_CONFIG),
-            "--ckpt",      str(STARHE_DETECT_CHECKPOINT),
-            "--image",     str(image_path),
-            "--out",       tmp_out,
-            "--score-thr", str(score_thr),
-        ]
+        if backend == "dino":
+            cmd = [
+                sys.executable,
+                str(_DINO_RUNNER),
+                "--config",      str(STARHE_DINO_CONFIG),
+                "--ckpt",        str(STARHE_DINO_CHECKPOINT),
+                "--starhe-root", str(STARHE_SHARE_ROOT),
+                "--image",       str(image_path),
+                "--out",         tmp_out,
+                "--score-thr",   str(score_thr),
+            ]
+            backend_label = "DINO-DETR"
+        else:
+            cmd = [
+                sys.executable,
+                str(_RTMDET_RUNNER),
+                "--config",    str(STARHE_DETECT_CONFIG),
+                "--ckpt",      str(STARHE_DETECT_CHECKPOINT),
+                "--image",     str(image_path),
+                "--out",       tmp_out,
+                "--score-thr", str(score_thr),
+            ]
+            backend_label = "RTMDet"
 
-        go_print("info", f"DETECT : inférence RTMDet ({image_path.name})…")
+        go_print("info", f"DETECT : inférence {backend_label} ({image_path.name})…")
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -90,14 +112,13 @@ def run_inference(image_path: str,
             tail_out = (result.stdout or "")[-500:]
             go_print(
                 "error",
-                f"Runner RTMDet a échoué (code {result.returncode}):\n"
+                f"Runner {backend_label} a échoué (code {result.returncode}):\n"
                 f"STDERR: {tail_err}\nSTDOUT: {tail_out}",
             )
             raise RuntimeError(
-                f"_rtmdet_runner.py a échoué avec le code {result.returncode}"
+                f"runner a échoué avec le code {result.returncode}"
             )
 
-        # Lire les résultats JSON
         detections = json.loads(Path(tmp_out).read_text(encoding="utf-8"))
         go_print("info", f"DETECT : {len(detections)} lésion(s) détectée(s).")
         return detections
@@ -113,11 +134,12 @@ def run_inference(image_path: str,
 
 class STARHEDetectModel:
     """
-    Interface pour STARHE-DETECT (RTMDet via subprocess).
+    Interface pour STARHE-DETECT (RTMDet ou DINO via subprocess).
 
     Usage
     -----
-    model = STARHEDetectModel()
+    model = STARHEDetectModel()                       # backend selon config.py
+    model = STARHEDetectModel(backend="dino")         # forcer DINO
     dets  = model.predict(frame)   # frame : (H, W, 3) uint8 RGB
 
     Retourne
@@ -131,9 +153,10 @@ class STARHEDetectModel:
     préférer run_inference(image_path) directement.
     """
 
-    def __init__(self, device: str | None = None):
+    def __init__(self, device: str | None = None, backend: str = DETECT_BACKEND):
         # device ignoré : défini dynamiquement dans le runner
-        go_print("info", "STARHE-DETECT initialisé (mode subprocess runner).")
+        self._backend = backend
+        go_print("info", f"STARHE-DETECT initialisé (backend={backend}, mode subprocess).")
 
     def predict(self, frame: np.ndarray,
                 score_thr: float = DETECT_SCORE_THRESHOLD) -> list:
@@ -146,7 +169,7 @@ class STARHEDetectModel:
             os.close(tmp_fd)
             bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             cv2.imwrite(tmp_path, bgr)
-            return run_inference(tmp_path, score_thr=score_thr)
+            return run_inference(tmp_path, score_thr=score_thr, backend=self._backend)
         finally:
             try:
                 os.unlink(tmp_path)

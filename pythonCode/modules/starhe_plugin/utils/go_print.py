@@ -15,6 +15,7 @@ Exemple de parsing côté Go :
 
 import json
 import sys
+from typing import Callable
 
 # Force UTF-8 sur stdout pour éviter les erreurs d'encodage Unicode sous Windows
 # (PowerShell utilise cp1252 par défaut, incompatible avec les caractères comme →, —, etc.)
@@ -22,18 +23,41 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
+# ── Log sink (injection pour UI non-Go / tests) ───────────────────────────────
+# fn(level: str, message: str) → None  |  None = comportement stdout (mode Go)
+_log_sink: "Callable | None" = None
+
+
+def set_log_sink(fn: "Callable | None") -> None:
+    """
+    Redirige go_print() vers un callback arbitraire au lieu de stdout.
+
+    Usage Tkinter :
+        set_log_sink(lambda level, msg: app._log(msg, level=level))
+    Usage pipeline Go (défaut) :
+        set_log_sink(None)
+    """
+    global _log_sink
+    _log_sink = fn
+
+
 def go_print(level: str, message: str, data: dict | None = None) -> None:
     """
-    Émet une ligne sur stdout que le serveur Go peut intercepter.
+    Émet un message de log.
+
+    En mode Go (défaut) : écrit une ligne préfixée sur stdout que le
+    serveur Go peut intercepter.
+    En mode UI (sink actif) : appelle le callback injecté via set_log_sink().
 
     Paramètres :
-      level   : "info" | "warning" | "error" | "progress" | "result"
+      level   : "info" | "warning" | "error" | "success" | "progress" | "result"
       message : texte humain lisible
-      data    : dictionnaire optionnel de données structurées
-
-    La sortie est toujours flushée immédiatement pour garantir
-    la réactivité du flux en temps réel.
+      data    : dictionnaire optionnel de données structurées (ignoré par le sink)
     """
+    if _log_sink is not None:
+        _log_sink(level, message)
+        return
+
     payload = {"level": level, "message": message}
     if data is not None:
         payload["data"] = data

@@ -20,7 +20,7 @@ def load_dicom(path: str) -> pydicom.dataset.FileDataset:
     Retourne le dataset pydicom ou lève une exception explicite.
     """
     try:
-        ds = pydicom.dcmread(path, force=False)
+        ds = pydicom.dcmread(path, force=True)
         go_print("info", f"DICOM chargé : {path} | SOPClassUID={getattr(ds, 'SOPClassUID', 'N/A')}")
         return ds
     except InvalidDicomError as e:

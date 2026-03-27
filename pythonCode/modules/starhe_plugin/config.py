@@ -13,31 +13,42 @@ BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 # Racine du dépôt (3 niveaux au-dessus de starhe_plugin/ → PLUGIN1-MEDomics/)
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "..", "..", ".."))
 
-# data/ est à la racine du dépôt, là où l'utilisateur dépose ses fichiers .dcm
-DATA_DIR     = os.path.join(PROJECT_ROOT, "data")
+# Dossier des fichiers DICOM (données locales de travail)
+DATA_DIR     = r"F:\STAGE\DATA"
 MODELS_DIR   = os.path.join(BASE_DIR, "models")
 TEMP_DIR     = os.path.join(BASE_DIR, "temp")
+
+# Package Python `starhe` vendorisé (copié dans ai/vendor/ — autonome)
+VENDOR_DIR   = os.path.join(BASE_DIR, "ai", "vendor")
 
 # Création automatique des dossiers s'ils n'existent pas
 for _d in (DATA_DIR, MODELS_DIR, TEMP_DIR):
     os.makedirs(_d, exist_ok=True)
 
-# ── Modèles STARHE (artefacts entraînés — chemin local machine) ───────────────
-# Répertoire racine du dépôt starhe partagé (contient le package Python `starhe`)
-STARHE_SHARE_ROOT  = r"F:\STAGE\starhe_share\starhe_share"
-# Sous-dossier models/
-STARHE_MODELS_ROOT = os.path.join(STARHE_SHARE_ROOT, "models")
+# ── Modèles STARHE (artefacts locaux — autonomes, sans dépendance externe) ────
 
-# Classification (STARHE-RISK) — C3D via mmaction2
-STARHE_RISK_CONFIG     = os.path.join(STARHE_MODELS_ROOT, "classification", "c3d_starhe.py")
-STARHE_RISK_CHECKPOINT = os.path.join(STARHE_MODELS_ROOT, "classification", "best_acc_mean_cls_f1_epoch_14.pth")
+# Classification (STARHE-RISK) — C3D PyTorch pur
+STARHE_RISK_CONFIG     = os.path.join(MODELS_DIR, "c3d_starhe.py")
+STARHE_RISK_CHECKPOINT = os.path.join(MODELS_DIR, "best_acc_mean_cls_f1_epoch_14.pth")
 
-# Détection (STARHE-DETECT) — RTMDet via mmdet
-STARHE_DETECT_CONFIG     = os.path.join(STARHE_MODELS_ROOT, "det", "bs_4", "rtmdet_starhe.py")
-STARHE_DETECT_CHECKPOINT = os.path.join(STARHE_MODELS_ROOT, "det", "bs_4", "best_coco_bbox_mAP_50_iter_2100.pth")
+# Détection (STARHE-DETECT) — modèle actif : "rtmdet" | "dino"
+DETECT_BACKEND = "rtmdet"
+
+# Détection — RTMDet (défaut)
+STARHE_DETECT_CONFIG     = os.path.join(MODELS_DIR, "rtmdet_starhe.py")
+STARHE_DETECT_CHECKPOINT = os.path.join(MODELS_DIR, "best_coco_bbox_mAP_50_iter_2100.pth")
+
+# Détection — DINO-DETR (optionnel)
+# Le config hérite de _base_/ via chemins relatifs → structure configs/ maintenue
+STARHE_DINO_CONFIG     = os.path.join(MODELS_DIR, "configs", "custom", "dino_starhe.py")
+STARHE_DINO_CHECKPOINT = os.path.join(MODELS_DIR, "best_coco_bbox_mAP_50_iter_2100.pth")
+
+# Racine à ajouter au sys.path pour `import starhe` (package vendorisé)
+# Contient : vendor/starhe/__init__.py
+STARHE_SHARE_ROOT = VENDOR_DIR
 
 # Score de confiance minimum pour afficher une détection
-DETECT_SCORE_THRESHOLD = 0.45
+DETECT_SCORE_THRESHOLD = 0.70
 
 # ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
 CROP_BLACK_THRESHOLD   = 10

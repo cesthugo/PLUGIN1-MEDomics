@@ -32,6 +32,7 @@ Dépendances :
 
 import sys
 import os
+import time
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
@@ -48,8 +49,9 @@ if _MODULES_DIR not in sys.path:
 from starhe_plugin.dicom.reader     import load_dicom, extract_frames, frame_to_uint8
 from starhe_plugin.dicom.crop       import crop_clip
 from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus
-from starhe_plugin.dicom.anonymizer import anonymize
-from starhe_plugin.config           import DATA_DIR, PROJECT_ROOT
+from starhe_plugin.dicom.anonymizer import anonymize, remove_pixel_burnin
+from starhe_plugin.config           import DATA_DIR, PROJECT_ROOT, DICOM_SENSITIVE_TAGS
+from starhe_plugin.utils.go_print   import set_log_sink
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -119,6 +121,50 @@ def _draw_detections_on_array(frame: np.ndarray,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  Dialogue d'ajustement générique (contraste / luminosité)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _AdjustDialog(tk.Toplevel):
+    """Petite fenêtre flottante avec slider pour ajuster une valeur image."""
+
+    def __init__(self, master, title: str, initial: float,
+                 min_val: float, max_val: float, neutral: float,
+                 callback):
+        super().__init__(master)
+        self.title(title)
+        self.configure(bg=SIDEBAR_BG)
+        self.resizable(False, False)
+        self.attributes("-topmost", True)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+        tk.Label(self, text=title, bg=SIDEBAR_BG, fg=SBAR_FG,
+                 font=FONT_BTN).pack(pady=(12, 4), padx=20)
+
+        self._var = tk.DoubleVar(value=initial)
+        self._lbl = tk.Label(self, text=f"{initial:.2f}",
+                             bg=SIDEBAR_BG, fg=SBAR_FG,
+                             font=FONT_MONO, width=7)
+        self._lbl.pack()
+
+        def _on_change(val):
+            v = float(val)
+            self._lbl.config(text=f"{v:.2f}")
+            callback(v)
+
+        ttk.Scale(self, orient="horizontal", from_=min_val, to=max_val,
+                  variable=self._var, command=_on_change,
+                  length=220).pack(padx=20, pady=(4, 6))
+
+        _neutral = neutral
+        tk.Button(self, text="Réinitialiser",
+                  command=lambda n=_neutral: (
+                      self._var.set(n), _on_change(n)),
+                  bg=SIDEBAR_SEC, fg=SBAR_FG, relief="flat",
+                  font=FONT_SMALL, cursor="hand2",
+                  pady=4).pack(pady=(0, 12), padx=20, fill="x")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  Application principale
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -136,14 +182,30 @@ class STARHEApp(tk.Tk):
         self._frames_backscan : np.ndarray | None = None  # résultat backscan prepUS
         self._frames_crop_only: np.ndarray | None = None  # résultat crop-seulement prepUS
         self._roi             : tuple | None      = None
-        self._frame_idx       : int               = 0
-        self._detections    : list[dict]        = []
-        self._show_cropped  : bool              = False
+        self._frame_idx            : int               = 0
+        self._detections_per_frame : list[list[dict]]  = []
+        self._show_cropped         : bool              = False
+        self._original_sensitive   : list              = []   # valeurs avant anonymisation
+        self._kept_metadata        : list              = []   # métadonnées conservées
         self._photo_ref     = None   # garde la référence PyImage en vie
         self._playing       : bool              = False
         self._play_after_id = None   # ID retourné par self.after()
         self._dark_mode     : bool              = False   # thème clair par défaut
+        # ── Lecture vidéo avancée ─────────────────────────────────────────────
+        self._play_fps      : float           = 22.0         # vitesse (fps)
+        self._loop_var      : tk.BooleanVar   = tk.BooleanVar(value=True)
 
+        # ── Vue interactive (pan / zoom / mesure / series scroll) ─────────────
+        self._view_mode     : str             = "normal"     # "normal"|"pan"|"measure"|"series"
+        self._zoom          : float           = 1.0
+        self._pan_x         : float           = 0.0
+        self._pan_y         : float           = 0.0
+        self._drag_start    : tuple | None    = None         # (ex, ey, pan_x, pan_y)
+        self._measure_pts   : list            = []           # [(x,y), (x,y)]
+        self._measure_items : list            = []           # IDs canvas overlay
+        self._contrast      : float           = 1.0          # 0.1 – 3.0
+        self._brightness    : float           = 0.0          # -100 – +100
+        self._pixel_spacing : tuple | None    = None         # (row_mm, col_mm) extrait du tag PixelSpacing DICOM
         # ttk style pour le Scale de navigation (doit être créé après super().__init__)
         _sty = ttk.Style()
         _sty.theme_use("clam")
@@ -153,6 +215,8 @@ class STARHEApp(tk.Tk):
                        sliderthickness=12, sliderlength=14)
 
         self._build_ui()
+        # Redirige go_print() des modules librairie vers la console Tkinter
+        set_log_sink(lambda level, msg: self._log(msg, level=level))
         self._log("Bienvenue dans Plugin1 Hugo  —  plugin STARHE.")
         self._log("Chargez un fichier DICOM (.dcm) dans le panneau latéral pour commencer.")
 
@@ -293,7 +357,36 @@ class STARHEApp(tk.Tk):
         self._frame_scale.pack(fill="x", padx=10, pady=(2, 2))
 
         self._btn_play = self._sbtn(sc, "▶   Play", self._toggle_play)
-        self._btn_play.pack(fill="x", padx=10, pady=(2, 6))
+        self._btn_play.pack(fill="x", padx=10, pady=(2, 2))
+
+        # Boucle
+        tk.Checkbutton(sc, text="Boucle",
+                       variable=self._loop_var,
+                       bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
+                       activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
+                       cursor="hand2", font=FONT_SMALL
+                       ).pack(anchor="w", padx=16, pady=(2, 0))
+
+        # Vitesse FPS
+        fps_row = tk.Frame(sc, bg=SIDEBAR_BG)
+        fps_row.pack(fill="x", padx=10, pady=(2, 2))
+        tk.Label(fps_row, text="Vitesse :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=FONT_SMALL).pack(side="left")
+        self._fps_var = tk.StringVar(value="22")
+        self._fps_entry = tk.Entry(fps_row, textvariable=self._fps_var, width=5,
+                                   bg=SIDEBAR_SEC, fg=SBAR_FG,
+                                   insertbackground=SBAR_FG, relief="flat",
+                                   font=FONT_SMALL, justify="center")
+        self._fps_entry.pack(side="left", padx=(6, 2))
+        tk.Label(fps_row, text="fps", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=FONT_SMALL).pack(side="left")
+        self._fps_entry.bind("<Return>",   lambda e: self._apply_fps())
+        self._fps_entry.bind("<KP_Enter>", lambda e: self._apply_fps())
+        self._fps_entry.bind("<FocusOut>", lambda e: self._on_fps_change())
+
+        # Reset
+        self._sbtn(sc, "⏮   Revenir au début", self._reset_video) \
+            .pack(fill="x", padx=10, pady=(0, 6))
 
         # ─── PRÉ-TRAITEMENT ──────────────────────────────────────────────────
         _sh("Pré-traitement")
@@ -327,8 +420,9 @@ class STARHEApp(tk.Tk):
 
         # ─── ANALYSE IA ──────────────────────────────────────────────────────
         _sh("Analyse IA")
-        self._pbtn(sc, "🧠   Lancer l'analyse STARHE",
-                   self._on_run_pipeline).pack(fill="x", padx=10, pady=(8, 6))
+        self._btn_pipeline = self._pbtn(sc, "🧠   Lancer l'analyse STARHE",
+                                        self._on_run_pipeline)
+        self._btn_pipeline.pack(fill="x", padx=10, pady=(8, 6))
 
         # ─── RÉSULTATS ───────────────────────────────────────────────────────
         _sh("Résultats")
@@ -347,6 +441,28 @@ class STARHEApp(tk.Tk):
         self._det_lbl = tk.Label(det_row, text="—", bg=SIDEBAR_BG, fg=SBAR_MUTED,
                                   font=("Segoe UI", 9, "bold"), anchor="w")
         self._det_lbl.pack(side="left", padx=(6, 0))
+
+        # ─── MÉTADONNÉES CONSERVÉES ──────────────────────────────────────────
+        _sh("Métadonnées conservées")
+        self._kept_meta_widget = tk.Text(
+            sc, height=8,
+            bg="#111827", fg="#6ee7b7",
+            font=FONT_MONO, state="disabled", relief="flat",
+            wrap="none", bd=0,
+            selectbackground=SIDEBAR_HOV,
+        )
+        self._kept_meta_widget.pack(fill="x", padx=10, pady=(2, 4))
+
+        # ─── TAGS ANONYMISÉS (valeurs originales) ──────────────────────────────
+        _sh("Tags anonymisés")
+        self._anon_tags_widget = tk.Text(
+            sc, height=10,
+            bg="#1a0a0a", fg=DANGER_FG,
+            font=FONT_MONO, state="disabled", relief="flat",
+            wrap="none", bd=0,
+            selectbackground=SIDEBAR_HOV,
+        )
+        self._anon_tags_widget.pack(fill="x", padx=10, pady=(2, 10))
 
     def _build_main(self, parent):
         """Zone principale claire : carte visionneuse + console."""
@@ -386,6 +502,13 @@ class STARHEApp(tk.Tk):
                                  highlightthickness=0,
                                  width=CANVAS_W, height=CANVAS_H)
         self._canvas.pack(fill="both", expand=True)
+        # Clic droit → menu contextuel
+        self._canvas.bind("<Button-3>",        self._show_context_menu)
+        # Interactions pan / zoom / mesure / series (actives selon self._view_mode)
+        self._canvas.bind("<ButtonPress-1>",   self._on_canvas_press)
+        self._canvas.bind("<B1-Motion>",       self._on_canvas_drag)
+        self._canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+        self._canvas.bind("<MouseWheel>",      self._on_canvas_scroll)
         self._canvas_text = self._canvas.create_text(
             CANVAS_W // 2, CANVAS_H // 2,
             text="Aucun DICOM chargé\n\nUtilisez  « Charger un fichier DICOM »  dans le panneau latéral",
@@ -513,6 +636,7 @@ class STARHEApp(tk.Tk):
     def _toggle_play(self):
         if self._frames_raw is None:
             return
+        self._on_fps_change()   # valide la saisie avant de démarrer
         self._playing = not self._playing
         if self._playing:
             self._btn_play.config(text="⏸   Pause")
@@ -526,25 +650,69 @@ class STARHEApp(tk.Tk):
     def _play_step(self):
         if not self._playing or self._frames_raw is None:
             return
-        n = len(self._frames_raw)
-        self._frame_idx = (self._frame_idx + 1) % n
+        n        = len(self._frames_raw)
+        next_idx = self._frame_idx + 1
+        if next_idx >= n:
+            if not self._loop_var.get():
+                # Fin de séquence sans boucle : stoppe la lecture
+                self._playing = False
+                self._btn_play.config(text="▶   Play")
+                return
+            next_idx = 0
+        self._frame_idx = next_idx
         self._update_frame_label()
+        t0 = time.perf_counter()
         self._refresh_canvas()
-        self._play_after_id = self.after(45, self._play_step)  # ~22 fps (FrameTime natif DICOM)
+        render_ms = (time.perf_counter() - t0) * 1000
+        # Lit la vitesse en direct depuis le champ pour prendre en compte
+        # tout changement tapé sans nécessairement appuyer sur Entrée
+        try:
+            fps = float(self._fps_var.get())
+            if fps > 0:
+                self._play_fps = fps
+        except (ValueError, tk.TclError):
+            pass
+        interval_ms = 1000.0 / max(1.0, self._play_fps)
+        delay = max(1, int(interval_ms - render_ms))
+        self._play_after_id = self.after(delay, self._play_step)
 
     def _on_load_dicom(self):
         path = filedialog.askopenfilename(
             title="Sélectionner un fichier DICOM",
             initialdir=DATA_DIR,
-            filetypes=[("Fichiers DICOM", "*.dcm"), ("Tous fichiers", "*.*")]
+            filetypes=[("Fichiers DICOM", "*.dcm *"), ("Tous fichiers", "*.*")]
         )
         if not path:
             return
         self._log(f"Chargement : {os.path.basename(path)}")
         try:
             ds = load_dicom(path)
+
+            # ── Capture les valeurs originales AVANT anonymisation ─────────────────────
+            _SENS_LABEL = {
+                (0x0010, 0x0010): "PatientName",
+                (0x0010, 0x0020): "PatientID",
+                (0x0010, 0x0030): "PatientBirthDate",
+                (0x0010, 0x0040): "PatientSex",
+                (0x0010, 0x1010): "PatientAge",
+                (0x0008, 0x0020): "StudyDate",
+                (0x0008, 0x0030): "StudyTime",
+                (0x0008, 0x0090): "ReferringPhysician",
+                (0x0008, 0x1030): "StudyDescription",
+                (0x0008, 0x103E): "SeriesDescription",
+                (0x0020, 0x000D): "StudyInstanceUID",
+                (0x0020, 0x000E): "SeriesInstanceUID",
+                (0x0008, 0x0018): "SOPInstanceUID",
+                (0x0032, 0x1032): "RequestingPhysician",
+                (0x0040, 0xA124): "UID",
+            }
+            original_sensitive = []
+            for tag in DICOM_SENSITIVE_TAGS:
+                name = _SENS_LABEL.get(tag, str(tag))
+                val  = str(ds[tag].value).strip() if tag in ds else "— absent"
+                original_sensitive.append((name, val))
+
             ds = anonymize(ds)  # suppression automatique des métadonnées sensibles
-            self._log("Anonymisation automatique : métadonnées sensibles supprimées.")
             frames = extract_frames(ds)
 
             # Normalise → (T, H, W, 3) uint8
@@ -554,24 +722,79 @@ class STARHEApp(tk.Tk):
             else:
                 frames = np.stack([frame_to_uint8(f) for f in frames])
 
+            # Supprime le bandeau brûlé contenant les infos patient (PHI pixel)
+            frames = remove_pixel_burnin(frames)
+
             self._frames_raw       = frames
             self._frames_cropped   = None
             self._frames_backscan  = None
             self._frames_crop_only = None
             self._roi              = None
-            self._frame_idx        = 0
-            self._detections       = []
+            self._frame_idx             = 0
+            self._detections_per_frame  = []
             self._crop_toggle.set(False)
             self._prepus_bsc.set(True)   # réinitialise backscan=on à chaque nouveau fichier
+
+            # Extrait le pixel spacing pour la mesure en mm
+            # Priorité : PixelSpacing → ImagerPixelSpacing → US Regions (PhysicalDeltaX/Y en cm)
+            self._pixel_spacing = None
+            try:
+                ps = ds.PixelSpacing
+                self._pixel_spacing = (float(ps[0]), float(ps[1]))
+            except AttributeError:
+                pass
+            if self._pixel_spacing is None:
+                try:
+                    ps = ds.ImagerPixelSpacing
+                    self._pixel_spacing = (float(ps[0]), float(ps[1]))
+                except AttributeError:
+                    pass
+            if self._pixel_spacing is None:
+                try:  # Échographie : SequenceOfUltrasoundRegions
+                    region = ds.SequenceOfUltrasoundRegions[0]
+                    # PhysicalDeltaX/Y sont en cm/pixel → ×10 pour mm/pixel
+                    row_mm = abs(float(region.PhysicalDeltaY)) * 10.0
+                    col_mm = abs(float(region.PhysicalDeltaX)) * 10.0
+                    if row_mm > 0 and col_mm > 0:
+                        self._pixel_spacing = (row_mm, col_mm)
+                except (AttributeError, IndexError, TypeError):
+                    pass
 
             # Affiche métadonnées non-sensibles
             mod   = str(getattr(ds, "Modality",  "N/A"))
             rows  = int(getattr(ds, "Rows",       0))
             cols  = int(getattr(ds, "Columns",    0))
+            ps_str = f"{self._pixel_spacing[0]:.3f} mm/px" if self._pixel_spacing else "N/A"
             self._info_var.set(
-                f"Modalité : {mod}\nTaille   : {rows}×{cols}\nFrames   : {len(frames)}"
+                f"Modalité : {mod}\nTaille   : {rows}×{cols}\nFrames   : {len(frames)}\nPixel    : {ps_str}"
             )
             self._label_file.config(text=os.path.basename(path), fg=SBAR_FG)
+
+            # ── Métadonnées conservées (non-sensibles) ───────────────────────────
+            _KEPT_ATTRS = [
+                ("Modality",                  "Modalité"),
+                ("Manufacturer",              "Fabricant"),
+                ("ManufacturerModelName",     "Modèle"),
+                ("InstitutionName",           "Institution"),
+                ("BodyPartExamined",          "Zone exam."),
+                ("Rows",                      "Lignes"),
+                ("Columns",                   "Colonnes"),
+                ("NumberOfFrames",            "Nb frames"),
+                ("FrameTime",                 "Tps/frame ms"),
+                ("PhotometricInterpretation", "Photométrie"),
+                ("BitsAllocated",             "Bits alloués"),
+                ("SamplesPerPixel",           "Canaux"),
+                ("TransducerType",            "Transducteur"),
+            ]
+            kept_meta = []
+            for attr, label in _KEPT_ATTRS:
+                val = getattr(ds, attr, None)
+                if val is not None:
+                    kept_meta.append((label, str(val).strip()))
+
+            self._original_sensitive = original_sensitive
+            self._kept_metadata      = kept_meta
+            self._update_meta_widgets()
             if self._playing:
                 self._toggle_play()  # stoppe la lecture si un autre DICOM était en cours
             # Recalibre la scrollbar sur la durée du nouveau clip
@@ -654,16 +877,26 @@ class STARHEApp(tk.Tk):
         if self._frames_raw is None:
             messagebox.showwarning("Aucun DICOM", "Chargez d'abord un fichier DICOM.")
             return
+        # Empêche un double lancement
+        btn = getattr(self, "_btn_pipeline", None)
+        if btn:
+            btn.config(state="disabled")
         self._log("Lancement de l'analyse STARHE (thread IA)…")
         t = threading.Thread(target=self._run_ia_thread, daemon=True)
         t.start()
 
     def _run_ia_thread(self):
-        """Exécutée dans un thread secondaire."""
+        """Exécutée dans un thread secondaire — détection sur chaque frame."""
+        def _re_enable():
+            btn = getattr(self, "_btn_pipeline", None)
+            if btn:
+                btn.config(state="normal")
+
         try:
             frames = (self._frames_cropped
                       if self._frames_cropped is not None
                       else self._frames_raw)
+            n = len(frames)
 
             # STARHE-RISK
             self._log("  → STARHE-RISK (C3D) en cours…")
@@ -678,27 +911,48 @@ class STARHEApp(tk.Tk):
                        self._risk_lbl.config(text=f"{l}  ({s:.1%})", fg=c))
             self._log(f"  → RISK : {label} | score={score:.3f}", level="success")
 
-            # STARHE-DETECT
-            self._log("  → STARHE-DETECT (DINO-DETR) en cours…")
+            # STARHE-DETECT — une inférence par frame
+            self._log(f"  → STARHE-DETECT : analyse de {n} frame(s)…")
             from starhe_plugin.ai.starhe_detect import STARHEDetectModel
-            mid  = len(frames) // 2
-            dets = STARHEDetectModel().predict(frames[mid])
-            self._detections = dets
-            det_fg = WARN_FG if len(dets) > 0 else SUCCESS_FG
-            self.after(0, lambda n=len(dets), c=det_fg:
-                       self._det_lbl.config(text=str(n), fg=c))
-            self._log(f"  → DETECT : {len(dets)} lésion(s) trouvée(s).", level="success")
+            model = STARHEDetectModel()
+            per_frame: list[list[dict]] = []
 
-            # Si détections trouvées et pré-traitement disponible → affiche en mode cropped
-            # pour que les bbox soient dans le bon espace de coordonnées
-            if dets and self._frames_cropped is not None:
+            for i, frm in enumerate(frames):
+                dets = model.predict(frm)
+                per_frame.append(dets)
+
+                # Mise à jour progressive toutes les 5 frames
+                if i % 5 == 0 or i == n - 1:
+                    captured = list(per_frame)   # copie locale pour la closure
+                    n_det = sum(1 for d in captured if d)
+                    self._detections_per_frame = captured
+                    self.after(0, lambda j=i + 1, nd=n_det:
+                               self._det_lbl.config(
+                                   text=f"Analyse… {j}/{n}  ({nd} frames)",
+                                   fg=SBAR_MUTED))
+                    self.after(0, self._refresh_canvas)
+
+            # Résultat final
+            self._detections_per_frame = per_frame
+            n_frames_with_det = sum(1 for d in per_frame if d)
+            det_fg = WARN_FG if n_frames_with_det > 0 else SUCCESS_FG
+            self.after(0, lambda nf=n_frames_with_det, c=det_fg:
+                       self._det_lbl.config(
+                           text=f"{nf}/{n} frames avec lésion(s)", fg=c))
+            self._log(
+                f"  → DETECT terminé : {n_frames_with_det}/{n} frames avec lésion(s).",
+                level="success"
+            )
+
+            if n_frames_with_det > 0 and self._frames_cropped is not None:
                 self.after(0, lambda: self._crop_toggle.set(True))
 
-            # Rafraîchit le canvas avec les bbox
             self.after(0, self._refresh_canvas)
 
         except Exception as exc:
             self._log(f"ERREUR IA : {exc}", level="error")
+        finally:
+            self.after(0, _re_enable)
 
     # ── Affichage canvas ──────────────────────────────────────────────────────
 
@@ -712,13 +966,13 @@ class STARHEApp(tk.Tk):
         idx    = min(self._frame_idx, len(frames) - 1)
         frame  = frames[idx].copy()
 
-        # Superpose les détections sur le frame actif
-        # (les bbox sont dans l'espace du frame traité — cropped si disponible, raw sinon)
-        if self._detections:
-            frame = _draw_detections_on_array(frame, self._detections)
+        # Superpose les détections du frame courant
+        if self._detections_per_frame and idx < len(self._detections_per_frame):
+            frame_dets = self._detections_per_frame[idx]
+            if frame_dets:
+                frame = _draw_detections_on_array(frame, frame_dets)
 
-        # Pad au format original : le crop ne change pas le zoom d'affichage,
-        # il ajoute juste un cadre noir autour de la zone utile.
+        # Pad au format original
         if use_cropped:
             orig_h = self._frames_raw.shape[1]
             orig_w = self._frames_raw.shape[2]
@@ -733,10 +987,41 @@ class STARHEApp(tk.Tk):
         cw = self._canvas.winfo_width()  or CANVAS_W
         ch = self._canvas.winfo_height() or CANVAS_H
 
-        photo = _ndarray_to_photoimage(frame, cw, ch)
-        self._photo_ref = photo       # éviter le GC
+        # ── Conversion PIL + ajustements contraste / luminosité ────────────────
+        from PIL import ImageEnhance
+        if frame.ndim == 2:
+            img = Image.fromarray(frame, mode="L").convert("RGB")
+        else:
+            img = Image.fromarray(frame.astype(np.uint8), mode="RGB")
 
-        # Met à jour le badge de mode d'affichage
+        if self._contrast != 1.0:
+            img = ImageEnhance.Contrast(img).enhance(max(0.01, self._contrast))
+        if self._brightness != 0.0:
+            factor = 1.0 + self._brightness / 100.0
+            img = ImageEnhance.Brightness(img).enhance(max(0.0, factor))
+
+        # ── Zoom + pan ───────────────────────────────────────────────────────
+        iw, ih    = img.size
+        fit_scale = min(cw / iw, ch / ih) if iw > 0 and ih > 0 else 1.0
+        scaled_w  = max(1, int(iw * fit_scale * self._zoom))
+        scaled_h  = max(1, int(ih * fit_scale * self._zoom))
+        img = img.resize((scaled_w, scaled_h), Image.LANCZOS)
+
+        off_x = cw // 2 - scaled_w // 2 + int(self._pan_x)
+        off_y = ch // 2 - scaled_h // 2 + int(self._pan_y)
+
+        result = Image.new("RGB", (cw, ch), (0, 0, 0))
+        src_x0 = max(0, -off_x);  src_y0 = max(0, -off_y)
+        src_x1 = min(scaled_w, cw - off_x)
+        src_y1 = min(scaled_h, ch - off_y)
+        if src_x1 > src_x0 and src_y1 > src_y0:
+            result.paste(img.crop((src_x0, src_y0, src_x1, src_y1)),
+                         (max(0, off_x), max(0, off_y)))
+
+        photo = ImageTk.PhotoImage(result)
+        self._photo_ref = photo
+
+        # ── Badge mode d'affichage ──────────────────────────────────────────
         if use_cropped and self._frames_backscan is not None and self._prepus_bsc.get():
             mode_txt = "BACKSCAN 512×512"
         elif use_cropped:
@@ -747,7 +1032,262 @@ class STARHEApp(tk.Tk):
             self._mode_badge.config(text=mode_txt)
 
         self._canvas.delete("all")
-        self._canvas.create_image(cw // 2, ch // 2, anchor="center", image=photo)
+        self._canvas.create_image(0, 0, anchor="nw", image=photo)
+
+        # Redessine l'overlay de mesure par-dessus l'image
+        if self._view_mode == "measure" and len(self._measure_pts) == 2:
+            self._measure_items.clear()
+            self._draw_measure_overlay(self._measure_pts[0], self._measure_pts[1])
+
+    # ── Vitesse FPS ───────────────────────────────────────────────────────────
+
+    def _apply_fps(self):
+        """Appliqué sur <Return> : valide + force le redémarrage immédiat de la boucle."""
+        self._on_fps_change()
+        # Retire le focus du champ pour confirmer visuellement la validation
+        self.focus_set()
+        # Si la lecture est en cours, annule le callback en attente et
+        # replanifie immédiatement avec le nouveau délai
+        if self._playing and self._play_after_id is not None:
+            self.after_cancel(self._play_after_id)
+            self._play_after_id = None
+            self._play_step()
+
+    def _on_fps_change(self):
+        try:
+            fps = float(self._fps_var.get())
+            if fps > 0:
+                self._play_fps = fps
+            else:
+                raise ValueError
+        except ValueError:
+            self._fps_var.set(f"{self._play_fps:.0f}")
+
+    # ── Reset vidéo ───────────────────────────────────────────────────────────
+
+    def _reset_video(self):
+        if self._frames_raw is None:
+            return
+        if self._playing:
+            self._toggle_play()
+        self._frame_idx = 0
+        self._update_frame_label()
+        self._refresh_canvas()
+
+    # ── Réinitialisation complète de la vue ───────────────────────────────────
+
+    def _reset_view(self):
+        self._zoom       = 1.0
+        self._pan_x      = 0.0
+        self._pan_y      = 0.0
+        self._contrast   = 1.0
+        self._brightness = 0.0
+        self._clear_measure()
+        self._view_mode = "normal"
+        self._canvas.config(cursor="")
+        self._refresh_canvas()
+
+    # ── Interactions canvas ───────────────────────────────────────────────────
+
+    def _on_canvas_press(self, event):
+        if self._view_mode == "pan":
+            self._drag_start = (event.x, event.y, self._pan_x, self._pan_y)
+        elif self._view_mode == "measure":
+            self._clear_measure()
+            self._measure_pts = [(event.x, event.y)]
+
+    def _on_canvas_drag(self, event):
+        if self._view_mode == "pan" and self._drag_start:
+            dx = event.x - self._drag_start[0]
+            dy = event.y - self._drag_start[1]
+            self._pan_x = self._drag_start[2] + dx
+            self._pan_y = self._drag_start[3] + dy
+            self._refresh_canvas()
+        elif self._view_mode == "measure" and self._measure_pts:
+            # Redessine la ligne en temps réel sans rafraîchir tout le canvas
+            self._draw_measure_overlay(self._measure_pts[0], (event.x, event.y))
+
+    def _on_canvas_release(self, event):
+        if self._view_mode == "pan":
+            self._drag_start = None
+        elif self._view_mode == "measure" and self._measure_pts:
+            p2 = (event.x, event.y)
+            self._measure_pts = [self._measure_pts[0], p2]
+            self._draw_measure_overlay(self._measure_pts[0], p2)
+
+    def _on_canvas_scroll(self, event):
+        if self._view_mode == "pan":
+            # Molette = zoom centré sur la position du curseur
+            factor = 1.15 if event.delta > 0 else 1 / 1.15
+            self._zoom = max(0.1, min(10.0, self._zoom * factor))
+            self._refresh_canvas()
+        elif self._view_mode == "series":
+            if self._frames_raw is None:
+                return
+            delta = -1 if event.delta > 0 else 1
+            n = len(self._frames_raw)
+            self._frame_idx = max(0, min(n - 1, self._frame_idx + delta))
+            self._update_frame_label()
+            self._refresh_canvas()
+
+    # ── Overlay de mesure ─────────────────────────────────────────────────────
+
+    def _draw_measure_overlay(self, p1: tuple, p2: tuple):
+        """Dessine la règle de mesure sur le canvas (coordonnées écran).
+
+        La distance est affichée en mm si le PixelSpacing DICOM est disponible,
+        sinon en pixels. La conversion tient compte du zoom et du fit_scale
+        courants pour passer des coordonnées écran aux coordonnées image réelles.
+        """
+        import math
+        # Supprime l'overlay précédent
+        for item in self._measure_items:
+            self._canvas.delete(item)
+        self._measure_items.clear()
+
+        x1, y1 = p1;  x2, y2 = p2
+        # Distance en pixels-écran
+        dist_screen = math.hypot(x2 - x1, y2 - y1)
+        r    = 3
+        mx, my = (x1 + x2) // 2, (y1 + y2) // 2
+
+        # ── Calcul distance réelle ──────────────────────────────────────────
+        # Le canvas affiche l'image avec fit_scale × zoom pixels-écran par pixel-image.
+        # On récupère les dimensions de l'image source pour calculer fit_scale.
+        frames = (self._frames_cropped
+                  if (self._crop_toggle.get() and self._frames_cropped is not None)
+                  else self._frames_raw)
+        if frames is not None:
+            cw = self._canvas.winfo_width()  or CANVAS_W
+            ch = self._canvas.winfo_height() or CANVAS_H
+            ih, iw = frames[0].shape[:2]
+            fit_scale = min(cw / iw, ch / ih) if iw > 0 and ih > 0 else 1.0
+            screen_per_img_px = fit_scale * self._zoom
+        else:
+            screen_per_img_px = 1.0
+
+        dist_img_px = dist_screen / screen_per_img_px if screen_per_img_px > 0 else dist_screen
+
+        if self._pixel_spacing is not None:
+            dx_screen = abs(x2 - x1)
+            dy_screen = abs(y2 - y1)
+            dx_img = dx_screen / screen_per_img_px
+            dy_img = dy_screen / screen_per_img_px
+            dist_mm = math.hypot(dx_img * self._pixel_spacing[1],
+                                  dy_img * self._pixel_spacing[0])
+            dist_label = f"{dist_mm:.1f} mm"
+        else:
+            dist_label = f"{dist_img_px:.1f} px (pas de calibration)"
+
+        line  = self._canvas.create_line(x1, y1, x2, y2,
+                                          fill="#ffff00", width=2, dash=(5, 3))
+        dot1  = self._canvas.create_oval(x1-r, y1-r, x1+r, y1+r,
+                                          fill="#ffff00", outline="")
+        dot2  = self._canvas.create_oval(x2-r, y2-r, x2+r, y2+r,
+                                          fill="#ffff00", outline="")
+        shadow = self._canvas.create_text(mx+1, my+1,
+                                           text=dist_label,
+                                           fill="#000000", font=FONT_SMALL)
+        label  = self._canvas.create_text(mx, my,
+                                           text=dist_label,
+                                           fill="#ffff00", font=FONT_SMALL)
+        self._measure_items = [line, dot1, dot2, shadow, label]
+
+    def _clear_measure(self):
+        for item in self._measure_items:
+            self._canvas.delete(item)
+        self._measure_items.clear()
+        self._measure_pts.clear()
+
+    # ── Menu contextuel clic droit ────────────────────────────────────────────
+
+    def _show_context_menu(self, event):
+        def _check(mode: str) -> str:
+            return "✓  " if self._view_mode == mode else "    "
+
+        menu = tk.Menu(self, tearoff=0,
+                       bg=SIDEBAR_BG, fg=SBAR_FG,
+                       activebackground=BLUE, activeforeground="#ffffff",
+                       font=FONT_BODY, bd=0, relief="flat")
+
+        menu.add_command(label=f"{_check('pan')}Déplacer / Zoomer",
+                         command=self._toggle_pan_zoom)
+        menu.add_command(label=f"{_check('measure')}Mesurer",
+                         command=self._toggle_measure)
+        menu.add_separator()
+        menu.add_command(label="    Contraste…",
+                         command=self._open_contrast_dialog)
+        menu.add_command(label="    Luminosité…",
+                         command=self._open_brightness_dialog)
+        menu.add_separator()
+        menu.add_command(label=f"{_check('series')}Series Scroll",
+                         command=self._toggle_series_scroll)
+        menu.add_separator()
+        menu.add_command(label="    Réinitialiser la vue",
+                         command=self._reset_view)
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    # ── Modes interactifs ─────────────────────────────────────────────────────
+
+    def _toggle_pan_zoom(self):
+        if self._view_mode == "pan":
+            self._view_mode = "normal"
+            self._canvas.config(cursor="")
+        else:
+            self._view_mode = "pan"
+            self._canvas.config(cursor="fleur")
+            self._clear_measure()
+
+    def _toggle_measure(self):
+        if self._view_mode == "measure":
+            self._view_mode = "normal"
+            self._canvas.config(cursor="")
+            self._clear_measure()
+        else:
+            self._view_mode = "measure"
+            self._canvas.config(cursor="crosshair")
+
+    def _toggle_series_scroll(self):
+        if self._view_mode == "series":
+            self._view_mode = "normal"
+            self._canvas.config(cursor="")
+        else:
+            self._view_mode = "series"
+            self._canvas.config(cursor="sb_v_double_arrow")
+
+    # ── Dialogues contraste / luminosité ─────────────────────────────────────
+
+    def _open_contrast_dialog(self):
+        if hasattr(self, "_contrast_win") and self._contrast_win.winfo_exists():
+            self._contrast_win.lift()
+            return
+        self._contrast_win = _AdjustDialog(
+            self, "Contraste", self._contrast,
+            0.1, 3.0, 1.0,
+            lambda v: self._set_contrast(v))
+
+    def _open_brightness_dialog(self):
+        if hasattr(self, "_brightness_win") and self._brightness_win.winfo_exists():
+            self._brightness_win.lift()
+            return
+        self._brightness_win = _AdjustDialog(
+            self, "Luminosité", self._brightness,
+            -100.0, 100.0, 0.0,
+            lambda v: self._set_brightness(v))
+
+    def _set_contrast(self, value: float):
+        self._contrast = value
+        self._refresh_canvas()
+
+    def _set_brightness(self, value: float):
+        self._brightness = value
+        self._refresh_canvas()
+
+    # ── Navigation frames ─────────────────────────────────────────────────────
 
     def _prev_frame(self):
         if self._frames_raw is None:
@@ -768,6 +1308,28 @@ class STARHEApp(tk.Tk):
         self._frame_idx = (self._frame_idx + 1) % n
         self._update_frame_label()
         self._refresh_canvas()
+
+    # ── Mise à jour sections métadonnées ─────────────────────────────────────
+
+    def _update_meta_widgets(self):
+        """Remplit les deux widgets texte (conservées / anonymisées) après chargement."""
+        # ── Métadonnées conservées (vert menthe) ──────────────────────────────
+        self._kept_meta_widget.config(state="normal")
+        self._kept_meta_widget.delete("1.0", "end")
+        for label, val in self._kept_metadata:
+            val_s = val if len(val) <= 24 else val[:21] + "…"
+            self._kept_meta_widget.insert("end", f"  {label:<14} {val_s}\n")
+        if not self._kept_metadata:
+            self._kept_meta_widget.insert("end", "  (aucune métadonnée trouvée)")
+        self._kept_meta_widget.config(state="disabled")
+
+        # ── Tags anonymisés (rouge — valeurs originales) ──────────────────────
+        self._anon_tags_widget.config(state="normal")
+        self._anon_tags_widget.delete("1.0", "end")
+        for name, val in self._original_sensitive:
+            val_s = val if len(val) <= 22 else val[:19] + "…"
+            self._anon_tags_widget.insert("end", f"  ✗ {name:<20} {val_s}\n")
+        self._anon_tags_widget.config(state="disabled")
 
     def _update_frame_label(self):
         if self._frames_raw is None:

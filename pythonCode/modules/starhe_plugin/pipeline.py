@@ -7,7 +7,7 @@ Enchaîne toutes les étapes :
   3. Anonymisation
   4. Prétraitement prepUS (removeLayout + backscan)
   5. Inférence STARHE-RISK
-  6. Inférence STARHE-DETECT (frame médian uniquement)
+  6. Inférence STARHE-DETECT (toutes les frames)
   7. Sauvegarde MongoDB
 
 Point d'entrée appelé par le blueprint Go.
@@ -89,13 +89,21 @@ def run_pipeline(dicom_path: str,
     risk_model  = STARHERiskModel()
     risk_result = risk_model.predict(frames_processed)
 
-    # ── 6. STARHE-DETECT (frame médian) ───────────────────────────────────────
-    detections = []
+    # ── 6. STARHE-DETECT (toutes les frames) ───────────────────────────────────────
+    detections: list[dict] = []
     if run_detection:
-        go_progress(step := step + 1, TOTAL_STEPS, "Inférence STARHE-DETECT (DINO-DETR)…")
+        n_frames = len(frames_processed)
+        go_progress(step := step + 1, TOTAL_STEPS,
+                    f"Inférence STARHE-DETECT ({n_frames} frames)…")
         detect_model = STARHEDetectModel()
-        mid_frame    = frames_processed[len(frames_processed) // 2]
-        detections   = detect_model.predict(mid_frame)
+        for i, frm in enumerate(frames_processed):
+            frame_dets = detect_model.predict(frm)
+            for d in frame_dets:
+                detections.append({**d, "frame": i})
+            if (i + 1) % 10 == 0 or i == n_frames - 1:
+                go_print("info",
+                         f"DETECT : {i + 1}/{n_frames} frames traités —"
+                         f" {len(detections)} lésion(s) cumulée(s).")
     else:
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")

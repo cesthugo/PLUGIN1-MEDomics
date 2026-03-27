@@ -3,6 +3,9 @@
 > **ST**ratification du risque et détection précoce du **C**arcinome **H**épatocellulaire (**E**chographie)  
 > Module d'analyse de ciné-clips échographiques intégré à la plateforme [MEDomics](https://medomicslab.gitbook.io/medomics-docs).
 
+*Version du plug-in : `0.1.0` — Stack MEDomics : Electron / React / Go / Python 3.13 / MongoDB*  
+*Dernière mise à jour : **25 mars 2026***
+
 ---
 
 ## 📋 Description du Projet
@@ -109,12 +112,14 @@ third_party/prepUS/
 
 ## ✨ Fonctionnalités Clés
 
-### 🏥 Parsing & Anonymisation DICOM
-- Lecture de fichiers `.dcm` (mono-frame et ciné-clips multi-frames) via `pydicom`
-- Extraction des frames pixel en tableau NumPy, normalisation vers `uint8`
+### 🏥 Parsing, Anonymisation & Nettoyage DICOM
+- Lecture de fichiers `.dcm` **et fichiers DICOM sans extension** (`A0000`, `IM-0001`…) via `pydicom` avec `force=True`
+- Mono-frame et ciné-clips multi-frames supportés ; extraction en tableau NumPy, normalisation vers `uint8`
 - Anonymisation des **15 tags DICOM sensibles** (PatientName, PatientID, StudyDate, UIDs…) en deux modes :
   - **`hash`** : remplacement par SHA-256 tronqué (16 chars) — traçabilité conservée
   - **`remove`** : suppression complète du tag
+- **Suppression du bandeau imageur** (`remove_pixel_burnin`) — noircit automatiquement les lignes supérieures contenant les informations patient brûlées dans les pixels (PHI pixel burn-in) ; détection par analyse de luminosité, sans hauteur fixe codée en dur
+- **Extraction du pixel spacing** pour calibration de la mesure : priorité `PixelSpacing` → `ImagerPixelSpacing` → `SequenceOfUltrasoundRegions` (PhysicalDeltaX/Y en cm)
 
 ### 🧹 Prétraitement — prepUS (`prepus_bridge.py`)
 Intégration directe de l'API `prepUS.removeLayoutFile` :
@@ -137,9 +142,19 @@ Intégration directe de l'API `prepUS.removeLayoutFile` :
 ### 🖼 Interface Prototype (Tkinter)
 - Thème **MEDomics v1.8.0** : sidebar `#151521`, fond principal `#f4f6fb`, bleu `#1565C0`
 - Logo **MEDomicsLab_LOGO.png** intégré dans le header
-- Navigation frames avec scrollbar horizontale et lecture automatique (~22 fps)
-- Bouton **⚙ Pré-Traitement** — lance prepUS avec `back_scan_conversion=True` dans un thread dédié ; la checkbox **Backscan (512×512)** détermine le mode d'**affichage** (backscan 512×512 *vs* crop masqué), sans relancer le traitement
+- Chargement de fichiers DICOM `.dcm` **et fichiers sans extension** (ex. `A0000`, `IM-0001`) grâce à `force=True` dans pydicom
+- Navigation frames avec scrollbar horizontale, boutons ◀/▶, et lecture automatique à vitesse configurable
+- **Vitesse de lecture configurable** — champ FPS dans la sidebar, délai recalculé dynamiquement
+- **Mode boucle** — checkbox activant la répétition infinie de la séquence
+- **Bouton Revenir au début** — remet la lecture au frame 0
+- Bouton **⚙ Pré-Traitement** — lance prepUS avec `back_scan_conversion=True` dans un thread dédié ; la checkbox **Backscan (512×512)** détermine le mode d'**affichage** sans relancer le traitement
 - Badge de mode en temps réel sur la carte (`ORIGINAL` / `BACKSCAN 512×512` / `CROP + MASQUE`)
+- **Menu contextuel clic droit** (7 options) sur le canvas :
+  - **Pan / Zoom** — glisser pour déplacer, molette pour zoomer
+  - **Outil de mesure** — clic-glisser, overlay jaune avec distance en **millimètres** calibrée depuis `SequenceOfUltrasoundRegions` ou `PixelSpacing`
+  - **Défilement de séries** — molette pour naviguer entre les frames
+  - **Contraste** / **Luminosité** — fenêtres flottantes avec curseur et bouton reset
+  - **Réinitialiser la vue** — remet zoom/pan/contraste/luminosité à zéro
 - En-têtes de section avec barre d'accent bleue (style MEDomics)
 - Résultats colorés dynamiquement (vert risque faible, rouge risque élevé)
 - Toggle thème clair / sombre
@@ -232,5 +247,4 @@ Tous les paramètres configurables sont centralisés dans [`config.py`](pythonCo
 
 ---
 
-*Version du plug-in : `0.1.0` — Stack MEDomics : Electron / React / Go / Python 3.13 / MongoDB*
-
+*Version du plug-in : `0.1.0` — Stack MEDomics : Electron / React / Go / Python 3.13 / MongoDB — Dernière mise à jour : **25 mars 2026***

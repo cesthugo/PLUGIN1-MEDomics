@@ -1,6 +1,9 @@
 # ── Données médicales (fichiers .dcm potentiellement lourds / sensibles) ──────
 data/
 
+# ── Binaires compilés ─────────────────────────────────────────────────────────
+*.exe
+
 # ── Environnements virtuels Python ────────────────────────────────────────────
 .venv/
 venv/
