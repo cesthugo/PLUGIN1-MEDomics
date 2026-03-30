@@ -192,7 +192,9 @@ class STARHEApp(tk.Tk):
         self._play_after_id = None   # ID retourné par self.after()
         self._dark_mode     : bool              = False   # thème clair par défaut
         # ── Lecture vidéo avancée ─────────────────────────────────────────────
-        self._play_fps      : float           = 22.0         # vitesse (fps)
+        self._base_fps      : float           = 22.0         # fps natif du DICOM
+        self._speed_mult    : float           = 1.0          # multiplicateur (×)
+        self._play_fps      : float           = 22.0         # fps effectif = base × mult
         self._loop_var      : tk.BooleanVar   = tk.BooleanVar(value=True)
 
         # ── Vue interactive (pan / zoom / mesure / series scroll) ─────────────
@@ -367,22 +369,24 @@ class STARHEApp(tk.Tk):
                        cursor="hand2", font=FONT_SMALL
                        ).pack(anchor="w", padx=16, pady=(2, 0))
 
-        # Vitesse FPS
+        # Vitesse de lecture (multiplicateur ×)
         fps_row = tk.Frame(sc, bg=SIDEBAR_BG)
-        fps_row.pack(fill="x", padx=10, pady=(2, 2))
+        fps_row.pack(fill="x", padx=10, pady=(2, 0))
         tk.Label(fps_row, text="Vitesse :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
                  font=FONT_SMALL).pack(side="left")
-        self._fps_var = tk.StringVar(value="22")
-        self._fps_entry = tk.Entry(fps_row, textvariable=self._fps_var, width=5,
-                                   bg=SIDEBAR_SEC, fg=SBAR_FG,
-                                   insertbackground=SBAR_FG, relief="flat",
-                                   font=FONT_SMALL, justify="center")
-        self._fps_entry.pack(side="left", padx=(6, 2))
-        tk.Label(fps_row, text="fps", bg=SIDEBAR_BG, fg=SBAR_MUTED,
-                 font=FONT_SMALL).pack(side="left")
-        self._fps_entry.bind("<Return>",   lambda e: self._apply_fps())
-        self._fps_entry.bind("<KP_Enter>", lambda e: self._apply_fps())
-        self._fps_entry.bind("<FocusOut>", lambda e: self._on_fps_change())
+        self._speed_label = tk.Label(fps_row, text="×1.00", bg=SIDEBAR_BG,
+                                     fg=SBAR_FG, font=FONT_SMALL)
+        self._speed_label.pack(side="right", padx=(0, 4))
+        self._speed_var = tk.DoubleVar(value=1.0)
+        self._speed_scale = tk.Scale(
+            sc, variable=self._speed_var, orient="horizontal",
+            from_=0.25, to=3.0, resolution=0.25,
+            showvalue=False, bg=SIDEBAR_BG, fg=SBAR_MUTED,
+            troughcolor=SIDEBAR_SEC, highlightthickness=0,
+            activebackground=BLUE, bd=0,
+            command=self._on_speed_change,
+        )
+        self._speed_scale.pack(fill="x", padx=10, pady=(0, 4))
 
         # Reset
         self._sbtn(sc, "⏮   Revenir au début", self._reset_video) \
@@ -636,7 +640,6 @@ class STARHEApp(tk.Tk):
     def _toggle_play(self):
         if self._frames_raw is None:
             return
-        self._on_fps_change()   # valide la saisie avant de démarrer
         self._playing = not self._playing
         if self._playing:
             self._btn_play.config(text="⏸   Pause")
@@ -650,29 +653,27 @@ class STARHEApp(tk.Tk):
     def _play_step(self):
         if not self._playing or self._frames_raw is None:
             return
-        n        = len(self._frames_raw)
-        next_idx = self._frame_idx + 1
+        n = len(self._frames_raw)
+        # ×1+ : saute N frames par tick → vitesse indépendante du temps de rendu
+        # ×<1 : avance 1 frame par tick, allonge l'intervalle
+        skip = max(1, round(self._speed_mult)) if self._speed_mult >= 1.0 else 1
+
+        next_idx = self._frame_idx + skip
         if next_idx >= n:
             if not self._loop_var.get():
-                # Fin de séquence sans boucle : stoppe la lecture
                 self._playing = False
                 self._btn_play.config(text="▶   Play")
                 return
-            next_idx = 0
+            next_idx = next_idx % n
         self._frame_idx = next_idx
         self._update_frame_label()
         t0 = time.perf_counter()
         self._refresh_canvas()
         render_ms = (time.perf_counter() - t0) * 1000
-        # Lit la vitesse en direct depuis le champ pour prendre en compte
-        # tout changement tapé sans nécessairement appuyer sur Entrée
-        try:
-            fps = float(self._fps_var.get())
-            if fps > 0:
-                self._play_fps = fps
-        except (ValueError, tk.TclError):
-            pass
-        interval_ms = 1000.0 / max(1.0, self._play_fps)
+        # Intervalle de base (fps natif du DICOM, non multiplié)
+        base_ms = 1000.0 / max(1.0, self._base_fps)
+        # En dessous de ×1 : ralentit en allongeant l'intervalle
+        interval_ms = base_ms if self._speed_mult >= 1.0 else base_ms / self._speed_mult
         delay = max(1, int(interval_ms - render_ms))
         self._play_after_id = self.after(delay, self._play_step)
 
@@ -795,6 +796,21 @@ class STARHEApp(tk.Tk):
             self._original_sensitive = original_sensitive
             self._kept_metadata      = kept_meta
             self._update_meta_widgets()
+
+            # Calibre la vitesse de lecture sur le FPS natif du DICOM
+            frame_time_ms = getattr(ds, "FrameTime", None)
+            if frame_time_ms:
+                try:
+                    self._base_fps = 1000.0 / float(frame_time_ms)
+                except (ValueError, ZeroDivisionError):
+                    self._base_fps = 22.0
+            else:
+                self._base_fps = 22.0
+            self._speed_var.set(1.0)
+            self._speed_mult = 1.0
+            self._play_fps   = self._base_fps
+            self._speed_label.config(text="×1.00")
+
             if self._playing:
                 self._toggle_play()  # stoppe la lecture si un autre DICOM était en cours
             # Recalibre la scrollbar sur la durée du nouveau clip
@@ -1041,27 +1057,15 @@ class STARHEApp(tk.Tk):
 
     # ── Vitesse FPS ───────────────────────────────────────────────────────────
 
-    def _apply_fps(self):
-        """Appliqué sur <Return> : valide + force le redémarrage immédiat de la boucle."""
-        self._on_fps_change()
-        # Retire le focus du champ pour confirmer visuellement la validation
-        self.focus_set()
-        # Si la lecture est en cours, annule le callback en attente et
-        # replanifie immédiatement avec le nouveau délai
+    def _on_speed_change(self, _=None):
+        """Appelé à chaque déplacement du slider de vitesse."""
+        self._speed_mult = self._speed_var.get()
+        self._play_fps   = max(1.0, self._base_fps * self._speed_mult)
+        self._speed_label.config(text=f"×{self._speed_mult:.2f}")
         if self._playing and self._play_after_id is not None:
             self.after_cancel(self._play_after_id)
             self._play_after_id = None
             self._play_step()
-
-    def _on_fps_change(self):
-        try:
-            fps = float(self._fps_var.get())
-            if fps > 0:
-                self._play_fps = fps
-            else:
-                raise ValueError
-        except ValueError:
-            self._fps_var.set(f"{self._play_fps:.0f}")
 
     # ── Reset vidéo ───────────────────────────────────────────────────────────
 
