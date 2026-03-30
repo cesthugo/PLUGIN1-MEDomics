@@ -140,33 +140,13 @@ def _load_ckpt(model, ckpt_path, device):
     model.load_state_dict(state_dict, strict=False)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="RTMDet single-image inference")
-    parser.add_argument("--config",    required=True)
-    parser.add_argument("--ckpt",      required=True)
-    parser.add_argument("--image",     required=True)
-    parser.add_argument("--out",       required=True)
-    parser.add_argument("--score-thr", type=float, default=0.001)
-    args = parser.parse_args()
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    # Charger le modèle
-    cfg = Config.fromfile(args.config)
-    _replace_syncbn(cfg._cfg_dict)
-    with DefaultScope.overwrite_default_scope("mmdet"):
-        model = MODELS.build(cfg.model)
-        _load_ckpt(model, args.ckpt, device)
-    model.to(device).eval()
-
-    # Lire l'image (BGR → garder tel quel, le modèle accepte BGR d'après config)
-    frame = cv2.imread(args.image)
+def _infer_one(model, image_path: str, score_thr: float, device: str) -> list:
+    """Inférence sur une image, retourne la liste de détections."""
+    frame = cv2.imread(image_path)
     if frame is None:
-        sys.exit(f"Impossible de lire l'image : {args.image}")
-
+        return []
     tensor, meta = _preprocess(frame)
     tensor = tensor.to(device)
-
     with torch.no_grad():
         feats      = model.backbone(tensor)
         neck_feats = model.neck(feats)
@@ -174,25 +154,125 @@ def main():
         results    = model.bbox_head.predict_by_feat(
             *head_outs, batch_img_metas=[meta], rescale=True
         )
-
     instances = results[0]
     bboxes = instances.bboxes.cpu().numpy()
     scores = instances.scores.cpu().numpy()
-
-    detections = [
-        {
-            "bbox":  [float(x) for x in bb],
-            "score": float(sc),
-            "label": "tumor",
-        }
+    return [
+        {"bbox": [float(x) for x in bb], "score": float(sc), "label": "tumor"}
         for bb, sc in zip(bboxes, scores)
-        if sc >= args.score_thr
+        if sc >= score_thr
     ]
 
-    Path(args.out).write_text(
-        json.dumps(detections, indent=2), encoding="utf-8"
-    )
-    print(f"[rtmdet_runner] {len(detections)} detection(s) saved -> {args.out}")
+
+def _infer_batch(model, image_paths: list, score_thr: float, device: str) -> list:
+    """
+    Inférence sur un lot d'images en une seule passe réseau.
+    Retourne une liste de listes de détections (une par image).
+    """
+    frames_data = []
+    metas       = []
+    valid_idx   = []   # indices des images effectivement chargées
+
+    for i, path in enumerate(image_paths):
+        frame = cv2.imread(path)
+        if frame is None:
+            frames_data.append(None)
+            metas.append(None)
+            continue
+        tensor, meta = _preprocess(frame)
+        frames_data.append(tensor)
+        metas.append(meta)
+        valid_idx.append(i)
+
+    results_out = [[] for _ in image_paths]
+    if not valid_idx:
+        return results_out
+
+    # Empilement en un seul batch (B, 3, H, W)
+    batch_tensor = torch.cat([frames_data[i] for i in valid_idx], dim=0).to(device)
+    batch_metas  = [metas[i] for i in valid_idx]
+
+    with torch.no_grad():
+        feats      = model.backbone(batch_tensor)
+        neck_feats = model.neck(feats)
+        head_outs  = model.bbox_head(neck_feats)
+        results    = model.bbox_head.predict_by_feat(
+            *head_outs, batch_img_metas=batch_metas, rescale=True
+        )
+
+    for pos, orig_idx in enumerate(valid_idx):
+        instances = results[pos]
+        bboxes = instances.bboxes.cpu().numpy()
+        scores = instances.scores.cpu().numpy()
+        results_out[orig_idx] = [
+            {"bbox": [float(x) for x in bb], "score": float(sc), "label": "tumor"}
+            for bb, sc in zip(bboxes, scores)
+            if sc >= score_thr
+        ]
+
+    return results_out
+
+
+def _build_model(config_path: str, ckpt_path: str, device: str):
+    cfg = Config.fromfile(config_path)
+    _replace_syncbn(cfg._cfg_dict)
+    with DefaultScope.overwrite_default_scope("mmdet"):
+        model = MODELS.build(cfg.model)
+        _load_ckpt(model, ckpt_path, device)
+    model.to(device).eval()
+    return model
+
+
+def main():
+    parser = argparse.ArgumentParser(description="RTMDet inference — mode image ou serveur")
+    parser.add_argument("--config",    required=True)
+    parser.add_argument("--ckpt",      required=True)
+    parser.add_argument("--score-thr", type=float, default=0.001)
+    # Mode image unique (legacy)
+    parser.add_argument("--image",     default=None, help="Chemin image (mode one-shot)")
+    parser.add_argument("--out",       default=None, help="Fichier JSON de sortie (mode one-shot)")
+    # Mode serveur persistant
+    parser.add_argument("--mode",      default="image", choices=["image", "server"],
+                        help="'server' : stdin/stdout JSON, 'image' : one-shot (défaut)")
+    args = parser.parse_args()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model  = _build_model(args.config, args.ckpt, device)
+
+    if args.mode == "server":
+        # ── Mode serveur ────────────────────────────────────────────────────
+        # Protocole :
+        #   stdin  → une ligne JSON par requête : {"image": "<path>", "score_thr": 0.70}
+        #            ou la chaîne littérale "__EXIT__" pour fermer proprement
+        #   stdout → une ligne JSON par réponse : [{"bbox":…, "score":…, "label":…}, …]
+        # flush obligatoire après chaque écriture pour débloquer le parent
+        print("[rtmdet_server] READY", flush=True)
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            if line == "__EXIT__":
+                break
+            try:
+                req      = json.loads(line)
+                thr      = float(req.get("score_thr", args.score_thr))
+                # Protocole batch : {"images": [...], "score_thr": ...}
+                if "images" in req:
+                    dets = _infer_batch(model, req["images"], thr, device)
+                else:
+                    # Protocole one-image : {"image": "...", "score_thr": ...}
+                    dets = _infer_one(model, req["image"], thr, device)
+                print(json.dumps(dets), flush=True)
+            except Exception as exc:
+                print(json.dumps({"error": str(exc)}), flush=True)
+
+    else:
+        # ── Mode one-shot (legacy) ───────────────────────────────────────────
+        if not args.image or not args.out:
+            sys.exit("--image et --out requis en mode 'image'")
+        dets = _infer_one(model, args.image, args.score_thr, device)
+        Path(args.out).write_text(json.dumps(dets, indent=2), encoding="utf-8")
+        print(f"[rtmdet_runner] {len(dets)} detection(s) saved -> {args.out}")
 
 
 if __name__ == "__main__":

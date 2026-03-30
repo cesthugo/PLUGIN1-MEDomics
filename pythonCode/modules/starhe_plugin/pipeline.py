@@ -22,6 +22,7 @@ from starhe_plugin.ai.starhe_risk      import STARHERiskModel
 from starhe_plugin.ai.starhe_detect    import STARHEDetectModel
 from starhe_plugin.db.mongo_client     import save_result
 from starhe_plugin.utils.go_print      import go_print, go_progress, go_result
+from starhe_plugin.config              import DETECT_EVERY_N
 
 
 def run_pipeline(dicom_path: str,
@@ -89,21 +90,26 @@ def run_pipeline(dicom_path: str,
     risk_model  = STARHERiskModel()
     risk_result = risk_model.predict(frames_processed)
 
-    # ── 6. STARHE-DETECT (toutes les frames) ───────────────────────────────────────
+    # ── 6. STARHE-DETECT (échantillonnage temporel) ──────────────────────────
     detections: list[dict] = []
     if run_detection:
-        n_frames = len(frames_processed)
+        n_frames  = len(frames_processed)
+        stride    = max(1, DETECT_EVERY_N)
+        n_analysed = len(range(0, n_frames, stride))
         go_progress(step := step + 1, TOTAL_STEPS,
-                    f"Inférence STARHE-DETECT ({n_frames} frames)…")
-        detect_model = STARHEDetectModel()
-        for i, frm in enumerate(frames_processed):
-            frame_dets = detect_model.predict(frm)
-            for d in frame_dets:
-                detections.append({**d, "frame": i})
-            if (i + 1) % 10 == 0 or i == n_frames - 1:
-                go_print("info",
-                         f"DETECT : {i + 1}/{n_frames} frames traités —"
-                         f" {len(detections)} lésion(s) cumulée(s).")
+                    f"Inférence STARHE-DETECT ({n_analysed}/{n_frames} frames, stride={stride})…")
+        with STARHEDetectModel() as detect_model:
+            for i in range(0, n_frames, stride):
+                frm        = frames_processed[i]
+                frame_dets = detect_model.predict(frm)
+                # Propager les détections sur les frames intermédiaires
+                for j in range(i, min(i + stride, n_frames)):
+                    for d in frame_dets:
+                        detections.append({**d, "frame": j})
+                if (i // stride + 1) % 5 == 0 or i + stride >= n_frames:
+                    go_print("info",
+                             f"DETECT : frame {i + 1}/{n_frames} —"
+                             f" {len(set(d['frame'] for d in detections))} frames avec détection(s).")
     else:
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")

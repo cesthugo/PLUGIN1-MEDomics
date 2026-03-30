@@ -187,6 +187,7 @@ class STARHEApp(tk.Tk):
         self._show_cropped         : bool              = False
         self._original_sensitive   : list              = []   # valeurs avant anonymisation
         self._kept_metadata        : list              = []   # métadonnées conservées
+        self._dicom_path           : str | None        = None  # chemin .dcm chargé
         self._photo_ref     = None   # garde la référence PyImage en vie
         self._playing       : bool              = False
         self._play_after_id = None   # ID retourné par self.after()
@@ -439,12 +440,26 @@ class STARHEApp(tk.Tk):
         self._risk_lbl.pack(side="left", padx=(6, 0))
 
         det_row = tk.Frame(sc, bg=SIDEBAR_BG)
-        det_row.pack(fill="x", padx=14, pady=(1, 12))
+        det_row.pack(fill="x", padx=14, pady=(1, 4))
         tk.Label(det_row, text="Lésions :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
                  font=FONT_SMALL, anchor="w").pack(side="left")
         self._det_lbl = tk.Label(det_row, text="—", bg=SIDEBAR_BG, fg=SBAR_MUTED,
                                   font=("Segoe UI", 9, "bold"), anchor="w")
         self._det_lbl.pack(side="left", padx=(6, 0))
+
+        # ─── FRAMES AVEC TUMEUR ──────────────────────────────────────────────
+        tk.Label(sc, text="Frames avec tumeur :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=FONT_SMALL, anchor="w").pack(fill="x", padx=14, pady=(4, 1))
+        self._det_frames_widget = tk.Text(
+            sc, height=4,
+            bg="#1a0a0a", fg=WARN_FG,
+            font=FONT_MONO, state="disabled", relief="flat",
+            wrap="word", bd=0, cursor="arrow",
+            selectbackground=SIDEBAR_HOV,
+        )
+        self._det_frames_widget.pack(fill="x", padx=10, pady=(0, 12))
+        self._det_frames_widget.tag_configure("link", foreground="#60a5fa",
+                                              underline=True)
 
         # ─── MÉTADONNÉES CONSERVÉES ──────────────────────────────────────────
         _sh("Métadonnées conservées")
@@ -733,7 +748,12 @@ class STARHEApp(tk.Tk):
             self._roi              = None
             self._frame_idx             = 0
             self._detections_per_frame  = []
+            self._dicom_path            = path
             self._crop_toggle.set(False)
+            # Vide le widget frames avec tumeur
+            self._det_frames_widget.config(state="normal")
+            self._det_frames_widget.delete("1.0", "end")
+            self._det_frames_widget.config(state="disabled")
             self._prepus_bsc.set(True)   # réinitialise backscan=on à chaque nouveau fichier
 
             # Extrait le pixel spacing pour la mesure en mm
@@ -914,7 +934,42 @@ class STARHEApp(tk.Tk):
                       else self._frames_raw)
             n = len(frames)
 
-            # STARHE-RISK
+            # ─── VÉRIFICATION CACHE MONGODB ────────────────────────────────────────
+            if self._dicom_path:
+                try:
+                    from starhe_plugin.db.mongo_client import find_by_file, save_result
+                    cached = find_by_file(self._dicom_path)
+                    if cached:
+                        self._log(
+                            f"  → Résultat en cache (MongoDB, {cached['processed_at'][:10]}).",
+                            level="success"
+                        )
+                        # Restaure les résultats depuis le cache
+                        per_frame    = cached.get("detections_per_frame", [[] for _ in range(n)])
+                        risk_cached  = cached.get("risk", {})
+                        score = risk_cached.get("score", 0.0)
+                        label = risk_cached.get("label", "Inconnu")
+                        risk_fg = RISK_HIGH_FG if any(
+                            w in label.lower() for w in ("élevé", "high")
+                        ) else RISK_LOW_FG
+                        self.after(0, lambda l=label, s=score, c=risk_fg:
+                                   self._risk_lbl.config(text=f"{l}  ({s:.1%})", fg=c))
+                        n_frames_with_det = sum(1 for d in per_frame if d)
+                        det_fg = WARN_FG if n_frames_with_det > 0 else SUCCESS_FG
+                        self.after(0, lambda nf=n_frames_with_det, c=det_fg:
+                                   self._det_lbl.config(
+                                       text=f"{nf}/{n} frames avec lésion(s)", fg=c))
+                        self._detections_per_frame = per_frame
+                        detected_indices = [i for i, d in enumerate(per_frame) if d]
+                        self.after(0, lambda idxs=detected_indices:
+                                   self._populate_det_frames(idxs))
+                        self.after(0, self._refresh_canvas)
+                        return
+                except Exception as exc:
+                    self._log(f"  MongoDB cache inaccessible : {exc} — analyse en cours…",
+                              level="error")
+
+            # ─── STARHE-RISK ───────────────────────────────────────────────────
             self._log("  → STARHE-RISK (C3D) en cours…")
             from starhe_plugin.ai.starhe_risk import STARHERiskModel
             risk_result = STARHERiskModel().predict(frames)
@@ -927,24 +982,38 @@ class STARHEApp(tk.Tk):
                        self._risk_lbl.config(text=f"{l}  ({s:.1%})", fg=c))
             self._log(f"  → RISK : {label} | score={score:.3f}", level="success")
 
-            # STARHE-DETECT — une inférence par frame
-            self._log(f"  → STARHE-DETECT : analyse de {n} frame(s)…")
+            # STARHE-DETECT — inférence par lots (batch inference)
             from starhe_plugin.ai.starhe_detect import STARHEDetectModel
-            model = STARHEDetectModel()
-            per_frame: list[list[dict]] = []
+            from starhe_plugin.config import DETECT_EVERY_N, DETECT_BATCH_SIZE
+            stride     = max(1, DETECT_EVERY_N)
+            batch_size = max(1, DETECT_BATCH_SIZE)
+            # Indices des frames à analyser (echantillonnage temporel)
+            sampled = list(range(0, n, stride))
+            n_sampled = len(sampled)
+            self._log(f"  → STARHE-DETECT : {n_sampled}/{n} frames (stride={stride}, batch={batch_size})…")
 
-            for i, frm in enumerate(frames):
-                dets = model.predict(frm)
-                per_frame.append(dets)
+            per_frame: list[list[dict]] = [[] for _ in range(n)]
 
-                # Mise à jour progressive toutes les 5 frames
-                if i % 5 == 0 or i == n - 1:
-                    captured = list(per_frame)   # copie locale pour la closure
-                    n_det = sum(1 for d in captured if d)
-                    self._detections_per_frame = captured
-                    self.after(0, lambda j=i + 1, nd=n_det:
+            with STARHEDetectModel() as detect_model:
+                for batch_start in range(0, n_sampled, batch_size):
+                    batch_indices = sampled[batch_start: batch_start + batch_size]
+                    batch_frames  = [frames[i] for i in batch_indices]
+
+                    # Inférence sur tout le lot en une seule passe réseau
+                    batch_dets = detect_model.predict_batch(batch_frames)
+
+                    for i, dets in zip(batch_indices, batch_dets):
+                        # Propagation aux frames intermédiaires
+                        for j in range(i, min(i + stride, n)):
+                            per_frame[j] = dets
+
+                    # Mise à jour progressive de l'UI tous les batches
+                    frames_done = min(batch_start + batch_size, n_sampled)
+                    n_det = sum(1 for d in per_frame if d)
+                    self._detections_per_frame = list(per_frame)
+                    self.after(0, lambda fd=frames_done, nd=n_det:
                                self._det_lbl.config(
-                                   text=f"Analyse… {j}/{n}  ({nd} frames)",
+                                   text=f"Analyse… {fd}/{n_sampled} lots  ({nd} frames)",
                                    fg=SBAR_MUTED))
                     self.after(0, self._refresh_canvas)
 
@@ -960,15 +1029,70 @@ class STARHEApp(tk.Tk):
                 level="success"
             )
 
+            # Liste des numéros de frames (1-based) avec au moins une détection
+            detected_indices = [i for i, d in enumerate(per_frame) if d]
+            self.after(0, lambda idxs=detected_indices:
+                       self._populate_det_frames(idxs))
+
             if n_frames_with_det > 0 and self._frames_cropped is not None:
                 self.after(0, lambda: self._crop_toggle.set(True))
 
             self.after(0, self._refresh_canvas)
 
+            # ─── SAUVEGARDE MONGODB ────────────────────────────────────────────────
+            if self._dicom_path:
+                try:
+                    from starhe_plugin.db.mongo_client import save_result
+                    save_result(
+                        file_path=self._dicom_path,
+                        num_frames=n,
+                        roi=list(self._roi) if self._roi else [],
+                        risk={"score": float(score), "label": label},
+                        detections_per_frame=per_frame,
+                    )
+                    self._log("  → Résultats sauvegardés dans MongoDB.", level="success")
+                except Exception as exc:
+                    self._log(f"  MongoDB : sauvegarde échouée ({exc})", level="error")
+
         except Exception as exc:
             self._log(f"ERREUR IA : {exc}", level="error")
         finally:
             self.after(0, _re_enable)
+
+    # ── Résultats détection ───────────────────────────────────────────────────
+
+    def _populate_det_frames(self, indices: list[int]):
+        """Remplit le widget 'Frames avec tumeur' avec des numéros cliquables."""
+        w = self._det_frames_widget
+        w.config(state="normal")
+        w.delete("1.0", "end")
+        if not indices:
+            w.insert("end", "Aucune tumeur détectée", "")
+        else:
+            for pos, idx in enumerate(indices):
+                label = str(idx + 1)   # 1-based
+                tag = f"fr_{idx}"
+                w.insert("end", label, ("link", tag))
+                if pos < len(indices) - 1:
+                    w.insert("end", "  ")
+                # Clic → navigation vers ce frame
+                w.tag_bind(tag, "<Button-1>",
+                           lambda e, i=idx: self._goto_frame(i))
+                w.tag_bind(tag, "<Enter>",
+                           lambda e: w.config(cursor="hand2"))
+                w.tag_bind(tag, "<Leave>",
+                           lambda e: w.config(cursor="arrow"))
+        w.config(state="disabled")
+
+    def _goto_frame(self, idx: int):
+        """Navigue vers le frame idx (0-based) et rafraîchit l'affichage."""
+        frames = (self._frames_cropped
+                  if self._crop_toggle.get() and self._frames_cropped is not None
+                  else self._frames_raw)
+        if frames is None:
+            return
+        self._frame_idx = max(0, min(len(frames) - 1, idx))
+        self._refresh_canvas()
 
     # ── Affichage canvas ──────────────────────────────────────────────────────
 
