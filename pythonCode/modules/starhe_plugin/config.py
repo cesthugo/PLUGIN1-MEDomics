@@ -50,12 +50,22 @@ STARHE_SHARE_ROOT = VENDOR_DIR
 # Score de confiance minimum pour afficher une détection
 DETECT_SCORE_THRESHOLD = 0.70
 
+# Échantillonnage temporel DETECT : 1 frame analysée toutes les N
+# Les N-1 frames intermédiaires héritent des détections de la frame analysée
+# 1 = toutes les frames (désactivé), 4 = gain ×4 (recommandé)
+DETECT_EVERY_N = 4
+
+# Taille des lots pour l'inférence RTMDet (batch inference)
+# Plus grand = moins d'overhead IPC mais plus de RAM GPU/CPU
+# 4 = bon compromis ; mettre 1 pour désactiver le batch
+DETECT_BATCH_SIZE = 4
+
 # ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
 CROP_BLACK_THRESHOLD   = 10
 CROP_MIN_CONTENT_RATIO = 0.01
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
-MONGO_URI        = "mongodb://localhost:27017/"
+MONGO_URI        = "mongodb://localhost:54017/"
 MONGO_DB_NAME    = "medomics"
 MONGO_COLLECTION = "starhe_results"
 

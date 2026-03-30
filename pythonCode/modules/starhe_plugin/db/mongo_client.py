@@ -3,14 +3,14 @@ db/mongo_client.py — Persistance des résultats STARHE dans MongoDB
 ===================================================================
 Schéma d'un document résultat :
 {
-  "_id"           : ObjectId,
-  "file_path"     : str,       → chemin .dcm source (ou anonymisé)
-  "processed_at"  : ISO-8601,
-  "num_frames"    : int,
-  "roi"           : [x0, y0, x1, y1],
-  "risk"          : { "score": float, "label": str },
-  "detections"    : [ {"bbox": [...], "score": float, "label": str}, ... ],
-  "anon_mode"     : str        → "hash" | "remove" | "none"
+  "_id"                  : ObjectId,
+  "file_path"            : str,       → chemin .dcm source (clé de cache)
+  "processed_at"         : ISO-8601,
+  "num_frames"           : int,
+  "roi"                  : [x0, y0, x1, y1],
+  "risk"                 : { "score": float, "label": str },
+  "detections_per_frame" : [ [{"bbox": [...], "score": float, "label": str}, ...], ... ],
+  "anon_mode"            : str        → "hash" | "remove" | "none"
 }
 """
 
@@ -43,27 +43,40 @@ def save_result(file_path: str,
                 num_frames: int,
                 roi: list[int],
                 risk: dict,
-                detections: list[dict],
+                detections_per_frame: list[list[dict]],
                 anon_mode: str = "none") -> str:
     """
-    Insère un nouveau document de résultat dans MongoDB.
+    Insère (ou remplace) un document de résultat dans MongoDB.
+    Si un document avec le même file_path existe déjà, il est remplacé.
 
-    Retourne l'_id (str) du document inséré.
+    Retourne l'_id (str) du document inséré/remplacé.
     """
     col = _get_collection()
     doc: dict[str, Any] = {
-        "file_path"    : file_path,
-        "processed_at" : datetime.datetime.utcnow().isoformat() + "Z",
-        "num_frames"   : num_frames,
-        "roi"          : roi,
-        "risk"         : risk,
-        "detections"   : detections,
-        "anon_mode"    : anon_mode,
+        "file_path"            : file_path,
+        "processed_at"         : datetime.datetime.utcnow().isoformat() + "Z",
+        "num_frames"           : num_frames,
+        "roi"                  : roi,
+        "risk"                 : risk,
+        "detections_per_frame" : detections_per_frame,
+        "anon_mode"            : anon_mode,
     }
-    result = col.insert_one(doc)
-    doc_id = str(result.inserted_id)
+    result = col.replace_one({"file_path": file_path}, doc, upsert=True)
+    doc_id = str(result.upserted_id) if result.upserted_id else "(updated)"
     go_print("info", f"mongo_client : résultat sauvegardé (_id={doc_id}).")
     return doc_id
+
+
+def find_by_file(file_path: str) -> dict | None:
+    """
+    Retourne le document de résultat associé à ce fichier DICOM, ou None.
+    Utilisé pour éviter de relancer l'analyse si elle a déjà été effectuée.
+    """
+    col = _get_collection()
+    doc = col.find_one({"file_path": file_path})
+    if doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
 
 
 def get_result(doc_id: str) -> dict | None:
