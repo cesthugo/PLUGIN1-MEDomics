@@ -1,82 +1,76 @@
 # 📋 TODOLIST — Plug-in STARHE / MEDomics
 > Carnet de bord opérationnel du projet.  
-> Dernière mise à jour : **25 mars 2026**
+> Dernière mise à jour : **30 mars 2026**
 
 ---
 
 ## ✅ Tâches Accomplies
 
 ### 🍴 Mise en place du projet
-- [x] **Fork du dépôt MEDomics** — Dépôt principal forké, branche de développement `feature/starhe-plugin` créée
-- [x] **Analyse de l'architecture MEDomics** — Étude du stack (Electron / React / Go / Python / MongoDB), compréhension du système de communication Go ↔ Python via stdout JSON, repérage des points d'intégration (`go_server`, `renderer/`)
-- [x] **Résolution des problèmes d'accès** — Contournement des blocages antivirus sur le disque `F:` (exclusions Windows Defender), résolution des conflits de `PATH` pour Python et Go sous Windows
-- [x] **Environnement Python 3.13** — Création du venv dans `starhe_plugin/.venv`, résolution du conflit Python 3.14/Tkinter
+- [x] **Fork du dépôt MEDomics** — Branche de développement créée
+- [x] **Analyse de l'architecture MEDomics** — Stack (Electron / React / Go / Python / MongoDB), communication Go ↔ Python via stdout JSON
+- [x] **Environnement Python 3.13** — venv dans `starhe_plugin/.venv`, résolution conflit Python 3.14/Tkinter
+- [x] **`.gitignore`** — exclusion `*.exe`, `*.pth`, `__pycache__`, `.venv`, `temp/`, `*.egg-info`, `build/`
 
 ### 🏗 Architecture du plug-in Python
-- [x] **Définition de la structure de répertoires** — Création de `pythonCode/modules/starhe_plugin/` avec les sous-modules `ai/`, `db/`, `dicom/`, `ui/`, `utils/`
 - [x] **`config.py`** — Centralisation de toutes les constantes (chemins, seuils, tags DICOM, paramètres MongoDB)
-- [x] **`__init__.py` racine** — Hooks de cycle de vie `on_load()` / `on_unload()` conformes à la philosophie MEDomics
-- [x] **`requirements.txt`** — Dépendances Python complètes avec section prepUS
+- [x] **`__init__.py` racine** — Hooks `on_load()` / `on_unload()` conformes à la philosophie MEDomics
+- [x] **`requirements.txt`** — Dépendances Python complètes
 
 ### 🏥 Module DICOM (`dicom/`)
-- [x] **`reader.py`** — Lecture `.dcm`, extraction frames mono/multi-frames, normalisation `uint8`, détection ciné-clips
-- [x] **`anonymizer.py`** — Anonymisation de 15 tags DICOM sensibles (modes `hash` SHA-256 et `remove`), fonctions `anonymize()` et `anonymize_file()`
-- [x] **`crop.py`** — Algo maison spatial + temporel — fallback si prepUS indisponible
-- [x] **`scan_conversion.py` supprimé** — Backscan maison par transformée de Hough — supersédé par prepUS et retiré du dépôt
-- [x] **`prepus_bridge.py`** — ✅ **Intégration API prepUS** : `preprocess_with_prepus()` — crop + backscan via `removeLayoutFile`, retourne `(backscan_array, crop_only_array, info_dict)`
-- [x] **`dicom/__init__.py` nettoyé** — Imports `find_fov_geometry`, `scan_convert_frame`, `scan_convert_clip` retirés (plus de dépendance à `scan_conversion`)
+- [x] **`reader.py`** — Lecture `.dcm` et fichiers sans extension (`force=True`), extraction frames, normalisation `uint8`
+- [x] **`anonymizer.py`** — Anonymisation 15 tags DICOM sensibles (modes `hash` et `remove`) + `remove_pixel_burnin()`
+- [x] **`crop.py`** — Algo maison spatial + temporel (fallback si prepUS indisponible)
+- [x] **`prepus_bridge.py`** — Intégration API prepUS : `preprocess_with_prepus()` — double sortie (backscan 512×512 + crop seul) en une passe
 
 ### 🧹 Intégration prepUS
 - [x] **Installation** : `sonocrop --no-deps` + `prepUS --no-deps` + `fire` + `rich` dans le venv
-- [x] **Correctif JSON** : ajout de `_NpEncoder` dans `prepUS/cli.py` pour les types numpy (`float32`, `int64`)
-- [x] **Gestion backscan off** : reconstruction du crop depuis `info.json` quand `back_scan_conversion=False` (prepUS ne sauvegarde pas de vidéo dans ce cas)
-- [x] **Double sortie** : `prepus_bridge` retourne les deux arrays (backscan 512×512 + crop seul) en une seule passe
+- [x] **Correctif JSON** : `_NpEncoder` dans `prepUS/cli.py` pour les types numpy (`float32`, `int64`)
+- [x] **Double sortie** : retour `(backscan_array, crop_only_array, info_dict)` en une seule passe
 
 ### 🤖 Module IA (`ai/`)
-- [x] **`starhe_risk.py`** — Wrapper C3D : preprocessing `(16, 112, 112)`, inférence, retour score `[0–1]` + label risque *(stub — poids non disponibles)*
-- [x] **`starhe_detect.py`** — Wrapper DINO-DETR : preprocessing `800×800`, inférence, retour bounding boxes filtrées *(stub — poids non disponibles)*
+- [x] **`starhe_risk.py`** — Wrapper C3D : preprocessing `(16, 112, 112)`, inférence, score `[0–1]` + label risque
+- [x] **`starhe_detect.py`** — Wrapper RTMDet/DINO : classe `STARHEDetectModel` avec :
+  - [x] Subprocess **persistant** (mode serveur) — modèle chargé une seule fois
+  - [x] Context manager `__enter__`/`__exit__` + `close()` propre
+  - [x] Méthode `predict_batch(frames)` — N frames en une seule passe réseau
+  - [x] Fallback one-shot en cas d'erreur serveur
+- [x] **`ai/models/_rtmdet_runner.py`** — Runner RTMDet avec :
+  - [x] Mode `--mode server` : boucle stdin/stdout JSON, signal `READY`, `__EXIT__`
+  - [x] Protocole batch : `{"images": [...]}` → `[[dets], ...]`
+  - [x] Patchs Python 3.13 : stubs mmcv._ext, NMSop, inspect.getmodule
+- [x] **`config.py` seuils** : `DETECT_SCORE_THRESHOLD=0.70`, `DETECT_EVERY_N=4`, `DETECT_BATCH_SIZE=4`
 
 ### 🗄 Module Base de données (`db/`)
-- [x] **`mongo_client.py`** — CRUD MongoDB complet : `save_result`, `get_result`, `list_results`, `delete_result`
-
-### 🔧 Module Utilitaires (`utils/`)
-- [x] **`go_print.py`** — Protocole JSON stdout : `go_print()`, `go_progress()`, `go_result()`
+- [x] **`mongo_client.py`** — CRUD MongoDB : `save_result` (upsert), `find_by_file`, `get_result`, `list_results`, `delete_result`
+- [x] **Port MongoDB** : `54017` (config.py + go_server/config.go)
+- [x] **Cache automatique** : `find_by_file(path)` vérifié avant toute inférence ; `save_result` avec `replace_one(..., upsert=True)`
+- [x] **Schéma** : `detections_per_frame` — liste de listes (une par frame), indexée sur `file_path`
 
 ### 🔀 Orchestration
-- [x] **`pipeline.py`** — Orchestrateur complet DICOM → frames → anonymisation → prétraitement prepUS (crop + backscan) → STARHE-RISK → STARHE-DETECT → MongoDB
+- [x] **`pipeline.py`** — Orchestrateur DICOM → anonymisation → prepUS → STARHE-RISK → STARHE-DETECT (batch + stride) → MongoDB
 
 ### 🖼 Prototype UI Tkinter
 - [x] **Interface MEDomics v1.8.0** — Sidebar `#151521`, fond `#f4f6fb`, bleu `#1565C0`, Segoe UI
-- [x] **Logo MEDomicsLab_LOGO.png** intégré dans le header (PNG avec gestion transparence)
-- [x] **Navigation** — Boutons ◀/▶, lecture automatique ~22 fps, scrollbar horizontale ttk
-- [x] **Toggle thème clair/sombre** (bouton footer sidebar, sidebar toujours sombre)
-- [x] **Bouton unique ⚙ Pré-Traitement** — remplace les deux anciens boutons (✂ Crop + 🧼 prepUS) ; toujours `back_scan_conversion=True`, la checkbox contrôle l'affichage
-- [x] **Badge de mode** sur l'en-tête de la carte (`ORIGINAL` / `BACKSCAN 512×512` / `CROP + MASQUE`)
-- [x] **En-têtes de section** avec barre d'accent bleue gauche (style MEDomics) et texte en gras
-- [x] **Résultats colorés dynamiquement** — vert risque faible, rouge risque élevé, orange/vert lésions
-- [x] **Ombre portée simulée** sur la carte visionneuse DICOM + bordure subtile
-- [x] **Indicateur d'état** du pré-traitement (en cours / terminé / erreur) sous le bouton
-- [x] **Compteur de frames** navigation en gros caractères blancs
-- [x] **Checkbox renommée** `Afficher résultat pré-traitement` (plus claire qu'`image rognée`)
-- [x] **Sidebar scrollable** — Canvas + Scrollbar, affichage correct même en petite fenêtre
+- [x] **Navigation** — Boutons ◀/▶, scrollbar horizontale ttk, lecture automatique
+- [x] **Vitesse de lecture** — Slider ×-multiplicateur style YouTube (0.25× à 3.0×), calibré depuis `FrameTime` DICOM
+  - Logique : skip N frames par tick (×≥1) ou allongement d'intervalle (×<1)
+- [x] **Frames détectées cliquables** — Après analyse, liste des numéros 1-based en bleu cliquable ; clic navigue directement vers ce frame
+- [x] **Cache MongoDB** dans l'UI — si fichier déjà analysé, résultats restitués instantanément
+- [x] **Sauvegarde MongoDB** après analyse — `save_result()` appelé en fin de thread
+- [x] **Menu contextuel clic droit** (7 options) : Pan/Zoom, mesure mm, séries, contraste, luminosité, réinitialisation
+- [x] **Outil de mesure en mm** — overlay jaune calibré depuis `SequenceOfUltrasoundRegions` / `PixelSpacing`
+- [x] **Toggle thème clair/sombre**
+- [x] **Badge de mode** sur la carte : `ORIGINAL` / `BACKSCAN 512×512` / `CROP + MASQUE`
+- [x] **Anonymisation automatique** à l'import (15 tags + bandeau imageur noirci)
+- [x] **Métadonnées affichées** : conservées (vert) + anonymisées originales (rouge)
+- [x] **Sidebar scrollable**
+- [x] **Bouton unique ⚙ Pré-Traitement** avec indicateur d'état
 
-### 🖼 Prototype Tkinter — Fonctionnalités avancées UI (mars 2026)
-- [x] **Vitesse de lecture configurable** — Champ FPS dans la sidebar (`_fps_var`, `_on_fps_change`) ; délai recalculé à chaque frame en `1000 / fps` ms
-- [x] **Mode boucle** — Checkbox `Boucle` (`_loop_var`) ; arrêt propre en fin de séquence si décoché
-- [x] **Bouton Revenir au début** (`_reset_video`) — Stoppe la lecture et revient au frame 0
-- [x] **Menu contextuel clic droit** — 7 entrées avec indicateur `✓` du mode actif :
-  - Pan / Zoom, Outil de mesure, Défilement de séries, Contraste, Luminosité, Réinitialiser la vue
-- [x] **Pan / Zoom interactif** — Mode `pan` : clic-glisser déplace l'image, molette zoome (×1.1 / ÷1.1) ; curseur `fleur`
-- [x] **Outil de mesure en mm** — Mode `measure` : clic-glisser trace une ligne jaune en overlay avec distance en mm (calibrée depuis `SequenceOfUltrasoundRegions` → `PixelSpacing` → fallback px) ; curseur `crosshair`
-- [x] **Défilement de séries** — Mode `series` : molette navigue frame par frame ; curseur `sb_v_double_arrow`
-- [x] **Dialogs Contraste / Luminosité** (`_AdjustDialog`) — Fenêtre flottante avec `Scale` + bouton Reset ; singletons (une seule fenêtre à la fois)
-- [x] **Réinitialisation de vue** (`_reset_view`) — Zoom=1, pan=0, contraste=1.0, luminosité=0, overlay mesure effacé
-- [x] **Pixel spacing automatique** — Extraction à l'import DICOM : `PixelSpacing` → `ImagerPixelSpacing` → `SequenceOfUltrasoundRegions` (PhysicalDeltaX/Y cm×10→mm) ; affiché dans la sidebar info
-- [x] **Mesure affichée uniquement en mm** — Label `"X.X mm"` (plus de combiné mm/px)
-
-### 🏥 Module DICOM — Extensions (mars 2026)
-- [x] **Support fichiers sans extension** — `pydicom.dcmread(path, force=True)` dans `reader.py` ; filtre boîte de dialogue mis à jour (`*.dcm *`)
-- [x] **`remove_pixel_burnin(frames)`** dans `anonymizer.py` — Suppression automatique du bandeau imageur (PHI pixel burn-in) par analyse de luminosité ligne par ligne ; exporté depuis `dicom/__init__.py` ; appelé systématiquement à l'import dans `_on_load_dicom`
+### 🔗 Go Server
+- [x] **`go_server/main.go`** — Endpoints : GET /health, POST /starhe/analyze (SSE), GET/DELETE /starhe/results
+- [x] **`go_server/config.go`** — Port MongoDB `54017`, chemins venv Python configurables par var d'env
+- [x] **`go_server/handlers.go`** — Streaming SSE `GO_PRINT|` depuis Python
 
 ---
 
@@ -86,7 +80,7 @@
 - [ ] **Tests du pipeline bout en bout** — Valider `run_pipeline()` avec un fichier `.dcm` réel sur données hépatiques
 
 ### 🖼 Prototype Tkinter
-- [ ] **Validation flux complet avec Canon Aplio i700** — Charger un fichier `A0000` → vérifier suppression bandeau + calibration mm → prepUS crop+backscan → inférence IA (stub) → affichage résultats
+- [ ] **Validation flux complet avec Canon Aplio i700** — Charger `A0000` → suppression bandeau + calibration mm → prepUS → inférence IA → affichage résultats + cache MongoDB
 - [ ] **Recueil de retours utilisateur** — Identifier les ajustements UX avant portage en React
 
 ---
@@ -95,94 +89,68 @@
 
 ### 🔬 Phase 1 : Validation Backend (Court terme)
 
-- [ ] **Intégration des poids des modèles IA**
-  - Placer `starhe_risk_c3d.pth` et `starhe_detect_dino_detr.pth` dans `pythonCode/modules/starhe_plugin/models/`
-  - Valider l'inférence C3D et DINO-DETR sur des données réelles prepUS-traitées
-  - 📝 *Démarche : utiliser `torch.load()` avec `map_location='cpu'` pour les environnements sans GPU*
-
 - [ ] **Écriture des tests unitaires**
-  - Tester `reader.py` : chargement, nombre de frames, shape des arrays
-  - Tester `anonymizer.py` : vérifier que les 15 tags sont bien effacés/hachés
-  - Tester `prepus_bridge.py` : valider le crop + backscan sur un DICOM de référence
-  - 📝 *Démarche : créer `pythonCode/modules/starhe_plugin/tests/` avec `pytest`*
+  - `reader.py` : chargement, nombre de frames, shape des arrays
+  - `anonymizer.py` : vérifier que les 15 tags sont bien effacés/hachés
+  - `prepus_bridge.py` : valider crop + backscan sur un DICOM de référence
+  - `mongo_client.py` : test round-trip save/find/delete
+  - *Démarche : créer `pythonCode/modules/starhe_plugin/tests/` avec `pytest`*
+
+- [ ] **Optimisation Phase 2 : GPU**
+  - Configurer le runner RTMDet pour utiliser CUDA si disponible (`--device cuda`)
+  - Gain estimé : ×10–20 sur la partie détection (RTX 30/40 : ~15–30ms/frame)
 
 ### 🔀 Phase 2 : Intégration Go Server (Moyen terme)
 
-- [ ] **Création des routes REST dans `go_server`**
-  - Créer `go_server/blueprints/starhe.go` avec les endpoints :
-    - `POST /starhe/analyze` — Lancer `pipeline.py` sur un fichier DICOM
-    - `GET  /starhe/results` — Lister les analyses MongoDB
-    - `GET  /starhe/results/:id` — Récupérer une analyse par ID
-    - `DELETE /starhe/results/:id` — Supprimer une analyse
-  - 📝 *Démarche : utiliser `os/exec` en Go pour lancer Python en subprocess, streamer stdout JSON via WebSocket ou SSE vers le frontend*
-
 - [ ] **Gestionnaire de progression en temps réel**
-  - Câbler les événements `go_progress()` de Python vers le frontend via Server-Sent Events (SSE)
+  - Câbler les événements `go_progress()` de Python vers le frontend via SSE
 
 - [ ] **Gestion des erreurs et timeouts**
-  - Implémenter un timeout configurable pour l'inférence IA
-  - Retourner des codes d'erreur HTTP sémantiques (400, 422, 500) avec messages JSON structurés
+  - Timeout configurable pour l'inférence IA
+  - Codes d'erreur HTTP sémantiques avec messages JSON structurés
 
-### ⚛️ Phase 3 : Portage UI React (Long terme)
+### ⚙ Phase 3 : Portage UI React (Long terme)
 
-- [ ] **Portage de l'interface Tkinter vers React/JSX**
-  - Composant `<DicomLoader />` — Upload et validation d'un fichier `.dcm`
-  - Composant `<FrameViewer />` — Visualisation des frames avec navigation, toggle crop/backscan
-  - Composant `<AnonymizationPanel />` — Sélection du mode (hash / remove) et confirmation
-  - Composant `<InferenceResults />` — Score STARHE-RISK et bounding boxes DINO-DETR
-  - Composant `<AnalysisConsole />` — Logs en temps réel (équivalent console Tkinter)
-  - 📝 *Démarche : s'inspirer du style MEDomics v1.8.0 déjà identifié dans le prototype Tkinter*
-
+- [ ] **Composant `<DicomLoader />`** — Upload et validation d'un fichier `.dcm`
+- [ ] **Composant `<FrameViewer />`** — Visualisation frames, navigation, toggle crop/backscan
+- [ ] **Composant `<InferenceResults />`** — Score STARHE-RISK, bboxes, liste frames détectées cliquables
+- [ ] **Composant `<AnalysisConsole />`** — Logs en temps réel (SSE)
 - [ ] **Intégration dans le système de navigation MEDomics**
-  - Enregistrer le plug-in dans le menu latéral de MEDomics
-  - Respecter le système de routing Next.js existant
 
 ### 🧪 Phase 4 : Tests & Déploiement (Long terme)
 
-- [ ] **Tests d'intégration bout en bout**
-  - Pipeline complet : frontend React → Go Server → Python → MongoDB → retour résultats
-  - ⚠️ *Attention : utiliser uniquement des DICOMs anonymisés ou synthétiques, jamais de données patient réelles en dev*
-
-- [ ] **Documentation des routes API Go** — Swagger / OpenAPI
-
-- [ ] **Packaging du plug-in**
-  - Vérifier la compatibilité avec le système d'extensions de MEDomics
-  - Documenter la procédure d'installation du plug-in
+- [ ] **Tests d'intégration bout en bout** — Frontend React → Go → Python → MongoDB
+- [ ] **Documentation API Go** — Swagger / OpenAPI
+- [ ] **Packaging du plug-in** — Compatibilité système d'extensions MEDomics
 
 ---
 
 ## 📝 Procédures Techniques Clés
 
-### 🧹 Prétraitement prepUS (pipeline principal)
-> `preprocess_with_prepus(frames, fps, thresh, back_scan_conversion, backscan_width, backscan_height)`  
-> 1. Export numpy → MP4 temporaire (OpenCV)  
-> 2. `removeLayoutFile(mp4, out_dir, ...)` — détection pixels statiques + masquage + crop  
-> 3. Lecture `backscan_video.mp4` et/ou `video.mp4` depuis `out_dir`  
-> 4. Toujours appelé avec `back_scan_conversion=True` → les deux sorties sont disponibles en une passe  
-> 5. Retourne `(backscan_array, crop_only_array, info_dict)` — nettoyage du dossier temporaire  
+### 🧹 Prétraitement prepUS
+> `preprocess_with_prepus(frames, fps, thresh, back_scan_conversion, backscan_width, backscan_height)`
+> 1. Export numpy → MP4 temporaire (OpenCV)
+> 2. `removeLayoutFile(mp4, out_dir, ...)` — détection pixels statiques + masquage + crop
+> 3. Toujours appelé avec `back_scan_conversion=True` → double sortie en une passe
+> 4. Retourne `(backscan_array, crop_only_array, info_dict)` + nettoyage tmp
 > ⚠️ prepUS doit être installé avec `--no-deps` pour éviter les conflits OpenCV
 
-### 🏥 Anonymisation DICOM
-> Utiliser `pydicom` pour itérer sur les tags DICOM définis dans `config.DICOM_SENSITIVE_TAGS`.  
-> Mode `hash` : remplacer la valeur par `sha256(valeur_originale)[:16]` pour conserver la traçabilité interne.  
-> Mode `remove` : appeler `del ds[tag]` après vérification de présence.  
-> Sauvegarder avec `ds.save_as(output_path)` — ne jamais écraser le fichier original.
+### 🐍 Subprocess persistant RTMDet
+> 1. `STARHEDetectModel.__init__()` lance `_rtmdet_runner.py --mode server`
+> 2. Attente du signal `[rtmdet_server] READY` sur stdout
+> 3. Chaque lot de frames : `{"images": [...], "score_thr": 0.70}` via stdin → `[[dets], ...]` via stdout
+> 4. `__EXIT__` ferme proprement le serveur
+> 5. Fallback automatique vers one-shot si erreur
 
-### 🔀 Communication Go ↔ Python
-> Lancer Python en subprocess depuis Go : `cmd := exec.Command("python", "-m", "starhe_plugin.pipeline", args...)`.  
-> Chaque ligne stdout de Python est préfixée `GO_PRINT:` suivi d'un JSON.  
-> Parser côté Go avec `bufio.Scanner` + `json.Unmarshal`.  
-> Relayer vers le frontend via SSE ou WebSocket en temps réel.
+### 🗄 Cache MongoDB
+> 1. Au lancement de l'analyse : `find_by_file(path)` — si résultat trouvé, restitution immédiate
+> 2. Après analyse : `save_result(file_path, ..., detections_per_frame=per_frame)` avec upsert
+> 3. Clé de cache = chemin absolu du fichier `.dcm` (sensible au déplacement/renommage)
 
-### 🤖 Chargement des modèles IA
-> Instancier le modèle une seule fois au démarrage du serveur (singleton) pour éviter les rechargements coûteux.  
-> Utiliser `torch.load(path, map_location=torch.device('cpu'))` en l'absence de GPU.  
-> Passer en mode évaluation : `model.eval()` + `torch.no_grad()` lors de l'inférence.
-
-### 🗄 Stockage MongoDB
-> Connexion via `pymongo.MongoClient(MONGO_URI)` avec gestion d'exception `ServerSelectionTimeoutError`.  
-> Chaque résultat est un document JSON avec : `dicom_path`, `frame_count`, `roi`, `risk_score`, `detections[]`, `anonymization_mode`, `created_at` (ISO 8601).  
-> Indexer sur `dicom_path` et `created_at` pour des requêtes performantes.
+### 🔗 Communication Go ↔ Python
+> Lancer Python en subprocess depuis Go : `os/exec.Command("python", "-m", "starhe_plugin.pipeline", args...)`
+> Chaque ligne stdout de Python est préfixée `GO_PRINT:` suivi d'un JSON.
+> Parser côté Go avec `bufio.Scanner` + `json.Unmarshal` — relayer via SSE.
 
 ---
 

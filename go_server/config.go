@@ -35,7 +35,7 @@ var cfg = appConfig{
 		`F:\STAGE\PROJET\PLUGIN1-MEDomics\pythonCode\modules`,
 	),
 
-	MongoURI:        envOr("MONGO_URI", "mongodb://localhost:27017/"),
+	MongoURI:        envOr("MONGO_URI", "mongodb://localhost:54017/"),
 	MongoDatabase:   envOr("MONGO_DB", "medomics"),
 	MongoCollection: envOr("MONGO_COLL", "starhe_results"),
 }

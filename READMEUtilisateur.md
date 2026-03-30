@@ -54,8 +54,10 @@ Pixel    : 0.275 mm/px
 | **⏮ Revenir au début** | Stoppe et revient au frame 0 |
 
 ### Vitesse de lecture
-- Champ **Vitesse** (en fps) dans la sidebar — modifiez et validez avec **Entrée**
-- Par défaut : 22 fps. Valeurs recommandées : 15–30 fps selon l'imageur
+- Slider **×-vitesse** (0.25× à 3.0×, pas de 0.25×) dans la sidebar — glissez le curseur
+- Le label **×1.00** se met à jour dynamiquement
+- La vitesse de base est calibrée automatiquement depuis le tag `FrameTime` du DICOM
+- En dessous de ×1 : lecture ralentie (intervalle étendu) ; au-dessus : frames sautées pour accélérer
 
 ### Mode boucle
 - Cochez **Boucle** pour que la lecture recommence automatiquement à la fin de la séquence
@@ -189,8 +191,9 @@ Le pré-traitement utilise **prepUS** pour supprimer les annotations et l'interf
 
 Les bounding boxes de détection s'affichent directement sur le canvas.
 
-> ⚠️ Les modèles IA sont actuellement des **stubs** — les vrais poids ne sont pas encore intégrés.  
-> Les résultats affichés sont des valeurs simulées à des fins de validation de l'interface.
+**Frames avec tumeur** : après l'analyse, la section **Frames avec tumeur** dans la sidebar affiche la liste des numéros de frames (1-basés) où une lésion a été détectée, en **bleu cliquable**. Cliquer sur un numéro navigue directement vers ce frame.
+
+**Cache automatique** : si le fichier `.dcm` a été analysé lors d'une session précédente, les résultats sont restaurés **instantanément** depuis MongoDB sans relancer les modèles IA.
 
 ---
 
