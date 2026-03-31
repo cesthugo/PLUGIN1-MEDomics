@@ -10,7 +10,8 @@ Schéma d'un document résultat :
   "roi"                  : [x0, y0, x1, y1],
   "risk"                 : { "score": float, "label": str },
   "detections_per_frame" : [ [{"bbox": [...], "score": float, "label": str}, ...], ... ],
-  "anon_mode"            : str        → "hash" | "remove" | "none"
+  "anon_mode"            : str,       → "hash" | "remove" | "none"
+  "analysis_mode"        : str        → "original" | "backscan" | "crop"
 }
 """
 
@@ -44,7 +45,8 @@ def save_result(file_path: str,
                 roi: list[int],
                 risk: dict,
                 detections_per_frame: list[list[dict]],
-                anon_mode: str = "none") -> str:
+                anon_mode: str = "none",
+                analysis_mode: str = "original") -> str:
     """
     Insère (ou remplace) un document de résultat dans MongoDB.
     Si un document avec le même file_path existe déjà, il est remplacé.
@@ -60,6 +62,7 @@ def save_result(file_path: str,
         "risk"                 : risk,
         "detections_per_frame" : detections_per_frame,
         "anon_mode"            : anon_mode,
+        "analysis_mode"        : analysis_mode,
     }
     result = col.replace_one({"file_path": file_path}, doc, upsert=True)
     doc_id = str(result.upserted_id) if result.upserted_id else "(updated)"
@@ -105,11 +108,10 @@ def list_results(limit: int = 50) -> list[dict]:
     return docs
 
 
-def delete_result(doc_id: str) -> bool:
-    """Supprime un document résultat. Retourne True si supprimé."""
-    from bson import ObjectId
+def delete_result(file_path: str) -> bool:
+    """Supprime le document résultat associé à un fichier. Retourne True si supprimé."""
     col = _get_collection()
-    res = col.delete_one({"_id": ObjectId(doc_id)})
+    res = col.delete_one({"file_path": file_path})
     deleted = res.deleted_count > 0
-    go_print("info", f"mongo_client : document {doc_id} {'supprimé' if deleted else 'introuvable'}.")
+    go_print("info", f"mongo_client : {file_path} {'supprimé' if deleted else 'introuvable'}.")
     return deleted

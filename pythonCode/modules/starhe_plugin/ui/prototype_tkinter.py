@@ -427,12 +427,27 @@ class STARHEApp(tk.Tk):
         _sh("Analyse IA")
         self._btn_pipeline = self._pbtn(sc, "🧠   Lancer l'analyse STARHE",
                                         self._on_run_pipeline)
-        self._btn_pipeline.pack(fill="x", padx=10, pady=(8, 6))
+        self._btn_pipeline.pack(fill="x", padx=10, pady=(8, 4))
+
+        btn_reset = tk.Button(sc, text="🗑   Réinitialiser l'analyse",
+                              command=self._on_reset_analysis,
+                              bg="#5a1a1a", fg="white",
+                              activebackground="#7a2a2a", activeforeground="white",
+                              font=FONT_SMALL, relief="flat", cursor="hand2")
+        btn_reset.pack(fill="x", padx=10, pady=(0, 6))
 
         # ─── RÉSULTATS ───────────────────────────────────────────────────────
         _sh("Résultats")
+        mode_row = tk.Frame(sc, bg=SIDEBAR_BG)
+        mode_row.pack(fill="x", padx=14, pady=(6, 1))
+        tk.Label(mode_row, text="Mode :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                 font=FONT_SMALL, anchor="w").pack(side="left")
+        self._mode_lbl = tk.Label(mode_row, text="—", bg=SIDEBAR_BG, fg=SBAR_MUTED,
+                                   font=("Segoe UI", 9, "bold"), anchor="w")
+        self._mode_lbl.pack(side="left", padx=(6, 0))
+
         risk_row = tk.Frame(sc, bg=SIDEBAR_BG)
-        risk_row.pack(fill="x", padx=14, pady=(6, 1))
+        risk_row.pack(fill="x", padx=14, pady=(1, 1))
         tk.Label(risk_row, text="Risque CHC :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
                  font=FONT_SMALL, anchor="w").pack(side="left")
         self._risk_lbl = tk.Label(risk_row, text="—", bg=SIDEBAR_BG, fg=SBAR_MUTED,
@@ -908,6 +923,32 @@ class STARHEApp(tk.Tk):
             self.after(0, lambda: self._preprocess_status.config(
                 text="✗  Erreur", fg=DANGER_FG))
             self._log(f"ERREUR pré-traitement : {exc}", level="error")
+    def _on_reset_analysis(self):
+        """Supprime le cache MongoDB pour le fichier actuel et réinitialise l'affichage."""
+        if not getattr(self, "_dicom_path", None):
+            messagebox.showwarning("Aucun DICOM", "Chargez d'abord un fichier DICOM.")
+            return
+        if not messagebox.askyesno(
+            "Réinitialiser l'analyse",
+            f"Supprimer les résultats STARHE en cache pour :\n{self._dicom_path} ?"
+        ):
+            return
+        from starhe_plugin.db.mongo_client import delete_result
+        ok = delete_result(self._dicom_path)
+        if ok:
+            self._log("✓  Résultat MongoDB supprimé.")
+        else:
+            self._log("⚠  Aucun résultat en cache à supprimer.")
+        # Réinitialise l'affichage
+        self._risk_lbl.config(text="—", fg=SBAR_MUTED)
+        self._det_lbl.config(text="—", fg=SBAR_MUTED)
+        if hasattr(self, "_mode_lbl"):
+            self._mode_lbl.config(text="—", fg=SBAR_MUTED)
+        if hasattr(self, "_det_frames_widget"):
+            self._det_frames_widget.config(state="normal")
+            self._det_frames_widget.delete("1.0", "end")
+            self._det_frames_widget.config(state="disabled")
+
     def _on_run_pipeline(self):
         """Lance l'analyse IA dans un thread pour ne pas bloquer l'UI."""
         if self._frames_raw is None:
@@ -934,16 +975,27 @@ class STARHEApp(tk.Tk):
                       else self._frames_raw)
             n = len(frames)
 
+            # Mode d'analyse courant
+            if self._crop_toggle.get() and self._frames_cropped is not None:
+                _analysis_mode = "backscan" if self._prepus_bsc.get() else "crop"
+            else:
+                _analysis_mode = "original"
+            _mode_labels = {"backscan": "Backscan 512×512", "crop": "Pré-traitement (crop)", "original": "Original"}
+
             # ─── VÉRIFICATION CACHE MONGODB ────────────────────────────────────────
             if self._dicom_path:
                 try:
                     from starhe_plugin.db.mongo_client import find_by_file, save_result
                     cached = find_by_file(self._dicom_path)
                     if cached:
+                        cached_mode = cached.get("analysis_mode", "original")
+                        cached_mode_label = _mode_labels.get(cached_mode, cached_mode)
                         self._log(
-                            f"  → Résultat en cache (MongoDB, {cached['processed_at'][:10]}).",
+                            f"  → Résultat en cache (MongoDB, mode={cached_mode_label}, {cached['processed_at'][:10]}).",
                             level="success"
                         )
+                        self.after(0, lambda ml=cached_mode_label:
+                                   self._mode_lbl.config(text=ml, fg="#93c5fd"))
                         # Restaure les résultats depuis le cache
                         per_frame    = cached.get("detections_per_frame", [[] for _ in range(n)])
                         risk_cached  = cached.get("risk", {})
@@ -1037,6 +1089,10 @@ class STARHEApp(tk.Tk):
             if n_frames_with_det > 0 and self._frames_cropped is not None:
                 self.after(0, lambda: self._crop_toggle.set(True))
 
+            mode_label_str = _mode_labels.get(_analysis_mode, _analysis_mode)
+            self.after(0, lambda ml=mode_label_str:
+                       self._mode_lbl.config(text=ml, fg="#93c5fd"))
+
             self.after(0, self._refresh_canvas)
 
             # ─── SAUVEGARDE MONGODB ────────────────────────────────────────────────
@@ -1049,6 +1105,7 @@ class STARHEApp(tk.Tk):
                         roi=list(self._roi) if self._roi else [],
                         risk={"score": float(score), "label": label},
                         detections_per_frame=per_frame,
+                        analysis_mode=_analysis_mode,
                     )
                     self._log("  → Résultats sauvegardés dans MongoDB.", level="success")
                 except Exception as exc:
