@@ -24,7 +24,7 @@ Deux modèles IA sont exploités :
 
 | Outil | Version minimale | Notes |
 |---|---|---|
-| Python | 3.13 | tkinter inclus ; 3.14 incompatible (tkinter cassé) |
+| Python | 3.13 | tkinter inclus ; 3.14 incompatible (tkinter cassé). Sur macOS Homebrew : `brew install python@3.13 python-tk@3.13` |
 | MongoDB | 4.x+ | Service local sur le port **54017** (non standard) |
 | Go | 1.21+ | Requis uniquement pour le serveur REST |
 | Node.js | 18+ | Requis uniquement pour le frontend MEDomics |
@@ -50,7 +50,7 @@ python3.13 -m venv pythonCode/modules/starhe_plugin/.venv
 pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/starhe_plugin/requirements.txt
 ```
 
-> Sur macOS, Python 3.13 peut être installé via `brew install python@3.13`. Vérifier que tkinter est inclus : `python3.13 -c "import tkinter"`. Si tkinter est absent (cas fréquent avec Homebrew), installer le package système `python-tk@3.13` : `brew install python-tk@3.13`.
+> **macOS (Homebrew)** : Python 3.13 s'installe via `brew install python@3.13`. Homebrew **n'inclut pas tkinter par défaut** — il faut aussi lancer `brew install python-tk@3.13`, sinon l'UI Tkinter échouera avec `ModuleNotFoundError: No module named '_tkinter'`. Vérifier avec : `python3.13 -c "import tkinter"`.
 
 ### 2. Lancer le prototype Tkinter (développement)
 
@@ -61,10 +61,27 @@ pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/sta
 
 **macOS / Linux :**
 ```bash
-# Résoudre le chemin absolu avant tout cd
+./run_tkinter.sh
+```
+
+Le script `run_tkinter.sh` est **autonome** : il vérifie que Python 3.13 et tkinter sont présents sur le système, crée le venv et installe les dépendances si absent, installe prepUS, puis lance l'UI. Un nouvel utilisateur sur Mac n'a besoin que de deux prérequis système :
+
+```bash
+# Prérequis une seule fois
+brew install python@3.13 python-tk@3.13
+# Puis lancer le prototype (tout le reste est automatique)
+./run_tkinter.sh
+```
+
+> **Important** : les commandes doivent être exécutées **depuis la racine du projet** (`PLUGIN1-MEDomics/`). Si vous êtes dans un sous-dossier (ex. `pythonCode/modules/`), les chemins relatifs seront faux et vous obtiendrez `zsh: no such file or directory`.
+
+<details>
+<summary>Commandes manuelles équivalentes (macOS / Linux)</summary>
+
+```bash
+# Depuis la racine du projet
 PYTHON="$(pwd)/pythonCode/modules/starhe_plugin/.venv/bin/python"
 PREPUS="$(pwd)/third_party/prepUS"
-# Installation de prepUS si absent
 "$PYTHON" -c "import prepUS" 2>/dev/null || {
     "$PYTHON" -m pip install sonocrop --no-deps -q
     "$PYTHON" -m pip install "$PREPUS" --no-deps -q
@@ -73,7 +90,7 @@ cd pythonCode/modules
 "$PYTHON" -m starhe_plugin.ui.prototype_tkinter
 ```
 
-Le script (ou les commandes équivalentes) installe automatiquement `prepUS` depuis `third_party/prepUS/` si absent, puis lance l'UI.
+</details>
 
 ### 3. Lancer le serveur Go (intégration MEDomics)
 
@@ -466,7 +483,8 @@ tqdm n'est pas dans les dépendances mmdet. Si absent, mmdet lève une `ImportEr
 ```
 PLUGIN1-MEDomics/
 │
-├── run_tkinter.ps1                   # Lanceur UI prototype (installe prepUS auto)
+├── run_tkinter.ps1                   # Lanceur UI prototype Windows (installe prepUS auto)
+├── run_tkinter.sh                    # Lanceur UI prototype macOS/Linux (installe prepUS auto)
 ├── README.md                         # Ce fichier
 ├── READMEUtilisateur.md              # Guide utilisateur de l'interface Tkinter
 ├── TODOLIST.md                       # Carnet de bord / roadmap
