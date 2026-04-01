@@ -64,8 +64,8 @@ pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/sta
 PYTHON=pythonCode/modules/starhe_plugin/.venv/bin/python
 # Installation de prepUS si absent
 $PYTHON -c "import prepUS" 2>/dev/null || {
-    pip install third_party/prepUS/deps/sonocrop --no-deps -q
-    pip install third_party/prepUS --no-deps -q
+    $PYTHON -m pip install sonocrop --no-deps -q
+    $PYTHON -m pip install third_party/prepUS --no-deps -q
 }
 cd pythonCode/modules
 $PYTHON -m starhe_plugin.ui.prototype_tkinter
