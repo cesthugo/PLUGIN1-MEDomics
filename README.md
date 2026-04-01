@@ -38,26 +38,56 @@ Deux modèles IA sont exploités :
 
 ### 1. Créer le venv Python 3.13
 
+**Windows (PowerShell) :**
 ```powershell
 py -3.13 -m venv pythonCode\modules\starhe_plugin\.venv
 pythonCode\modules\starhe_plugin\.venv\Scripts\pip install -r pythonCode\modules\starhe_plugin\requirements.txt
 ```
 
+**macOS / Linux :**
+```bash
+python3.13 -m venv pythonCode/modules/starhe_plugin/.venv
+pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/starhe_plugin/requirements.txt
+```
+
+> Sur macOS, Python 3.13 peut être installé via `brew install python@3.13`. Vérifier que tkinter est inclus : `python3.13 -c "import tkinter"`. Si tkinter est absent (cas fréquent avec Homebrew), installer le package système `python-tk@3.13` : `brew install python-tk@3.13`.
+
 ### 2. Lancer le prototype Tkinter (développement)
 
+**Windows (PowerShell) :**
 ```powershell
 .\run_tkinter.ps1
 ```
 
-Le script installe automatiquement `prepUS` depuis `third_party/prepUS/` si absent, puis lance l'UI.
+**macOS / Linux :**
+```bash
+PYTHON=pythonCode/modules/starhe_plugin/.venv/bin/python
+# Installation de prepUS si absent
+$PYTHON -c "import prepUS" 2>/dev/null || {
+    pip install third_party/prepUS/deps/sonocrop --no-deps -q
+    pip install third_party/prepUS --no-deps -q
+}
+cd pythonCode/modules
+$PYTHON -m starhe_plugin.ui.prototype_tkinter
+```
+
+Le script (ou les commandes équivalentes) installe automatiquement `prepUS` depuis `third_party/prepUS/` si absent, puis lance l'UI.
 
 ### 3. Lancer le serveur Go (intégration MEDomics)
 
+**Windows / macOS / Linux :**
 ```bash
 cd go_server
 go run .
 # Écoute sur http://localhost:8080 (PORT modifiable via variable d'environnement)
 ```
+
+> Sur macOS, les chemins par défaut dans `go_server/config.go` pointent vers des chemins Windows (`F:\STAGE\...`). Il faut les surcharger via variables d'environnement :
+> ```bash
+> export STARHE_PYTHON_EXE="$(pwd)/pythonCode/modules/starhe_plugin/.venv/bin/python"
+> export STARHE_PYTHON_PATH="$(pwd)/pythonCode/modules"
+> cd go_server && go run .
+> ```
 
 Variables d'environnement du serveur Go :
 
