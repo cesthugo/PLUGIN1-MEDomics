@@ -61,14 +61,16 @@ pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/sta
 
 **macOS / Linux :**
 ```bash
-PYTHON=pythonCode/modules/starhe_plugin/.venv/bin/python
+# Résoudre le chemin absolu avant tout cd
+PYTHON="$(pwd)/pythonCode/modules/starhe_plugin/.venv/bin/python"
+PREPUS="$(pwd)/third_party/prepUS"
 # Installation de prepUS si absent
-$PYTHON -c "import prepUS" 2>/dev/null || {
-    $PYTHON -m pip install sonocrop --no-deps -q
-    $PYTHON -m pip install third_party/prepUS --no-deps -q
+"$PYTHON" -c "import prepUS" 2>/dev/null || {
+    "$PYTHON" -m pip install sonocrop --no-deps -q
+    "$PYTHON" -m pip install "$PREPUS" --no-deps -q
 }
 cd pythonCode/modules
-$PYTHON -m starhe_plugin.ui.prototype_tkinter
+"$PYTHON" -m starhe_plugin.ui.prototype_tkinter
 ```
 
 Le script (ou les commandes équivalentes) installe automatiquement `prepUS` depuis `third_party/prepUS/` si absent, puis lance l'UI.
