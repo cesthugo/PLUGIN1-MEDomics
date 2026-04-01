@@ -1,6 +1,6 @@
 # 📋 TODOLIST — Plug-in STARHE / MEDomics
 > Carnet de bord opérationnel du projet.  
-> Dernière mise à jour : **30 mars 2026**
+> Dernière mise à jour : **1er avril 2026**
 
 ---
 
@@ -66,6 +66,14 @@
 - [x] **Métadonnées affichées** : conservées (vert) + anonymisées originales (rouge)
 - [x] **Sidebar scrollable**
 - [x] **Bouton unique ⚙ Pré-Traitement** avec indicateur d'état
+- [x] **Bouton 🗑 Réinitialiser l'analyse** (sidebar rouge) — efface le cache MongoDB du fichier courant et réinitialise entièrement l'UI
+- [x] **Label Mode dans RÉSULTATS** — badge dynamique indiquant le mode d'affichage actif : `Backscan 512×512`, `Pré-traitement (crop)` ou `Original`
+- [x] **Clic droit maintenu** → contraste (axe X) / luminosité (axe Y) en direct ; clic droit bref (<0,25 s) → menu contextuel 7 options
+- [x] **Glisser gauche vertical** (mode normal) → défilement de frames (1 frame / 8 px)
+- [x] **Mesures multiples simultanées** — plusieurs segments tracés en parallèle ; sélection par clic (contour orange), édition d'extrémité par glisser (point), déplacement du segment entier, suppression via Delete/BackSpace
+- [x] **Raccourcis clavier** (18 bindings) — Espace (lecture), ←/→ (±1 frame), Shift+←/→ (±10 frames), Home/End, P/M/S (modes), Échap (déselect/reset), R (réinitialiser vue), C/L (contraste/luminosité), +/- (vitesse), B (boucle), Ctrl+Tab / Ctrl+Shift+Tab (onglets), Ctrl+W (fermer onglet)
+- [x] **Système d'onglets multi-fichiers** — `askopenfilenames` pour charger N fichiers en une sélection, barre d'onglets en bas de la visionneuse, label = `StudyDate` formatée JJ/MM/AAAA (fallback : nom de fichier), sauvegarde/restauration complète de l'état par onglet (frames, zoom, mesures, contraste…), fermeture individuelle (×), navigation Ctrl+Tab
+- [x] **Bug `delete_result()` MongoDB** corrigé — filtre par champ string `file_path` au lieu d'ObjectId
 
 ### 🔗 Go Server
 - [x] **`go_server/main.go`** — Endpoints : GET /health, POST /starhe/analyze (SSE), GET/DELETE /starhe/results

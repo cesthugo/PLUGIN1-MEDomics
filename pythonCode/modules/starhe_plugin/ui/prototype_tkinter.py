@@ -33,6 +33,7 @@ Dépendances :
 import sys
 import os
 import time
+import math
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
@@ -203,9 +204,18 @@ class STARHEApp(tk.Tk):
         self._zoom          : float           = 1.0
         self._pan_x         : float           = 0.0
         self._pan_y         : float           = 0.0
-        self._drag_start    : tuple | None    = None         # (ex, ey, pan_x, pan_y)
-        self._measure_pts   : list            = []           # [(x,y), (x,y)]
-        self._measure_items : list            = []           # IDs canvas overlay
+        self._drag_start    : tuple | None    = None         # (ex, ey, val_a, val_b)
+        self._press_time    : float           = 0.0          # horodatage du ButtonPress-1
+        self._press_pos     : tuple           = (0, 0)       # position du ButtonPress-1
+        # Mesures multiples
+        self._measures              : list            = []   # [{pts:[(x1,y1),(x2,y2)], items:[...]}]
+        self._measure_drawing       : list            = []   # [(x,y)] ou [] — segment en cours
+        self._measure_selected      : int | None      = None # index segment sélectionné
+        self._measure_edit          : dict | None     = None # édition drag
+        self._measure_preview_items : list            = []   # canvas items temporaires (preview)
+        # Système d'onglets multi-fichiers
+        self._tabs          : list[dict]      = []           # un dict d'état par onglet
+        self._active_tab    : int             = -1           # index de l'onglet actif (-1 = aucun)
         self._contrast      : float           = 1.0          # 0.1 – 3.0
         self._brightness    : float           = 0.0          # -100 – +100
         self._pixel_spacing : tuple | None    = None         # (row_mm, col_mm) extrait du tag PixelSpacing DICOM
@@ -218,15 +228,132 @@ class STARHEApp(tk.Tk):
                        sliderthickness=12, sliderlength=14)
 
         self._build_ui()
+        self._setup_kb_shortcuts()
         # Redirige go_print() des modules librairie vers la console Tkinter
         set_log_sink(lambda level, msg: self._log(msg, level=level))
         self._log("Bienvenue dans Plugin1 Hugo  —  plugin STARHE.")
         self._log("Chargez un fichier DICOM (.dcm) dans le panneau latéral pour commencer.")
 
+    # ── Raccourcis clavier globaux ────────────────────────────────────────────
+
+    def _setup_kb_shortcuts(self):
+        """Enregistre les raccourcis clavier sur la fenêtre principale.
+
+        Les raccourcis sont inactifs si le focus est dans un champ de saisie
+        (Entry / Text) pour éviter toute interférence lors de la frappe.
+
+        Tableau des raccourcis
+        ──────────────────────
+        Espace          Play / Pause
+        ←  →            Frame précédente / suivante
+        Shift+← / →     Saut de −10 / +10 frames
+        Home / End      Premier / Dernier frame
+        P               Toggle mode Pan/Zoom
+        M               Toggle mode Mesure
+        S               Toggle mode Défilement série
+        Échap           Retour mode normal (+ déselect mesure)
+        R               Réinitialiser la vue
+        C               Dialog Contraste
+        L               Dialog Luminosité
+        + ou =          Vitesse lecture ×1.25
+        -               Vitesse lecture ×0.80
+        B               Toggle boucle
+        """
+        kb = [
+            ("<space>",         lambda e: self._kb_do(self._toggle_play)),
+            ("<Left>",          lambda e: self._kb_do(self._prev_frame)),
+            ("<Right>",         lambda e: self._kb_do(self._next_frame)),
+            ("<Shift-Left>",    lambda e: self._kb_do(lambda: self._kb_jump(-10))),
+            ("<Shift-Right>",   lambda e: self._kb_do(lambda: self._kb_jump(+10))),
+            ("<Home>",          lambda e: self._kb_do(self._kb_first_frame)),
+            ("<End>",           lambda e: self._kb_do(self._kb_last_frame)),
+            ("<Control-Tab>",   lambda e: self._kb_do(self._kb_next_tab)),
+            ("<Control-Shift-Tab>", lambda e: self._kb_do(self._kb_prev_tab)),
+            ("<Control-w>",     lambda e: self._kb_do(lambda: self._close_tab(self._active_tab))),
+            ("p",               lambda e: self._kb_do(self._toggle_pan_zoom)),
+            ("m",               lambda e: self._kb_do(self._toggle_measure)),
+            ("s",               lambda e: self._kb_do(self._toggle_series_scroll)),
+            ("<Escape>",        lambda e: self._kb_do(self._kb_escape)),
+            ("r",               lambda e: self._kb_do(self._reset_view)),
+            ("c",               lambda e: self._kb_do(self._open_contrast_dialog)),
+            ("l",               lambda e: self._kb_do(self._open_brightness_dialog)),
+            ("<plus>",          lambda e: self._kb_do(lambda: self._kb_speed(1.25))),
+            ("<equal>",         lambda e: self._kb_do(lambda: self._kb_speed(1.25))),
+            ("<minus>",         lambda e: self._kb_do(lambda: self._kb_speed(0.80))),
+            ("b",               lambda e: self._kb_do(self._kb_toggle_loop)),
+        ]
+        for seq, handler in kb:
+            self.bind(seq, handler)
+
+    def _kb_guard(self) -> bool:
+        """Renvoie True si le focus est dans un champ de texte éditable."""
+        w = self.focus_get()
+        return isinstance(w, (tk.Entry, tk.Text, scrolledtext.ScrolledText))
+
+    def _kb_do(self, fn):
+        """Exécute *fn* sauf si un widget de texte a le focus."""
+        if not self._kb_guard():
+            fn()
+
+    # ── Helpers raccourcis ────────────────────────────────────────────────────
+
+    def _kb_jump(self, delta: int):
+        """Saute *delta* frames (négatif = reculer)."""
+        if self._frames_raw is None:
+            return
+        if self._playing:
+            self._toggle_play()
+        n = len(self._frames_raw)
+        self._frame_idx = max(0, min(n - 1, self._frame_idx + delta))
+        self._update_frame_label()
+        self._refresh_canvas()
+
+    def _kb_first_frame(self):
+        if self._frames_raw is None:
+            return
+        if self._playing:
+            self._toggle_play()
+        self._frame_idx = 0
+        self._update_frame_label()
+        self._refresh_canvas()
+
+    def _kb_last_frame(self):
+        if self._frames_raw is None:
+            return
+        if self._playing:
+            self._toggle_play()
+        self._frame_idx = len(self._frames_raw) - 1
+        self._update_frame_label()
+        self._refresh_canvas()
+
+    def _kb_escape(self):
+        """Échap : déselectionne la mesure courante s'il y en a une, sinon repasse en mode normal."""
+        if self._view_mode == "measure" and self._measure_selected is not None:
+            self._measure_selected = None
+            self._redraw_measures()
+        else:
+            self._reset_view()
+
+    def _kb_speed(self, factor: float):
+        """Multiplie la vitesse de lecture par *factor*, clampée entre 0.25× et 3.0×."""
+        new_val = max(0.25, min(3.0, self._speed_mult * factor))
+        self._speed_var.set(new_val)
+        self._on_speed_change()
+
+    def _kb_toggle_loop(self):
+        self._loop_var.set(not self._loop_var.get())
+
+    def _kb_next_tab(self):
+        if self._tabs:
+            self._switch_tab((self._active_tab + 1) % len(self._tabs))
+
+    def _kb_prev_tab(self):
+        if self._tabs:
+            self._switch_tab((self._active_tab - 1) % len(self._tabs))
+
     # ── Construction UI ───────────────────────────────────────────────────────
 
-    def _build_ui(self):
-        # ── Barre de titre MEDomics ─────────────────────────────────────────────
+    def _build_ui(self):        # ── Barre de titre MEDomics ─────────────────────────────────────────────
         header = tk.Frame(self, bg=SIDEBAR_BG, height=50)
         header.pack(fill="x")
         header.pack_propagate(False)
@@ -529,6 +656,28 @@ class STARHEApp(tk.Tk):
         self._card_divider = tk.Frame(card, bg=BORDER, height=1)
         self._card_divider.pack(fill="x")
 
+        # ── Barre d'onglets (bas de la carte, avant canvas pour side="bottom") ────
+        _TAB_BG = "#0c1018"
+        self._tab_bar_outer = tk.Frame(card, bg=_TAB_BG, height=32)
+        self._tab_bar_outer.pack(side="bottom", fill="x")
+        self._tab_bar_outer.pack_propagate(False)
+        # Zone défilante pour les onglets
+        self._tab_bar_scroll = tk.Canvas(self._tab_bar_outer, bg=_TAB_BG,
+                                          highlightthickness=0, height=32)
+        self._tab_bar_scroll.pack(side="left", fill="both", expand=True)
+        # Bouton "+" pour ajouter d'autres fichiers
+        tk.Button(self._tab_bar_outer, text="  +  ", command=self._on_load_dicom,
+                  bg=_TAB_BG, fg="#4b5563", relief="flat", bd=0,
+                  activebackground="#151c2a", activeforeground="#9ca3af",
+                  font=("Segoe UI", 12, "bold"), cursor="hand2",
+                  padx=4).pack(side="right", padx=2)
+        self._tab_bar_inner = tk.Frame(self._tab_bar_scroll, bg=_TAB_BG)
+        self._tab_bar_scroll.create_window((0, 0), window=self._tab_bar_inner, anchor="nw")
+        self._tab_bar_inner.bind("<Configure>", lambda e: self._tab_bar_scroll.config(
+            scrollregion=self._tab_bar_scroll.bbox("all")))
+        self._tab_bar_scroll.bind("<MouseWheel>",
+            lambda e: self._tab_bar_scroll.xview_scroll(int(-1 * (e.delta / 120)), "units"))
+
         # Canvas DICOM (fond sombre à l'intérieur de la carte)
         canvas_wrap = tk.Frame(card, bg=CANVAS_BG)
         canvas_wrap.pack(fill="both", expand=True)
@@ -536,13 +685,18 @@ class STARHEApp(tk.Tk):
                                  highlightthickness=0,
                                  width=CANVAS_W, height=CANVAS_H)
         self._canvas.pack(fill="both", expand=True)
-        # Clic droit → menu contextuel
-        self._canvas.bind("<Button-3>",        self._show_context_menu)
         # Interactions pan / zoom / mesure / series (actives selon self._view_mode)
         self._canvas.bind("<ButtonPress-1>",   self._on_canvas_press)
         self._canvas.bind("<B1-Motion>",       self._on_canvas_drag)
         self._canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+        # Clic droit maintenu → contraste (X) / luminosité (Y)
+        self._canvas.bind("<ButtonPress-3>",   self._on_rclick_press)
+        self._canvas.bind("<B3-Motion>",       self._on_rclick_drag)
+        self._canvas.bind("<ButtonRelease-3>", self._on_rclick_release)
         self._canvas.bind("<MouseWheel>",      self._on_canvas_scroll)
+        # Suppression de mesure sélectionnée (le canvas doit avoir le focus)
+        self._canvas.bind("<Delete>",          self._on_measure_delete)
+        self._canvas.bind("<BackSpace>",       self._on_measure_delete)
         self._canvas_text = self._canvas.create_text(
             CANVAS_W // 2, CANVAS_H // 2,
             text="Aucun DICOM chargé\n\nUtilisez  « Charger un fichier DICOM »  dans le panneau latéral",
@@ -708,13 +862,23 @@ class STARHEApp(tk.Tk):
         self._play_after_id = self.after(delay, self._play_step)
 
     def _on_load_dicom(self):
-        path = filedialog.askopenfilename(
-            title="Sélectionner un fichier DICOM",
+        """Ouvre un ou plusieurs fichiers DICOM et crée un onglet pour chacun."""
+        paths = filedialog.askopenfilenames(
+            title="Sélectionner un ou plusieurs fichiers DICOM",
             initialdir=DATA_DIR,
             filetypes=[("Fichiers DICOM", "*.dcm *"), ("Tous fichiers", "*.*")]
         )
-        if not path:
+        if not paths:
             return
+        self._save_tab_state()
+        first_new = len(self._tabs)
+        for path in paths:
+            self._load_one_dicom(path)
+        target = first_new if first_new < len(self._tabs) else max(0, len(self._tabs) - 1)
+        self._switch_tab(target)
+
+    def _load_one_dicom(self, path: str):
+        """Charge un fichier DICOM individuel et crée son onglet."""
         self._log(f"Chargement : {os.path.basename(path)}")
         try:
             ds = load_dicom(path)
@@ -855,9 +1019,272 @@ class STARHEApp(tk.Tk):
             self._refresh_canvas()
             self._log(f"DICOM chargé — {len(frames)} frame(s), {rows}×{cols} px.")
 
+            # ── Création de l'onglet ────────────────────────────────────────────
+            _study_date = next(
+                (v for n, v in original_sensitive if n == "StudyDate" and v != "— absent"),
+                ""
+            )
+            self._tabs.append(
+                self._capture_tab_state(self._make_tab_label(_study_date, path))
+            )
+            self._active_tab = len(self._tabs) - 1
+
         except Exception as exc:
             messagebox.showerror("Erreur de chargement", str(exc))
             self._log(f"ERREUR : {exc}", level="error")
+
+    # ── Gestion des onglets multi-fichiers ───────────────────────────────────
+
+    @staticmethod
+    def _make_tab_label(study_date: str, path: str) -> str:
+        """Génère le label d'onglet depuis la date DICOM ou le nom de fichier."""
+        sd = study_date.strip()
+        if len(sd) == 8 and sd.isdigit():
+            return f"{sd[6:8]}/{sd[4:6]}/{sd[0:4]}"
+        if sd and sd not in ("", "— absent"):
+            return sd[:14]
+        base = os.path.splitext(os.path.basename(path))[0]
+        return base[:14] if len(base) > 14 else base
+
+    def _capture_tab_state(self, label: str) -> dict:
+        """Prend un instantané de l'état courant pour le stocker dans un onglet."""
+        return {
+            "label":                label,
+            "frames_raw":           self._frames_raw,
+            "frames_cropped":       self._frames_cropped,
+            "frames_backscan":      self._frames_backscan,
+            "frames_crop_only":     self._frames_crop_only,
+            "roi":                  self._roi,
+            "frame_idx":            self._frame_idx,
+            "detections_per_frame": list(self._detections_per_frame),
+            "dicom_path":           self._dicom_path,
+            "pixel_spacing":        self._pixel_spacing,
+            "base_fps":             self._base_fps,
+            "original_sensitive":   list(self._original_sensitive),
+            "kept_metadata":        list(self._kept_metadata),
+            "measures":             [{"pts": list(s["pts"])} for s in self._measures],
+            "measure_selected":     self._measure_selected,
+            "zoom":                 self._zoom,
+            "pan_x":               self._pan_x,
+            "pan_y":               self._pan_y,
+            "contrast":             self._contrast,
+            "brightness":           self._brightness,
+            "view_mode":            self._view_mode,
+            "crop_toggle_val":      self._crop_toggle.get(),
+            "prepus_bsc_val":       self._prepus_bsc.get(),
+            "speed_mult":           self._speed_mult,
+            "risk_text":            self._risk_lbl.cget("text"),
+            "risk_fg":              self._risk_lbl.cget("fg"),
+            "det_text":             self._det_lbl.cget("text"),
+            "det_fg":               self._det_lbl.cget("fg"),
+            "mode_text":            self._mode_lbl.cget("text"),
+            "mode_fg":              self._mode_lbl.cget("fg"),
+            "info_val":             self._info_var.get(),
+            "label_file_text":      self._label_file.cget("text"),
+            "label_file_fg":        self._label_file.cget("fg"),
+            "preprocess_text":      self._preprocess_status.cget("text"),
+            "preprocess_fg":        self._preprocess_status.cget("fg"),
+        }
+
+    def _save_tab_state(self):
+        """Met à jour le dict de l'onglet actif avec l'état courant."""
+        if self._active_tab < 0 or self._active_tab >= len(self._tabs):
+            return
+        s = self._tabs[self._active_tab]
+        s["frames_raw"]            = self._frames_raw
+        s["frames_cropped"]        = self._frames_cropped
+        s["frames_backscan"]       = self._frames_backscan
+        s["frames_crop_only"]      = self._frames_crop_only
+        s["roi"]                   = self._roi
+        s["frame_idx"]             = self._frame_idx
+        s["detections_per_frame"]  = list(self._detections_per_frame)
+        s["dicom_path"]            = self._dicom_path
+        s["pixel_spacing"]         = self._pixel_spacing
+        s["base_fps"]              = self._base_fps
+        s["original_sensitive"]    = list(self._original_sensitive)
+        s["kept_metadata"]         = list(self._kept_metadata)
+        s["measures"]              = [{"pts": list(seg["pts"])} for seg in self._measures]
+        s["measure_selected"]      = self._measure_selected
+        s["zoom"]                  = self._zoom
+        s["pan_x"]                 = self._pan_x
+        s["pan_y"]                 = self._pan_y
+        s["contrast"]              = self._contrast
+        s["brightness"]            = self._brightness
+        s["view_mode"]             = self._view_mode
+        s["crop_toggle_val"]       = self._crop_toggle.get()
+        s["prepus_bsc_val"]        = self._prepus_bsc.get()
+        s["speed_mult"]            = self._speed_mult
+        s["risk_text"]             = self._risk_lbl.cget("text")
+        s["risk_fg"]               = self._risk_lbl.cget("fg")
+        s["det_text"]              = self._det_lbl.cget("text")
+        s["det_fg"]                = self._det_lbl.cget("fg")
+        s["mode_text"]             = self._mode_lbl.cget("text")
+        s["mode_fg"]               = self._mode_lbl.cget("fg")
+        s["info_val"]              = self._info_var.get()
+        s["label_file_text"]       = self._label_file.cget("text")
+        s["label_file_fg"]         = self._label_file.cget("fg")
+        s["preprocess_text"]       = self._preprocess_status.cget("text")
+        s["preprocess_fg"]         = self._preprocess_status.cget("fg")
+
+    def _restore_tab_state(self, idx: int):
+        """Restaure l'état d'un onglet dans les variables d'instance et l'UI."""
+        s = self._tabs[idx]
+        self._frames_raw            = s.get("frames_raw")
+        self._frames_cropped        = s.get("frames_cropped")
+        self._frames_backscan       = s.get("frames_backscan")
+        self._frames_crop_only      = s.get("frames_crop_only")
+        self._roi                   = s.get("roi")
+        self._frame_idx             = s.get("frame_idx", 0)
+        self._detections_per_frame  = list(s.get("detections_per_frame", []))
+        self._dicom_path            = s.get("dicom_path")
+        self._pixel_spacing         = s.get("pixel_spacing")
+        self._base_fps              = s.get("base_fps", 22.0)
+        self._original_sensitive    = list(s.get("original_sensitive", []))
+        self._kept_metadata         = list(s.get("kept_metadata", []))
+        # Mesures : items canvas seront recréés par _redraw_measures / _refresh_canvas
+        self._measures              = [{"pts": list(seg["pts"]), "items": []}
+                                       for seg in s.get("measures", [])]
+        self._measure_drawing       = []
+        self._measure_preview_items = []
+        self._measure_selected      = s.get("measure_selected")
+        self._measure_edit          = None
+        self._zoom       = s.get("zoom",       1.0)
+        self._pan_x      = s.get("pan_x",      0.0)
+        self._pan_y      = s.get("pan_y",      0.0)
+        self._contrast   = s.get("contrast",   1.0)
+        self._brightness = s.get("brightness", 0.0)
+        self._view_mode  = s.get("view_mode",  "normal")
+        vm_cursor = {"pan": "fleur", "measure": "crosshair",
+                     "series": "sb_v_double_arrow"}.get(self._view_mode, "")
+        self._canvas.config(cursor=vm_cursor)
+        self._crop_toggle.set(s.get("crop_toggle_val", False))
+        self._prepus_bsc.set(s.get("prepus_bsc_val", True))
+        speed = s.get("speed_mult", 1.0)
+        self._speed_mult = speed
+        self._speed_var.set(speed)
+        self._play_fps   = self._base_fps * speed
+        self._speed_label.config(text=f"×{speed:.2f}")
+        if self._frames_raw is not None:
+            n = len(self._frames_raw)
+            self._frame_scale.configure(to=max(1, n - 1))
+            self._frame_scale.set(self._frame_idx)
+            self._frame_label.config(text=f"{self._frame_idx + 1} / {n}")
+        else:
+            self._frame_scale.configure(to=1)
+            self._frame_scale.set(0)
+            self._frame_label.config(text="— / —")
+        self._risk_lbl.config(text=s.get("risk_text", "—"),  fg=s.get("risk_fg",  SBAR_MUTED))
+        self._det_lbl .config(text=s.get("det_text",  "—"),  fg=s.get("det_fg",   SBAR_MUTED))
+        self._mode_lbl.config(text=s.get("mode_text", "—"),  fg=s.get("mode_fg",  SBAR_MUTED))
+        self._info_var.set(s.get("info_val", ""))
+        self._label_file.config(
+            text=s.get("label_file_text", "Aucun fichier sélectionné"),
+            fg=s.get("label_file_fg", SBAR_MUTED))
+        self._preprocess_status.config(
+            text=s.get("preprocess_text", ""),
+            fg=s.get("preprocess_fg", SBAR_MUTED))
+        det_idxs = [i for i, d in enumerate(self._detections_per_frame) if d]
+        self._populate_det_frames(det_idxs)
+        self._update_meta_widgets()
+
+    def _switch_tab(self, idx: int):
+        """Bascule vers l'onglet *idx* : sauvegarde l'état courant puis restaure."""
+        if not (0 <= idx < len(self._tabs)):
+            self._rebuild_tab_bar()
+            return
+        if idx == self._active_tab:
+            self._rebuild_tab_bar()
+            return
+        if self._playing:
+            self._toggle_play()
+        # Supprime les items canvas de mesure (seront recréés sur le nouvel onglet)
+        for seg in self._measures:
+            for item in seg["items"]:
+                self._canvas.delete(item)
+        for item in self._measure_preview_items:
+            self._canvas.delete(item)
+        self._save_tab_state()
+        self._active_tab = idx
+        self._restore_tab_state(idx)
+        self._rebuild_tab_bar()
+        self._refresh_canvas()
+
+    def _close_tab(self, idx: int):
+        """Ferme l'onglet *idx*."""
+        if not self._tabs:
+            return
+        if len(self._tabs) == 1:
+            # Dernier onglet : réinitialise tout
+            self._tabs.clear()
+            self._active_tab = -1
+            self._frames_raw = self._frames_cropped = None
+            self._frames_backscan = self._frames_crop_only = None
+            self._detections_per_frame = []
+            self._dicom_path = None
+            self._pixel_spacing = None
+            self._clear_measure()
+            self._zoom = 1.0; self._pan_x = 0.0; self._pan_y = 0.0
+            self._contrast = 1.0; self._brightness = 0.0
+            self._view_mode = "normal"; self._canvas.config(cursor="")
+            self._info_var.set("")
+            self._label_file.config(text="Aucun fichier sélectionné", fg=SBAR_MUTED)
+            self._risk_lbl.config(text="—", fg=SBAR_MUTED)
+            self._det_lbl .config(text="—", fg=SBAR_MUTED)
+            self._mode_lbl.config(text="—", fg=SBAR_MUTED)
+            self._preprocess_status.config(text="", fg=SBAR_MUTED)
+            self._populate_det_frames([])
+            self._update_meta_widgets()
+            self._rebuild_tab_bar()
+            self._canvas.delete("all")
+            self._canvas.create_text(
+                CANVAS_W // 2, CANVAS_H // 2,
+                text="Aucun DICOM chargé\n\nUtilisez  « Charger un fichier DICOM »  dans le panneau latéral",
+                fill="#2a2a3e", font=("Segoe UI", 12), justify="center")
+            return
+        was_active = (idx == self._active_tab)
+        self._tabs.pop(idx)
+        if was_active:
+            new_idx = max(0, idx - 1)
+            self._active_tab = new_idx
+            self._restore_tab_state(new_idx)
+            self._rebuild_tab_bar()
+            self._refresh_canvas()
+        else:
+            if self._active_tab > idx:
+                self._active_tab -= 1
+            self._rebuild_tab_bar()
+
+    def _rebuild_tab_bar(self):
+        """Redessine tous les boutons d'onglets."""
+        for w in self._tab_bar_inner.winfo_children():
+            w.destroy()
+        _TAB_BG     = "#0c1018"
+        _TAB_ACT_BG = "#131c2e"
+        for i, tab in enumerate(self._tabs):
+            is_active = (i == self._active_tab)
+            bg  = _TAB_ACT_BG if is_active else _TAB_BG
+            fg  = "#e5e7eb"   if is_active else "#6b7280"
+            frm = tk.Frame(self._tab_bar_inner, bg=bg, cursor="hand2")
+            frm.pack(side="left", padx=(0, 1), fill="y")
+            # Barre bleue en haut de l'onglet actif
+            tk.Frame(frm, bg=BLUE if is_active else _TAB_BG, height=2).pack(fill="x")
+            inner = tk.Frame(frm, bg=bg)
+            inner.pack(fill="both", expand=True)
+            lbl = tk.Label(inner, text=tab["label"],
+                           bg=bg, fg=fg, font=("Segoe UI", 8),
+                           padx=8, pady=3, cursor="hand2")
+            lbl.pack(side="left")
+            close_btn = tk.Button(
+                inner, text="×",
+                bg=bg, fg="#4b5563", relief="flat", bd=0, cursor="hand2",
+                font=("Segoe UI", 9), padx=3, pady=1,
+                activebackground="#3a0a0a", activeforeground="#f87171",
+                command=lambda ci=i: self._close_tab(ci))
+            close_btn.pack(side="left", pady=2)
+            for w in (frm, inner, lbl):
+                w.bind("<Button-1>", lambda e, ci=i: self._switch_tab(ci))
+        self._tab_bar_inner.update_idletasks()
+        self._tab_bar_scroll.config(scrollregion=self._tab_bar_scroll.bbox("all"))
 
     def _on_preprocess(self):
         """Lance le pré-traitement prepUS dans un thread (backscan selon checkbox)."""
@@ -1231,10 +1658,9 @@ class STARHEApp(tk.Tk):
         self._canvas.delete("all")
         self._canvas.create_image(0, 0, anchor="nw", image=photo)
 
-        # Redessine l'overlay de mesure par-dessus l'image
-        if self._view_mode == "measure" and len(self._measure_pts) == 2:
-            self._measure_items.clear()
-            self._draw_measure_overlay(self._measure_pts[0], self._measure_pts[1])
+        # Redessine les mesures par-dessus l'image
+        if self._view_mode == "measure":
+            self._redraw_measures()
 
     # ── Vitesse FPS ───────────────────────────────────────────────────────────
 
@@ -1278,8 +1704,27 @@ class STARHEApp(tk.Tk):
         if self._view_mode == "pan":
             self._drag_start = (event.x, event.y, self._pan_x, self._pan_y)
         elif self._view_mode == "measure":
-            self._clear_measure()
-            self._measure_pts = [(event.x, event.y)]
+            self._canvas.focus_set()
+            hit = self._measure_hit(event.x, event.y)
+            if hit is not None:
+                seg_idx, part = hit
+                self._measure_selected = seg_idx
+                self._measure_edit = {
+                    "seg_idx": seg_idx,
+                    "part": part,
+                    "start_x": event.x,
+                    "start_y": event.y,
+                    "orig_pts": list(self._measures[seg_idx]["pts"]),
+                }
+                self._measure_drawing = []
+                self._redraw_measures()
+            else:
+                self._measure_selected = None
+                self._measure_edit = None
+                self._measure_drawing = [(event.x, event.y)]
+                self._redraw_measures()
+        elif self._view_mode == "normal":
+            self._drag_start = (event.x, event.y, self._frame_idx)
 
     def _on_canvas_drag(self, event):
         if self._view_mode == "pan" and self._drag_start:
@@ -1288,17 +1733,75 @@ class STARHEApp(tk.Tk):
             self._pan_x = self._drag_start[2] + dx
             self._pan_y = self._drag_start[3] + dy
             self._refresh_canvas()
-        elif self._view_mode == "measure" and self._measure_pts:
-            # Redessine la ligne en temps réel sans rafraîchir tout le canvas
-            self._draw_measure_overlay(self._measure_pts[0], (event.x, event.y))
+        elif self._view_mode == "normal" and self._drag_start and self._frames_raw is not None:
+            # Glisser vertical → défilement de frames
+            dy = event.y - self._drag_start[1]
+            # 1 frame tous les 8 pixels de déplacement
+            step = int(dy / 8)
+            n = len(self._frames_raw)
+            new_idx = max(0, min(n - 1, self._drag_start[2] + step))
+            if new_idx != self._frame_idx:
+                self._frame_idx = new_idx
+                self._update_frame_label()
+                self._refresh_canvas()
+        elif self._view_mode == "measure":
+            if self._measure_edit is not None:
+                ed = self._measure_edit
+                seg = self._measures[ed["seg_idx"]]
+                dx = event.x - ed["start_x"]
+                dy = event.y - ed["start_y"]
+                ox1, oy1 = ed["orig_pts"][0]
+                ox2, oy2 = ed["orig_pts"][1]
+                if ed["part"] == "p1":
+                    seg["pts"] = [(ox1 + dx, oy1 + dy), (ox2, oy2)]
+                elif ed["part"] == "p2":
+                    seg["pts"] = [(ox1, oy1), (ox2 + dx, oy2 + dy)]
+                else:  # "seg" — déplace tout le segment
+                    seg["pts"] = [(ox1 + dx, oy1 + dy), (ox2 + dx, oy2 + dy)]
+                self._redraw_measures()
+            elif self._measure_drawing:
+                self._redraw_measures(
+                    preview=(self._measure_drawing[0], (event.x, event.y))
+                )
 
     def _on_canvas_release(self, event):
-        if self._view_mode == "pan":
+        if self._view_mode in ("pan", "normal"):
             self._drag_start = None
-        elif self._view_mode == "measure" and self._measure_pts:
-            p2 = (event.x, event.y)
-            self._measure_pts = [self._measure_pts[0], p2]
-            self._draw_measure_overlay(self._measure_pts[0], p2)
+        elif self._view_mode == "measure":
+            if self._measure_edit is not None:
+                self._measure_edit = None
+            elif self._measure_drawing:
+                p1 = self._measure_drawing[0]
+                p2 = (event.x, event.y)
+                if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > 5:
+                    self._measures.append({"pts": [p1, p2], "items": []})
+                self._measure_drawing = []
+                self._redraw_measures()
+
+    # ── Clic droit maintenu : contraste (X) / luminosité (Y) ─────────────────
+
+    def _on_rclick_press(self, event):
+        self._press_time = time.time()
+        self._press_pos  = (event.x, event.y)
+        self._drag_start = (event.x, event.y, self._contrast, self._brightness)
+
+    def _on_rclick_drag(self, event):
+        if not self._drag_start:
+            return
+        dx = event.x - self._drag_start[0]   # droite → contraste +
+        dy = event.y - self._drag_start[1]   # bas    → luminosité +
+        self._contrast   = max(0.1, min(3.0,   self._drag_start[2] + dx * 0.008))
+        self._brightness = max(-100, min(100,  self._drag_start[3] + dy * 0.5))
+        self._refresh_canvas()
+
+    def _on_rclick_release(self, event):
+        self._drag_start = None
+        # Clic bref sans déplacement → menu contextuel
+        dt = time.time() - self._press_time
+        dx = abs(event.x - self._press_pos[0])
+        dy = abs(event.y - self._press_pos[1])
+        if dt < 0.25 and dx < 5 and dy < 5:
+            self._show_context_menu(event)
 
     def _on_canvas_scroll(self, event):
         if self._view_mode == "pan":
@@ -1317,28 +1820,26 @@ class STARHEApp(tk.Tk):
 
     # ── Overlay de mesure ─────────────────────────────────────────────────────
 
-    def _draw_measure_overlay(self, p1: tuple, p2: tuple):
-        """Dessine la règle de mesure sur le canvas (coordonnées écran).
+    def _draw_measure_overlay(self, p1: tuple, p2: tuple,
+                               selected: bool = False,
+                               target: list | None = None):
+        """Dessine un segment de mesure sur le canvas (coordonnées écran).
 
         La distance est affichée en mm si le PixelSpacing DICOM est disponible,
         sinon en pixels. La conversion tient compte du zoom et du fit_scale
         courants pour passer des coordonnées écran aux coordonnées image réelles.
-        """
-        import math
-        # Supprime l'overlay précédent
-        for item in self._measure_items:
-            self._canvas.delete(item)
-        self._measure_items.clear()
 
+        Les IDs canvas créés sont ajoutés à *target* si fourni,
+        sinon à self._measure_preview_items (segment temporaire).
+        selected=True → couleur orange ; False → jaune.
+        """
         x1, y1 = p1;  x2, y2 = p2
-        # Distance en pixels-écran
         dist_screen = math.hypot(x2 - x1, y2 - y1)
         r    = 3
         mx, my = (x1 + x2) // 2, (y1 + y2) // 2
+        color = "#ff9900" if selected else "#ffff00"
 
         # ── Calcul distance réelle ──────────────────────────────────────────
-        # Le canvas affiche l'image avec fit_scale × zoom pixels-écran par pixel-image.
-        # On récupère les dimensions de l'image source pour calculer fit_scale.
         frames = (self._frames_cropped
                   if (self._crop_toggle.get() and self._frames_cropped is not None)
                   else self._frames_raw)
@@ -1364,25 +1865,91 @@ class STARHEApp(tk.Tk):
         else:
             dist_label = f"{dist_img_px:.1f} px (pas de calibration)"
 
-        line  = self._canvas.create_line(x1, y1, x2, y2,
-                                          fill="#ffff00", width=2, dash=(5, 3))
-        dot1  = self._canvas.create_oval(x1-r, y1-r, x1+r, y1+r,
-                                          fill="#ffff00", outline="")
-        dot2  = self._canvas.create_oval(x2-r, y2-r, x2+r, y2+r,
-                                          fill="#ffff00", outline="")
+        line   = self._canvas.create_line(x1, y1, x2, y2,
+                                           fill=color, width=2, dash=(5, 3))
+        dot1   = self._canvas.create_oval(x1-r, y1-r, x1+r, y1+r,
+                                           fill=color, outline="")
+        dot2   = self._canvas.create_oval(x2-r, y2-r, x2+r, y2+r,
+                                           fill=color, outline="")
         shadow = self._canvas.create_text(mx+1, my+1,
                                            text=dist_label,
                                            fill="#000000", font=FONT_SMALL)
         label  = self._canvas.create_text(mx, my,
                                            text=dist_label,
-                                           fill="#ffff00", font=FONT_SMALL)
-        self._measure_items = [line, dot1, dot2, shadow, label]
+                                           fill=color, font=FONT_SMALL)
+        items = [line, dot1, dot2, shadow, label]
+        if target is not None:
+            target.extend(items)
+        else:
+            self._measure_preview_items.extend(items)
 
     def _clear_measure(self):
-        for item in self._measure_items:
+        for seg in self._measures:
+            for item in seg["items"]:
+                self._canvas.delete(item)
+        self._measures.clear()
+        self._measure_drawing.clear()
+        for item in self._measure_preview_items:
             self._canvas.delete(item)
-        self._measure_items.clear()
-        self._measure_pts.clear()
+        self._measure_preview_items.clear()
+        self._measure_selected = None
+        self._measure_edit = None
+
+    def _redraw_measures(self, preview: tuple | None = None):
+        """Redessine tous les segments finalisés + éventuellement un segment en cours."""
+        # Supprime les items canvas de chaque segment puis les recrée
+        for i, seg in enumerate(self._measures):
+            for item in seg["items"]:
+                self._canvas.delete(item)
+            seg["items"].clear()
+            self._draw_measure_overlay(
+                seg["pts"][0], seg["pts"][1],
+                selected=(i == self._measure_selected),
+                target=seg["items"],
+            )
+        # Preview (segment en cours de dessin)
+        for item in self._measure_preview_items:
+            self._canvas.delete(item)
+        self._measure_preview_items.clear()
+        if preview is not None:
+            self._draw_measure_overlay(preview[0], preview[1],
+                                        selected=False, target=None)
+
+    # ── Hit-test mesures ──────────────────────────────────────────────────────
+
+    def _measure_hit(self, x: int, y: int) -> tuple | None:
+        """Renvoie (seg_idx, 'p1'|'p2'|'seg') pour le premier segment touché, ou None."""
+        ENDPOINT_R = 8
+        LINE_DIST  = 6
+        for i, seg in enumerate(self._measures):
+            (x1, y1), (x2, y2) = seg["pts"]
+            if math.hypot(x - x1, y - y1) <= ENDPOINT_R:
+                return (i, "p1")
+            if math.hypot(x - x2, y - y2) <= ENDPOINT_R:
+                return (i, "p2")
+            if self._dist_to_segment(x, y, x1, y1, x2, y2) <= LINE_DIST:
+                return (i, "seg")
+        return None
+
+    @staticmethod
+    def _dist_to_segment(px: float, py: float,
+                          x1: float, y1: float,
+                          x2: float, y2: float) -> float:
+        """Distance d'un point (px,py) au segment [(x1,y1)-(x2,y2)]."""
+        dx, dy = x2 - x1, y2 - y1
+        if dx == 0 and dy == 0:
+            return math.hypot(px - x1, py - y1)
+        t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)))
+        return math.hypot(px - (x1 + t * dx), py - (y1 + t * dy))
+
+    def _on_measure_delete(self, event=None):
+        """Supprime le segment de mesure sélectionné (touche Delete/BackSpace)."""
+        if self._view_mode != "measure" or self._measure_selected is None:
+            return
+        seg = self._measures.pop(self._measure_selected)
+        for item in seg["items"]:
+            self._canvas.delete(item)
+        self._measure_selected = None
 
     # ── Menu contextuel clic droit ────────────────────────────────────────────
 
@@ -1435,6 +2002,15 @@ class STARHEApp(tk.Tk):
         else:
             self._view_mode = "measure"
             self._canvas.config(cursor="crosshair")
+
+    def _toggle_cl_drag(self):
+        if self._view_mode == "cl_drag":
+            self._view_mode = "normal"
+            self._canvas.config(cursor="")
+        else:
+            self._view_mode = "cl_drag"
+            self._canvas.config(cursor="fleur")
+            self._drag_start = None
 
     def _toggle_series_scroll(self):
         if self._view_mode == "series":

@@ -7,6 +7,260 @@
 
 ## 🚀 Lancement de l'Interface
 
+```powershell
+# Depuis la racine du projet
+.\run_tkinter.ps1
+```
+
+La fenêtre s'ouvre avec la sidebar de contrôle à gauche et la zone de visualisation à droite.
+
+---
+
+## 📂 1. Charger un ou Plusieurs Fichiers DICOM
+
+1. Dans la sidebar, section **FICHIER DICOM**, cliquez sur **📂 Charger un fichier DICOM**.
+2. La boîte de dialogue permet de sélectionner **un ou plusieurs fichiers** simultanément (`Ctrl+clic` ou `Shift+clic`).
+3. Formats acceptés :
+   - Fichiers `.dcm` classiques
+   - **Fichiers sans extension** (ex. `A0000`, `IM-0001`) — utilisez le filtre **« Tous fichiers »**
+
+**À l'import, automatiquement :**
+- Les **métadonnées sensibles** sont supprimées des tags DICOM
+- Le **bandeau d'en-tête** de l'imageur est **noirci**
+- Le **pixel spacing** est extrait pour les mesures en millimètres
+- Un **onglet** est créé pour chaque fichier chargé, intitulé par la date du DICOM (`JJ/MM/AAAA`)
+
+---
+
+## 📄 2. Onglets Multi-Fichiers
+
+La **barre d'onglets** est située en bas de la visionneuse, comme un navigateur web.
+
+| Action | Résultat |
+|---|---|
+| Cliquer sur un onglet | Bascule vers ce fichier (la visionneuse, les résultats, les mesures et l'état de lecture sont préservés) |
+| Cliquer sur **×** d'un onglet | Ferme ce fichier (le dernier onglet réinitialise tout) |
+| Cliquer sur **+** (à droite) | Ouvre le sélect eur de fichiers pour ajouter d'autres DICOM |
+| Défilement horizontal molette | Défile si trop d'onglets |
+| `Ctrl+Tab` | Onglet suivant |
+| `Ctrl+Shift+Tab` | Onglet précédent |
+| `Ctrl+W` | Ferme l'onglet actif |
+
+**Label des onglets :** extrait du tag `StudyDate` DICOM (format `JJ/MM/AAAA`). Si absent, le nom du fichier est utilisé.
+
+---
+
+## ▶ 3. Navigation dans la Séquence
+
+### Boutons de navigation
+| Contrôle | Action |
+|---|---|
+| **◄** | Frame précédente |
+| **►** | Frame suivante |
+| Scrollbar horizontale | Glisser pour aller directement à une position |
+| **► Play** | Lance la lecture automatique |
+| **⏸ Pause** | Met la lecture en pause |
+| **⏮ Revenir au début** | Stoppe et revient au frame 0 |
+
+### Vitesse de lecture
+- Slider **×-vitesse** (0.25× à 3.0×) dans la sidebar
+- La vitesse de base est calibrée automatiquement depuis le tag `FrameTime` du DICOM
+- En dessous de ×1 : lecture ralentie ; au-dessus : frames sautées pour accélérer
+
+### Mode boucle
+- Cochez **Boucle** pour que la lecture recommence automatiquement à la fin de la séquence
+
+---
+
+## ⌨️ 4. Raccourcis Clavier
+
+> Les raccourcis sont désactivés lorsqu'un champ de saisie a le focus.
+
+### Navigation vidéo
+| Touche | Action |
+|---|---|
+| `Espace` | ► Play / ⏸ Pause |
+| `←` / `→` | Frame précédente / suivante |
+| `Shift+←` / `Shift+→` | −10 / +10 frames |
+| `Home` / `End` | Premier / Dernier frame |
+
+### Modes de vue
+| Touche | Action |
+|---|---|
+| `P` | Toggle **Pan/Zoom** |
+| `M` | Toggle **Mesure** |
+| `S` | Toggle **Défilement série** (molette = frames) |
+| `Échap` | Désélectionne la mesure active, sinon réinitialise la vue |
+| `R` | **Réinitialiser** la vue (zoom, pan, contraste, luminosité) |
+
+### Ajustements image
+| Touche | Action |
+|---|---|
+| `C` | Ouvrir dialog **Contraste** |
+| `L` | Ouvrir dialog **Luminosité** |
+| `+` ou `=` | Vitesse de lecture ×1.25 |
+| `-` | Vitesse de lecture ×0.80 |
+| `B` | Toggle **Boucle** |
+
+### Onglets
+| Touche | Action |
+|---|---|
+| `Ctrl+Tab` | Onglet suivant |
+| `Ctrl+Shift+Tab` | Onglet précédent |
+| `Ctrl+W` | Fermer l'onglet actif |
+
+---
+
+## 🔍 5. Pan & Zoom
+
+**Activation :** Clic droit → **Pan / Zoom** ou touche `P` (curseur devient une main)
+
+| Action | Résultat |
+|---|---|
+| **Clic-glisser** | Déplace l'image dans le canvas |
+| **Molette vers le haut** | Zoom avant (×1.15 par cran) |
+| **Molette vers le bas** | Zoom arrière (÷1.15 par cran) |
+
+Pour revenir à la vue initiale : touche `R` ou Clic droit → **Réinitialiser la vue**
+
+---
+
+## 📏 6. Outil de Mesure (Multi-Segments)
+
+**Activation :** Clic droit → **Outil de mesure** ou touche `M` (curseur devient une croix)
+
+### Dessiner un nouveau segment
+1. **Cliquez et maintenez** sur une zone vide du canvas
+2. **Glissez** jusqu'au point d'arrivée — une ligne jaune pointillée s'affiche en temps réel
+3. **Relâchez** — le segment est fixé, la distance s'affiche en jaune
+
+Plus ieurs mesures peuvent être tracées simultanément.
+
+### Sélectionner / Éditer / Supprimer
+| Action | Résultat |
+|---|---|
+| Cliquer **près d'un segment** | Le sélectionne (passe en orange) |
+| Cliquer-glisser **sur un endpoint** (extrémité) | Déplace uniquement cet endpoint |
+| Cliquer-glisser **au milieu d'un segment** | Déplace tout le segment |
+| `Delete` ou `BackSpace` | Supprime le segment sélectionné |
+| `Échap` | Désélectionne sans supprimer |
+
+**Affichage de la distance :**
+- Si le DICOM contient une calibration : **`X.X mm`**
+- Sinon : **`X.X px (pas de calibration)`**
+
+> La calibration est extraite depuis `PixelSpacing`, `ImagerPixelSpacing`, ou `SequenceOfUltrasoundRegions`.
+
+---
+
+## 📜 7. Défilement de Séries (Molette Frame-par-Frame)
+
+**Activation :** Clic droit → **Défilement de séries** ou touche `S`
+
+| Action | Résultat |
+|---|---|
+| **Molette vers le bas** | Frame suivant |
+| **Molette vers le haut** | Frame précédent |
+
+En mode **Normal** (sans mode spécial activé), glisser verticalement au bouton gauche permet aussi de défiler frame par frame (1 frame tous les 8 pixels de déplacement).
+
+---
+
+## 🎨 8. Réglages Contraste & Luminosité
+
+### Via le menu contextuel
+- Clic droit → **Contraste…** ou **Luminosité…** — ouvre une fenêtre flottante avec curseur
+- Bouton **Réinitialiser** pour revenir aux valeurs neutres (contraste 1.0, luminosité 0)
+
+### Via le clic droit maintenu
+- **Maintenir le clic droit + glisser** :
+  - Vers la droite/gauche : contraste + / −
+  - Vers le bas/haut : luminosité + / −
+- L'image se met à jour en temps réel
+
+### Via les raccourcis
+- Touche `C` : ouvre la fenêtre Contraste
+- Touche `L` : ouvre la fenêtre Luminosité
+
+---
+
+## 🔄 9. Réinitialiser la Vue
+
+Touche `R` ou Clic droit → **Réinitialiser la vue** : réinitialise en une action :
+- Zoom → 1.0 (fit automatique)
+- Pan → centré
+- Contraste → 1.0
+- Luminosité → 0
+- Mode → Normal
+- Mesures → effacées
+
+---
+
+## ⚙️ 10. Pré-Traitement
+
+1. Chargez d'abord un fichier DICOM
+2. Dans la section **PRÉ-TRAITEMENT**, configurez :
+   - ☑ **Backscan (512×512)** — cochée : affiche la reconstruction rectangulaire (recommandé pour l'IA)
+3. Cliquez sur **⚙ Pré-Traitement**
+4. Indicateur d'état :
+   - `⟳ Traitement en cours…` — en attente
+   - `✓ Terminé` — succès
+   - `✗ Erreur` — voir la console
+5. Cochez **Afficher résultat pré-traitement** pour basculer entre l'image originale et le résultat
+
+---
+
+## 🧠 11. Analyse IA
+
+1. Chargez un DICOM et lancez le pré-traitement (optionnel)
+2. Cliquez sur **🧠 Lancer l'analyse STARHE**
+3. Section **RÉSULTATS** :
+
+| Champ | Description |
+|---|---|
+| **Mode** | Surface analysée (Backscan 512×512 / Pré-traitement / Original) |
+| **Risque CHC** | Score 0–1 + label `Faible` (vert) ou `Élevé` (rouge) |
+| **Lésions** | Nb frames avec lésion(s) |
+
+**Frames avec tumeur** : liste des numéros 1-basés cliquables — cliquer navigue vers ce frame.
+
+**Cache automatique** : si le fichier a déjà été analysé, les résultats sont restaurés **instantanément** depuis MongoDB.
+
+**🗑 Réinitialiser l'analyse** : efface les résultats MongoDB pour ce fichier afin de forcer une nouvelle analyse.
+
+---
+
+## 💬 12. Console
+
+La **Console** en bas de la fenêtre affiche en temps réel :
+- Les étapes de chargement et d'anonymisation
+- La progression du pré-traitement
+- Les résultats de l'analyse IA
+- Les erreurs éventuelles (en rouge)
+
+Elle est en lecture seule.
+
+---
+
+## 🎗 13. Thème Clair / Sombre
+
+Le bouton **🌙 Thème sombre** en bas de la sidebar bascule entre thème clair et sombre.  
+La sidebar reste toujours sombre dans les deux modes.
+
+---
+
+## ⚠️ Notes Importantes
+
+- **Anonymisation** : chaque fichier chargé est anonymisé **en mémoire**. Le fichier original sur le disque **n'est pas modifié**.
+- **Plusieurs fichiers ouverts** : chaque onglet dispose de son propre état indépendant (lecture, zoom, mesures, résultats). Basculer d'onglet sauvegarde et restaure automatiquement tout l'état.
+- **Analyse en cours + changement d'onglet** : si une analyse IA ou un pré-traitement est en cours, ne pas changer d'onglet avant la fin pour éviter un mélange d'états.
+- **Calibration mm** : si `Pixel : N/A` s'affiche, la mesure sera affichée en pixels.
+- **Fichiers sans extension** : si votre fichier n'apparaît pas dans le sélecteur, changez le filtre sur **« Tous fichiers (*.*) »**.
+
+---
+
+*Pour toute question technique, consultez le [README.md](README.md) ou la [TODOLIST.md](TODOLIST.md).*
+
 Depuis la racine du projet, exécutez le script PowerShell :
 
 ```powershell
