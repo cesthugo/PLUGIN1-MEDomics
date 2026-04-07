@@ -14,7 +14,10 @@ BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "..", "..", ".."))
 
 # Dossier des fichiers DICOM (données locales de travail)
-DATA_DIR     = r"F:\STAGE\DATA"
+# Configurable via variable d'environnement STARHE_DATA_DIR ;
+# par défaut : dossier "data/" à la racine du projet.
+DATA_DIR     = os.environ.get("STARHE_DATA_DIR",
+                              os.path.join(PROJECT_ROOT, "data"))
 MODELS_DIR   = os.path.join(BASE_DIR, "models")
 TEMP_DIR     = os.path.join(BASE_DIR, "temp")
 
@@ -22,7 +25,7 @@ TEMP_DIR     = os.path.join(BASE_DIR, "temp")
 VENDOR_DIR   = os.path.join(BASE_DIR, "ai", "vendor")
 
 # Création automatique des dossiers s'ils n'existent pas
-for _d in (DATA_DIR, MODELS_DIR, TEMP_DIR):
+for _d in (MODELS_DIR, TEMP_DIR):
     os.makedirs(_d, exist_ok=True)
 
 # ── Modèles STARHE (artefacts locaux — autonomes, sans dépendance externe) ────

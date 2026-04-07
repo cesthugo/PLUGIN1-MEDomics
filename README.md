@@ -38,16 +38,20 @@ Deux modèles IA sont exploités :
 
 ### 1. Créer le venv Python 3.13
 
+> **Toutes les commandes ci-dessous supposent que vous êtes dans le dossier racine du projet** (`PLUGIN1-MEDomics/`).
+
 **Windows (PowerShell) :**
 ```powershell
-py -3.13 -m venv pythonCode\modules\starhe_plugin\.venv
-pythonCode\modules\starhe_plugin\.venv\Scripts\pip install -r pythonCode\modules\starhe_plugin\requirements.txt
+$PROJECT_ROOT = (Get-Location).Path
+py -3.13 -m venv "$PROJECT_ROOT\pythonCode\modules\starhe_plugin\.venv"
+& "$PROJECT_ROOT\pythonCode\modules\starhe_plugin\.venv\Scripts\pip" install -r "$PROJECT_ROOT\pythonCode\modules\starhe_plugin\requirements.txt"
 ```
 
 **macOS / Linux :**
 ```bash
-python3.13 -m venv pythonCode/modules/starhe_plugin/.venv
-pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/starhe_plugin/requirements.txt
+PROJECT_ROOT="$(pwd)"
+python3.13 -m venv "$PROJECT_ROOT/pythonCode/modules/starhe_plugin/.venv"
+"$PROJECT_ROOT/pythonCode/modules/starhe_plugin/.venv/bin/pip" install -r "$PROJECT_ROOT/pythonCode/modules/starhe_plugin/requirements.txt"
 ```
 
 > **macOS (Homebrew)** : Python 3.13 s'installe via `brew install python@3.13`. Homebrew **n'inclut pas tkinter par défaut** — il faut aussi lancer `brew install python-tk@3.13`, sinon l'UI Tkinter échouera avec `ModuleNotFoundError: No module named '_tkinter'`. Vérifier avec : `python3.13 -c "import tkinter"`.
@@ -56,12 +60,12 @@ pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/sta
 
 **Windows (PowerShell) :**
 ```powershell
-.\run_tkinter.ps1
+& "$PROJECT_ROOT\run_tkinter.ps1"
 ```
 
 **macOS / Linux :**
 ```bash
-./run_tkinter.sh
+"$PROJECT_ROOT/run_tkinter.sh"
 ```
 
 Le script `run_tkinter.sh` est **autonome** : il vérifie que Python 3.13 et tkinter sont présents sur le système, crée le venv et installe les dépendances si absent, installe prepUS, puis lance l'UI. Un nouvel utilisateur sur Mac n'a besoin que de deux prérequis système :
@@ -70,23 +74,21 @@ Le script `run_tkinter.sh` est **autonome** : il vérifie que Python 3.13 et tki
 # Prérequis une seule fois
 brew install python@3.13 python-tk@3.13
 # Puis lancer le prototype (tout le reste est automatique)
-./run_tkinter.sh
+"$PROJECT_ROOT/run_tkinter.sh"
 ```
-
-> **Important** : les commandes doivent être exécutées **depuis la racine du projet** (`PLUGIN1-MEDomics/`). Si vous êtes dans un sous-dossier (ex. `pythonCode/modules/`), les chemins relatifs seront faux et vous obtiendrez `zsh: no such file or directory`.
 
 <details>
 <summary>Commandes manuelles équivalentes (macOS / Linux)</summary>
 
 ```bash
-# Depuis la racine du projet
-PYTHON="$(pwd)/pythonCode/modules/starhe_plugin/.venv/bin/python"
-PREPUS="$(pwd)/third_party/prepUS"
+PROJECT_ROOT="$(pwd)"
+PYTHON="$PROJECT_ROOT/pythonCode/modules/starhe_plugin/.venv/bin/python"
+PREPUS="$PROJECT_ROOT/third_party/prepUS"
 "$PYTHON" -c "import prepUS" 2>/dev/null || {
     "$PYTHON" -m pip install sonocrop --no-deps -q
     "$PYTHON" -m pip install "$PREPUS" --no-deps -q
 }
-cd pythonCode/modules
+cd "$PROJECT_ROOT/pythonCode/modules"
 "$PYTHON" -m starhe_plugin.ui.prototype_tkinter
 ```
 
@@ -96,16 +98,16 @@ cd pythonCode/modules
 
 **Windows / macOS / Linux :**
 ```bash
-cd go_server
+cd "$PROJECT_ROOT/go_server"
 go run .
 # Écoute sur http://localhost:8080 (PORT modifiable via variable d'environnement)
 ```
 
 > Sur macOS, les chemins par défaut dans `go_server/config.go` pointent vers des chemins Windows (`F:\STAGE\...`). Il faut les surcharger via variables d'environnement :
 > ```bash
-> export STARHE_PYTHON_EXE="$(pwd)/pythonCode/modules/starhe_plugin/.venv/bin/python"
-> export STARHE_PYTHON_PATH="$(pwd)/pythonCode/modules"
-> cd go_server && go run .
+> export STARHE_PYTHON_EXE="$PROJECT_ROOT/pythonCode/modules/starhe_plugin/.venv/bin/python"
+> export STARHE_PYTHON_PATH="$PROJECT_ROOT/pythonCode/modules"
+> cd "$PROJECT_ROOT/go_server" && go run .
 > ```
 
 Variables d'environnement du serveur Go :

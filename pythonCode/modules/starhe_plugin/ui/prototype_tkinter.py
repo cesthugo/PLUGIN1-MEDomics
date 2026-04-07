@@ -122,6 +122,69 @@ def _draw_detections_on_array(frame: np.ndarray,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  Bouton cliquable cross-platform (macOS ignore bg/fg sur tk.Button)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _ClickableFrame(tk.Frame):
+    """tk.Frame qui proxy .config(text=…) et .config(state=…) vers son label."""
+
+    def __init__(self, parent, lbl: tk.Label, rest_bg: str, rest_fg: str,
+                 command=None, **kw):
+        super().__init__(parent, **kw)
+        self._lbl = lbl
+        self._rest_bg = rest_bg
+        self._rest_fg = rest_fg
+        self._command = command
+
+    # --- proxy config / configure ---
+    def config(self, **kw):
+        return self.configure(**kw)
+
+    def configure(self, **kw):
+        text  = kw.pop("text",  None)
+        state = kw.pop("state", None)
+        fg    = kw.pop("fg",    None)
+        if text is not None:
+            self._lbl.configure(text=text)
+        if fg is not None:
+            self._rest_fg = fg
+            self._lbl.configure(fg=fg)
+        if state == "disabled":
+            self._lbl.configure(fg="#555555")
+            for w in (self, self._lbl):
+                w.configure(cursor="")
+                w.unbind("<Button-1>")
+        elif state == "normal":
+            self._lbl.configure(fg=self._rest_fg)
+            cmd = self._command
+            for w in (self, self._lbl):
+                w.configure(cursor="hand2")
+                w.bind("<Button-1>", lambda e, c=cmd: c())
+        if kw:
+            super().configure(**kw)
+
+
+def _make_btn(parent, text, command, bg="#000000", fg="#ffffff",
+              font=None, padx=10, pady=6, anchor="w", width=None):
+    """Label cliquable avec hover — fonctionne sur macOS contrairement à tk.Button."""
+    frm = _ClickableFrame(parent, lbl=None, rest_bg=bg, rest_fg=fg,
+                           command=command, bg=bg, cursor="hand2")
+    kw = dict(text=text, bg=bg, fg=fg, font=font or FONT_BTN,
+              padx=padx, pady=pady, anchor=anchor, cursor="hand2")
+    if width is not None:
+        kw["width"] = width
+    lbl = tk.Label(frm, **kw)
+    frm._lbl = lbl
+    lbl.pack(fill="both", expand=True)
+    hover_bg = "#222222"
+    for w in (frm, lbl):
+        w.bind("<Button-1>", lambda e, c=command: c())
+        w.bind("<Enter>", lambda e, l=lbl, f=frm: (l.configure(bg=hover_bg), f.configure(bg=hover_bg)))
+        w.bind("<Leave>", lambda e, l=lbl, f=frm, b=bg: (l.configure(bg=b), f.configure(bg=b)))
+    return frm
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  Dialogue d'ajustement générique (contraste / luminosité)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -157,12 +220,10 @@ class _AdjustDialog(tk.Toplevel):
                   length=220).pack(padx=20, pady=(4, 6))
 
         _neutral = neutral
-        tk.Button(self, text="Réinitialiser",
-                  command=lambda n=_neutral: (
-                      self._var.set(n), _on_change(n)),
-                  bg=SIDEBAR_SEC, fg=SBAR_FG, relief="flat",
-                  font=FONT_SMALL, cursor="hand2",
-                  pady=4).pack(pady=(0, 12), padx=20, fill="x")
+        rst = _make_btn(self, "Réinitialiser",
+                        lambda n=_neutral: (self._var.set(n), _on_change(n)),
+                        bg="#000000", fg="#ffffff", font=FONT_SMALL, pady=4)
+        rst.pack(pady=(0, 12), padx=20, fill="x")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,7 +245,8 @@ class STARHEApp(tk.Tk):
         self._frames_crop_only: np.ndarray | None = None  # résultat crop-seulement prepUS
         self._roi             : tuple | None      = None
         self._frame_idx            : int               = 0
-        self._detections_per_frame : list[list[dict]]  = []
+        self._detections_by_mode   : dict[str, list[list[dict]]] = {}   # mode→per-frame dets
+        self._results_by_mode      : dict[str, dict]              = {}   # mode→{risk_text,risk_fg,det_text,det_fg}
         self._show_cropped         : bool              = False
         self._original_sensitive   : list              = []   # valeurs avant anonymisation
         self._kept_metadata        : list              = []   # métadonnées conservées
@@ -406,13 +468,9 @@ class STARHEApp(tk.Tk):
         sb_footer = tk.Frame(sb, bg="#0d0d1a", height=46)
         sb_footer.pack(side="bottom", fill="x")
         sb_footer.pack_propagate(False)
-        self._sb_theme_btn = tk.Button(
-            sb_footer, text="🌙   Thème sombre",
-            command=self._toggle_theme,
-            bg="#0d0d1a", fg=SBAR_MUTED,
-            relief="flat", bd=0,
-            activebackground=SIDEBAR_HOV, activeforeground=SBAR_FG,
-            font=FONT_SMALL, cursor="hand2", anchor="w", padx=14
+        self._sb_theme_btn = _make_btn(
+            sb_footer, "🌙   Thème sombre", self._toggle_theme,
+            bg="#000000", fg="#ffffff", font=FONT_SMALL, padx=14
         )
         self._sb_theme_btn.pack(fill="both", expand=True)
 
@@ -545,7 +603,7 @@ class STARHEApp(tk.Tk):
 
         self._crop_toggle = tk.BooleanVar(value=False)
         tk.Checkbutton(sc, text="Afficher résultat pré-traitement",
-                       variable=self._crop_toggle, command=self._refresh_canvas,
+                       variable=self._crop_toggle, command=self._on_crop_toggle,
                        bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
                        activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
                        cursor="hand2", font=FONT_SMALL).pack(anchor="w", padx=16)
@@ -556,11 +614,10 @@ class STARHEApp(tk.Tk):
                                         self._on_run_pipeline)
         self._btn_pipeline.pack(fill="x", padx=10, pady=(8, 4))
 
-        btn_reset = tk.Button(sc, text="🗑   Réinitialiser l'analyse",
-                              command=self._on_reset_analysis,
-                              bg="#5a1a1a", fg="white",
-                              activebackground="#7a2a2a", activeforeground="white",
-                              font=FONT_SMALL, relief="flat", cursor="hand2")
+        btn_reset = _make_btn(sc, "🗑   Réinitialiser l'analyse",
+                                    self._on_reset_analysis,
+                                    bg="#000000", fg="#ffffff",
+                                    font=FONT_SMALL)
         btn_reset.pack(fill="x", padx=10, pady=(0, 6))
 
         # ─── RÉSULTATS ───────────────────────────────────────────────────────
@@ -666,11 +723,12 @@ class STARHEApp(tk.Tk):
                                           highlightthickness=0, height=32)
         self._tab_bar_scroll.pack(side="left", fill="both", expand=True)
         # Bouton "+" pour ajouter d'autres fichiers
-        tk.Button(self._tab_bar_outer, text="  +  ", command=self._on_load_dicom,
-                  bg=_TAB_BG, fg="#4b5563", relief="flat", bd=0,
-                  activebackground="#151c2a", activeforeground="#9ca3af",
-                  font=("Segoe UI", 12, "bold"), cursor="hand2",
-                  padx=4).pack(side="right", padx=2)
+        _plus_btn = _make_btn(self._tab_bar_outer, "  +  ",
+                                    self._on_load_dicom,
+                                    bg="#000000", fg="#ffffff",
+                                    font=("Segoe UI", 12, "bold"),
+                                    padx=4, anchor="center")
+        _plus_btn.pack(side="right", padx=2)
         self._tab_bar_inner = tk.Frame(self._tab_bar_scroll, bg=_TAB_BG)
         self._tab_bar_scroll.create_window((0, 0), window=self._tab_bar_inner, anchor="nw")
         self._tab_bar_inner.bind("<Configure>", lambda e: self._tab_bar_scroll.config(
@@ -717,34 +775,23 @@ class STARHEApp(tk.Tk):
         )
         self._log_widget.pack(fill="x", padx=14, pady=(0, 10))
 
-    def _sbtn(self, parent, text: str, command) -> tk.Button:
-        """Bouton secondaire sidebar (fond SIDEBAR_SEC, texte clair)."""
-        return tk.Button(parent, text=text, command=command,
-                         bg=SIDEBAR_SEC, fg=SBAR_FG,
-                         relief="flat", bd=0,
-                         activebackground=SIDEBAR_HOV,
-                         activeforeground="#ffffff",
-                         font=FONT_BTN, padx=10, pady=6,
-                         cursor="hand2", anchor="w")
+    def _sbtn(self, parent, text: str, command) -> tk.Frame:
+        """Bouton secondaire sidebar (fond noir, texte blanc)."""
+        return _make_btn(parent, text, command,
+                         bg="#000000", fg="#ffffff", font=FONT_BTN)
 
-    def _sibtn(self, parent, text: str, command) -> tk.Button:
+    def _sibtn(self, parent, text: str, command) -> tk.Frame:
         """Petit bouton icône carré pour la navigation."""
-        return tk.Button(parent, text=text, command=command,
-                         bg=SIDEBAR_SEC, fg=SBAR_FG,
-                         relief="flat", bd=0,
-                         activebackground=BLUE, activeforeground="#ffffff",
-                         font=("Segoe UI", 10, "bold"), width=4, pady=4,
-                         cursor="hand2")
+        return _make_btn(parent, text, command,
+                         bg="#000000", fg="#ffffff",
+                         font=("Segoe UI", 10, "bold"),
+                         width=4, pady=4, anchor="center")
 
-    def _pbtn(self, parent, text: str, command) -> tk.Button:
-        """Bouton primaire bleu MEDomics (CTA équivalent de 'Set Workspace')."""
-        return tk.Button(parent, text=text, command=command,
-                         bg=BLUE, fg="#ffffff",
-                         relief="flat", bd=0,
-                         activebackground=BLUE_HOV,
-                         activeforeground="#ffffff",
-                         font=FONT_BTN_P, padx=10, pady=8,
-                         cursor="hand2", anchor="w")
+    def _pbtn(self, parent, text: str, command) -> tk.Frame:
+        """Bouton primaire (fond noir, texte blanc)."""
+        return _make_btn(parent, text, command,
+                         bg="#000000", fg="#ffffff",
+                         font=FONT_BTN_P, pady=8)
 
     # ── Thème clair / sombre ──────────────────────────────────────────────────
 
@@ -783,6 +830,44 @@ class STARHEApp(tk.Tk):
             else:
                 self._mode_badge.configure(bg="#dbeafe", fg="#1d4ed8")
 
+    # ── Mode d'affichage courant (pour associer les détections au bon mode) ───
+
+    def _current_display_mode(self) -> str:
+        """Retourne le mode d'affichage actif : 'backscan', 'crop' ou 'original'."""
+        if self._crop_toggle.get() and self._frames_cropped is not None:
+            return "backscan" if self._prepus_bsc.get() else "crop"
+        return "original"
+
+    def _active_detections(self) -> list[list[dict]]:
+        """Retourne les détections correspondant au mode d'affichage courant."""
+        return self._detections_by_mode.get(self._current_display_mode(), [])
+
+    _MODE_LABELS = {"backscan": "Backscan 512×512", "crop": "Pré-traitement (crop)", "original": "Original"}
+
+    def _refresh_results_panel(self):
+        """Met à jour la section Résultats selon le mode d'affichage courant."""
+        mode = self._current_display_mode()
+        res = self._results_by_mode.get(mode)
+        if res:
+            self._mode_lbl.config(text=self._MODE_LABELS.get(mode, mode), fg="#93c5fd")
+            self._risk_lbl.config(text=res["risk_text"], fg=res["risk_fg"])
+            self._det_lbl .config(text=res["det_text"],  fg=res["det_fg"])
+        else:
+            self._mode_lbl.config(text=self._MODE_LABELS.get(mode, mode), fg=SBAR_MUTED)
+            self._risk_lbl.config(text="—", fg=SBAR_MUTED)
+            self._det_lbl .config(text="—", fg=SBAR_MUTED)
+        # Met à jour la liste des frames avec tumeur
+        _dets = self._active_detections()
+        det_idxs = [i for i, d in enumerate(_dets) if d]
+        self._populate_det_frames(det_idxs)
+
+    # ── Bascule cropped / original ───────────────────────────────────────────
+
+    def _on_crop_toggle(self):
+        """Bascule la vue cropped/original et met à jour les résultats affichés."""
+        self._refresh_results_panel()
+        self._refresh_canvas()
+
     # ── Bascule backscan / crop-seulement ─────────────────────────────────────
 
     def _on_bsc_toggle(self):
@@ -801,6 +886,8 @@ class STARHEApp(tk.Tk):
                       level="warning")
             return
         self._crop_toggle.set(True)
+        # Rafraîchir le panneau Résultats pour le nouveau mode
+        self._refresh_results_panel()
         self._refresh_canvas()
 
     # ── Scale de navigation ───────────────────────────────────────────────────
@@ -863,11 +950,19 @@ class STARHEApp(tk.Tk):
 
     def _on_load_dicom(self):
         """Ouvre un ou plusieurs fichiers DICOM et crée un onglet pour chacun."""
-        paths = filedialog.askopenfilenames(
+        import platform
+        kwargs = dict(
             title="Sélectionner un ou plusieurs fichiers DICOM",
             initialdir=DATA_DIR,
-            filetypes=[("Fichiers DICOM", "*.dcm *"), ("Tous fichiers", "*.*")]
         )
+        # Sur macOS, le dialogue natif (NSOpenPanel) filtre par UTI et masque
+        # les fichiers sans extension (A0000, IM-0001…). On désactive le filtre.
+        if platform.system() != "Darwin":
+            kwargs["filetypes"] = [
+                ("Fichiers DICOM", "*.dcm"),
+                ("Tous fichiers", "*"),
+            ]
+        paths = filedialog.askopenfilenames(**kwargs)
         if not paths:
             return
         self._save_tab_state()
@@ -926,7 +1021,8 @@ class STARHEApp(tk.Tk):
             self._frames_crop_only = None
             self._roi              = None
             self._frame_idx             = 0
-            self._detections_per_frame  = []
+            self._detections_by_mode    = {}
+            self._results_by_mode       = {}
             self._dicom_path            = path
             self._crop_toggle.set(False)
             # Vide le widget frames avec tumeur
@@ -1056,7 +1152,8 @@ class STARHEApp(tk.Tk):
             "frames_crop_only":     self._frames_crop_only,
             "roi":                  self._roi,
             "frame_idx":            self._frame_idx,
-            "detections_per_frame": list(self._detections_per_frame),
+            "detections_by_mode":   {k: list(v) for k, v in self._detections_by_mode.items()},
+            "results_by_mode":     dict(self._results_by_mode),
             "dicom_path":           self._dicom_path,
             "pixel_spacing":        self._pixel_spacing,
             "base_fps":             self._base_fps,
@@ -1073,12 +1170,6 @@ class STARHEApp(tk.Tk):
             "crop_toggle_val":      self._crop_toggle.get(),
             "prepus_bsc_val":       self._prepus_bsc.get(),
             "speed_mult":           self._speed_mult,
-            "risk_text":            self._risk_lbl.cget("text"),
-            "risk_fg":              self._risk_lbl.cget("fg"),
-            "det_text":             self._det_lbl.cget("text"),
-            "det_fg":               self._det_lbl.cget("fg"),
-            "mode_text":            self._mode_lbl.cget("text"),
-            "mode_fg":              self._mode_lbl.cget("fg"),
             "info_val":             self._info_var.get(),
             "label_file_text":      self._label_file.cget("text"),
             "label_file_fg":        self._label_file.cget("fg"),
@@ -1097,7 +1188,8 @@ class STARHEApp(tk.Tk):
         s["frames_crop_only"]      = self._frames_crop_only
         s["roi"]                   = self._roi
         s["frame_idx"]             = self._frame_idx
-        s["detections_per_frame"]  = list(self._detections_per_frame)
+        s["detections_by_mode"]    = {k: list(v) for k, v in self._detections_by_mode.items()}
+        s["results_by_mode"]       = dict(self._results_by_mode)
         s["dicom_path"]            = self._dicom_path
         s["pixel_spacing"]         = self._pixel_spacing
         s["base_fps"]              = self._base_fps
@@ -1114,12 +1206,6 @@ class STARHEApp(tk.Tk):
         s["crop_toggle_val"]       = self._crop_toggle.get()
         s["prepus_bsc_val"]        = self._prepus_bsc.get()
         s["speed_mult"]            = self._speed_mult
-        s["risk_text"]             = self._risk_lbl.cget("text")
-        s["risk_fg"]               = self._risk_lbl.cget("fg")
-        s["det_text"]              = self._det_lbl.cget("text")
-        s["det_fg"]                = self._det_lbl.cget("fg")
-        s["mode_text"]             = self._mode_lbl.cget("text")
-        s["mode_fg"]               = self._mode_lbl.cget("fg")
         s["info_val"]              = self._info_var.get()
         s["label_file_text"]       = self._label_file.cget("text")
         s["label_file_fg"]         = self._label_file.cget("fg")
@@ -1135,7 +1221,8 @@ class STARHEApp(tk.Tk):
         self._frames_crop_only      = s.get("frames_crop_only")
         self._roi                   = s.get("roi")
         self._frame_idx             = s.get("frame_idx", 0)
-        self._detections_per_frame  = list(s.get("detections_per_frame", []))
+        self._detections_by_mode    = {k: list(v) for k, v in s.get("detections_by_mode", {}).items()}
+        self._results_by_mode       = dict(s.get("results_by_mode", {}))
         self._dicom_path            = s.get("dicom_path")
         self._pixel_spacing         = s.get("pixel_spacing")
         self._base_fps              = s.get("base_fps", 22.0)
@@ -1173,9 +1260,7 @@ class STARHEApp(tk.Tk):
             self._frame_scale.configure(to=1)
             self._frame_scale.set(0)
             self._frame_label.config(text="— / —")
-        self._risk_lbl.config(text=s.get("risk_text", "—"),  fg=s.get("risk_fg",  SBAR_MUTED))
-        self._det_lbl .config(text=s.get("det_text",  "—"),  fg=s.get("det_fg",   SBAR_MUTED))
-        self._mode_lbl.config(text=s.get("mode_text", "—"),  fg=s.get("mode_fg",  SBAR_MUTED))
+        self._refresh_results_panel()
         self._info_var.set(s.get("info_val", ""))
         self._label_file.config(
             text=s.get("label_file_text", "Aucun fichier sélectionné"),
@@ -1183,7 +1268,8 @@ class STARHEApp(tk.Tk):
         self._preprocess_status.config(
             text=s.get("preprocess_text", ""),
             fg=s.get("preprocess_fg", SBAR_MUTED))
-        det_idxs = [i for i, d in enumerate(self._detections_per_frame) if d]
+        _active_dets = self._active_detections()
+        det_idxs = [i for i, d in enumerate(_active_dets) if d]
         self._populate_det_frames(det_idxs)
         self._update_meta_widgets()
 
@@ -1219,7 +1305,8 @@ class STARHEApp(tk.Tk):
             self._active_tab = -1
             self._frames_raw = self._frames_cropped = None
             self._frames_backscan = self._frames_crop_only = None
-            self._detections_per_frame = []
+            self._detections_by_mode = {}
+            self._results_by_mode = {}
             self._dicom_path = None
             self._pixel_spacing = None
             self._clear_measure()
@@ -1274,13 +1361,14 @@ class STARHEApp(tk.Tk):
                            bg=bg, fg=fg, font=("Segoe UI", 8),
                            padx=8, pady=3, cursor="hand2")
             lbl.pack(side="left")
-            close_btn = tk.Button(
+            close_lbl = tk.Label(
                 inner, text="×",
-                bg=bg, fg="#4b5563", relief="flat", bd=0, cursor="hand2",
-                font=("Segoe UI", 9), padx=3, pady=1,
-                activebackground="#3a0a0a", activeforeground="#f87171",
-                command=lambda ci=i: self._close_tab(ci))
-            close_btn.pack(side="left", pady=2)
+                bg="#000000", fg="#ffffff", cursor="hand2",
+                font=("Segoe UI", 9), padx=3, pady=1)
+            close_lbl.pack(side="left", pady=2)
+            close_lbl.bind("<Button-1>", lambda e, ci=i: self._close_tab(ci))
+            close_lbl.bind("<Enter>", lambda e, l=close_lbl: l.configure(fg="#ff4444"))
+            close_lbl.bind("<Leave>", lambda e, l=close_lbl: l.configure(fg="#ffffff"))
             for w in (frm, inner, lbl):
                 w.bind("<Button-1>", lambda e, ci=i: self._switch_tab(ci))
         self._tab_bar_inner.update_idletasks()
@@ -1413,7 +1501,7 @@ class STARHEApp(tk.Tk):
             if self._dicom_path:
                 try:
                     from starhe_plugin.db.mongo_client import find_by_file, save_result
-                    cached = find_by_file(self._dicom_path)
+                    cached = find_by_file(self._dicom_path, analysis_mode=_analysis_mode)
                     if cached:
                         cached_mode = cached.get("analysis_mode", "original")
                         cached_mode_label = _mode_labels.get(cached_mode, cached_mode)
@@ -1421,8 +1509,6 @@ class STARHEApp(tk.Tk):
                             f"  → Résultat en cache (MongoDB, mode={cached_mode_label}, {cached['processed_at'][:10]}).",
                             level="success"
                         )
-                        self.after(0, lambda ml=cached_mode_label:
-                                   self._mode_lbl.config(text=ml, fg="#93c5fd"))
                         # Restaure les résultats depuis le cache
                         per_frame    = cached.get("detections_per_frame", [[] for _ in range(n)])
                         risk_cached  = cached.get("risk", {})
@@ -1431,17 +1517,16 @@ class STARHEApp(tk.Tk):
                         risk_fg = RISK_HIGH_FG if any(
                             w in label.lower() for w in ("élevé", "high")
                         ) else RISK_LOW_FG
-                        self.after(0, lambda l=label, s=score, c=risk_fg:
-                                   self._risk_lbl.config(text=f"{l}  ({s:.1%})", fg=c))
                         n_frames_with_det = sum(1 for d in per_frame if d)
                         det_fg = WARN_FG if n_frames_with_det > 0 else SUCCESS_FG
-                        self.after(0, lambda nf=n_frames_with_det, c=det_fg:
-                                   self._det_lbl.config(
-                                       text=f"{nf}/{n} frames avec lésion(s)", fg=c))
-                        self._detections_per_frame = per_frame
-                        detected_indices = [i for i, d in enumerate(per_frame) if d]
-                        self.after(0, lambda idxs=detected_indices:
-                                   self._populate_det_frames(idxs))
+                        self._detections_by_mode[cached_mode] = per_frame
+                        self._results_by_mode[cached_mode] = {
+                            "risk_text": f"{label}  ({score:.1%})",
+                            "risk_fg":   risk_fg,
+                            "det_text":  f"{n_frames_with_det}/{n} frames avec lésion(s)",
+                            "det_fg":    det_fg,
+                        }
+                        self.after(0, self._refresh_results_panel)
                         self.after(0, self._refresh_canvas)
                         return
                 except Exception as exc:
@@ -1457,8 +1542,9 @@ class STARHEApp(tk.Tk):
             risk_fg = RISK_HIGH_FG if any(
                 w in label.lower() for w in ("élevé", "high")
             ) else RISK_LOW_FG
-            self.after(0, lambda l=label, s=score, c=risk_fg:
-                       self._risk_lbl.config(text=f"{l}  ({s:.1%})", fg=c))
+            _risk_text = f"{label}  ({score:.1%})"
+            self.after(0, lambda rt=_risk_text, c=risk_fg:
+                       self._risk_lbl.config(text=rt, fg=c))
             self._log(f"  → RISK : {label} | score={score:.3f}", level="success")
 
             # STARHE-DETECT — inférence par lots (batch inference)
@@ -1489,7 +1575,7 @@ class STARHEApp(tk.Tk):
                     # Mise à jour progressive de l'UI tous les batches
                     frames_done = min(batch_start + batch_size, n_sampled)
                     n_det = sum(1 for d in per_frame if d)
-                    self._detections_per_frame = list(per_frame)
+                    self._detections_by_mode[_analysis_mode] = list(per_frame)
                     self.after(0, lambda fd=frames_done, nd=n_det:
                                self._det_lbl.config(
                                    text=f"Analyse… {fd}/{n_sampled} lots  ({nd} frames)",
@@ -1497,12 +1583,17 @@ class STARHEApp(tk.Tk):
                     self.after(0, self._refresh_canvas)
 
             # Résultat final
-            self._detections_per_frame = per_frame
+            self._detections_by_mode[_analysis_mode] = per_frame
             n_frames_with_det = sum(1 for d in per_frame if d)
             det_fg = WARN_FG if n_frames_with_det > 0 else SUCCESS_FG
-            self.after(0, lambda nf=n_frames_with_det, c=det_fg:
-                       self._det_lbl.config(
-                           text=f"{nf}/{n} frames avec lésion(s)", fg=c))
+            _det_text = f"{n_frames_with_det}/{n} frames avec lésion(s)"
+            self._results_by_mode[_analysis_mode] = {
+                "risk_text": _risk_text,
+                "risk_fg":   risk_fg,
+                "det_text":  _det_text,
+                "det_fg":    det_fg,
+            }
+            self.after(0, self._refresh_results_panel)
             self._log(
                 f"  → DETECT terminé : {n_frames_with_det}/{n} frames avec lésion(s).",
                 level="success"
@@ -1515,10 +1606,6 @@ class STARHEApp(tk.Tk):
 
             if n_frames_with_det > 0 and self._frames_cropped is not None:
                 self.after(0, lambda: self._crop_toggle.set(True))
-
-            mode_label_str = _mode_labels.get(_analysis_mode, _analysis_mode)
-            self.after(0, lambda ml=mode_label_str:
-                       self._mode_lbl.config(text=ml, fg="#93c5fd"))
 
             self.after(0, self._refresh_canvas)
 
@@ -1590,9 +1677,10 @@ class STARHEApp(tk.Tk):
         idx    = min(self._frame_idx, len(frames) - 1)
         frame  = frames[idx].copy()
 
-        # Superpose les détections du frame courant
-        if self._detections_per_frame and idx < len(self._detections_per_frame):
-            frame_dets = self._detections_per_frame[idx]
+        # Superpose les détections du frame courant (uniquement pour le mode analysé)
+        _dets_for_mode = self._active_detections()
+        if _dets_for_mode and idx < len(_dets_for_mode):
+            frame_dets = _dets_for_mode[idx]
             if frame_dets:
                 frame = _draw_detections_on_array(frame, frame_dets)
 

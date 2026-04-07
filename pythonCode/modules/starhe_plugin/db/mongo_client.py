@@ -64,19 +64,24 @@ def save_result(file_path: str,
         "anon_mode"            : anon_mode,
         "analysis_mode"        : analysis_mode,
     }
-    result = col.replace_one({"file_path": file_path}, doc, upsert=True)
+    result = col.replace_one(
+        {"file_path": file_path, "analysis_mode": analysis_mode},
+        doc, upsert=True)
     doc_id = str(result.upserted_id) if result.upserted_id else "(updated)"
     go_print("info", f"mongo_client : résultat sauvegardé (_id={doc_id}).")
     return doc_id
 
 
-def find_by_file(file_path: str) -> dict | None:
+def find_by_file(file_path: str, analysis_mode: str | None = None) -> dict | None:
     """
-    Retourne le document de résultat associé à ce fichier DICOM, ou None.
-    Utilisé pour éviter de relancer l'analyse si elle a déjà été effectuée.
+    Retourne le document de résultat associé à ce fichier DICOM et mode, ou None.
+    Si analysis_mode est None, retourne le premier résultat trouvé.
     """
     col = _get_collection()
-    doc = col.find_one({"file_path": file_path})
+    query = {"file_path": file_path}
+    if analysis_mode is not None:
+        query["analysis_mode"] = analysis_mode
+    doc = col.find_one(query)
     if doc:
         doc["_id"] = str(doc["_id"])
     return doc

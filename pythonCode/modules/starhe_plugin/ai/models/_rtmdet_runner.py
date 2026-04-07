@@ -35,10 +35,15 @@ if "mmcv._ext" not in sys.modules:
 try:
     import tqdm  # noqa: F401
 except ImportError:
+    import importlib.machinery as _im
     _m = types.ModuleType("tqdm")
     _m.tqdm = lambda it=None, *a, **kw: (it if it is not None else iter([]))
+    _m.__spec__ = _im.ModuleSpec("tqdm", None)
+    _m_auto = types.ModuleType("tqdm.auto")
+    _m_auto.tqdm = _m.tqdm
+    _m_auto.__spec__ = _im.ModuleSpec("tqdm.auto", None)
     sys.modules.setdefault("tqdm", _m)
-    sys.modules.setdefault("tqdm.auto", _m)
+    sys.modules.setdefault("tqdm.auto", _m_auto)
 
 # ─── 3. Patch inspect.getmodule (Python 3.13 / mmengine compat) ──────────────
 import inspect as _inspect
