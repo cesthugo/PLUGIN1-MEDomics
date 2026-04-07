@@ -1,6 +1,6 @@
 # 📋 TODOLIST — Plug-in STARHE / MEDomics
 > Carnet de bord opérationnel du projet.  
-> Dernière mise à jour : **1er avril 2026**
+> Dernière mise à jour : **7 avril 2026**
 
 ---
 
@@ -74,6 +74,13 @@
 - [x] **Raccourcis clavier** (18 bindings) — Espace (lecture), ←/→ (±1 frame), Shift+←/→ (±10 frames), Home/End, P/M/S (modes), Échap (déselect/reset), R (réinitialiser vue), C/L (contraste/luminosité), +/- (vitesse), B (boucle), Ctrl+Tab / Ctrl+Shift+Tab (onglets), Ctrl+W (fermer onglet)
 - [x] **Système d'onglets multi-fichiers** — `askopenfilenames` pour charger N fichiers en une sélection, barre d'onglets en bas de la visionneuse, label = `StudyDate` formatée JJ/MM/AAAA (fallback : nom de fichier), sauvegarde/restauration complète de l'état par onglet (frames, zoom, mesures, contraste…), fermeture individuelle (×), navigation Ctrl+Tab
 - [x] **Bug `delete_result()` MongoDB** corrigé — filtre par champ string `file_path` au lieu d'ObjectId
+
+### 🔧 Séparation par mode d'affichage (7 avril)
+- [x] **Bounding boxes par mode** — `_detections_by_mode` (dict : `"backscan"` / `"crop"` / `"original"` → `list[list[dict]]`). Quand l'utilisateur bascule entre modes, seules les détections du mode actif sont dessinées sur le canvas
+- [x] **Panneau Résultats par mode** — `_results_by_mode` (dict → textes risque/détection par mode), méthode `_refresh_results_panel()` met à jour les labels Mode, Risque CHC, et Lésions selon le mode courant
+- [x] **Cache MongoDB par mode** — Clé composite `(file_path, analysis_mode)` au lieu de `file_path` seul ; `find_by_file(path, analysis_mode=...)` filtre par mode ; un fichier peut avoir des résultats distincts par mode
+- [x] **Sauvegarde/restauration onglets** — `_capture_tab_state()` / `_restore_tab_state()` intègrent `detections_by_mode` et `results_by_mode`
+- [x] **Compatibilité macOS sélecteur fichiers** — Suppression du filtre `filetypes` sur Darwin (fichiers DICOM sans extension invisibles sinon)
 
 ### 🔗 Go Server
 - [x] **`go_server/main.go`** — Endpoints : GET /health, POST /starhe/analyze (SSE), GET/DELETE /starhe/results
@@ -151,9 +158,9 @@
 > 5. Fallback automatique vers one-shot si erreur
 
 ### 🗄 Cache MongoDB
-> 1. Au lancement de l'analyse : `find_by_file(path)` — si résultat trouvé, restitution immédiate
-> 2. Après analyse : `save_result(file_path, ..., detections_per_frame=per_frame)` avec upsert
-> 3. Clé de cache = chemin absolu du fichier `.dcm` (sensible au déplacement/renommage)
+> 1. Au lancement de l'analyse : `find_by_file(path, analysis_mode)` — si résultat trouvé pour ce mode, restitution immédiate
+> 2. Après analyse : `save_result(file_path, ..., detections_per_frame=per_frame, analysis_mode=mode)` avec upsert
+> 3. Clé de cache = couple `(file_path, analysis_mode)` — un même fichier peut avoir des résultats distincts pour chaque mode (original, crop, backscan)
 
 ### 🔗 Communication Go ↔ Python
 > Lancer Python en subprocess depuis Go : `os/exec.Command("python", "-m", "starhe_plugin.pipeline", args...)`

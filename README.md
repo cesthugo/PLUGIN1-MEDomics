@@ -3,7 +3,7 @@
 > **STARHE** = STratification du risque et détection du carcinome **H**épatocellulaire par **E**chographie.  
 > Extension Python/Go de la plateforme [MEDomics](https://medomicslab.gitbook.io/medomics-docs).
 
-*Version `0.1.0` — Dernière mise à jour : 1er avril 2026*
+*Version `0.1.0` — Dernière mise à jour : 7 avril 2026*
 
 ---
 
@@ -42,30 +42,30 @@ Deux modèles IA sont exploités :
 
 **Windows (PowerShell) :**
 ```powershell
-$PROJECT_ROOT = (Get-Location).Path
-py -3.13 -m venv "$PROJECT_ROOT\pythonCode\modules\starhe_plugin\.venv"
-& "$PROJECT_ROOT\pythonCode\modules\starhe_plugin\.venv\Scripts\pip" install -r "$PROJECT_ROOT\pythonCode\modules\starhe_plugin\requirements.txt"
+py -3.13 -m venv pythonCode\modules\starhe_plugin\.venv
+pythonCode\modules\starhe_plugin\.venv\Scripts\pip install -r pythonCode\modules\starhe_plugin\requirements.txt
 ```
 
 **macOS / Linux :**
 ```bash
-PROJECT_ROOT="$(pwd)"
-python3.13 -m venv "$PROJECT_ROOT/pythonCode/modules/starhe_plugin/.venv"
-"$PROJECT_ROOT/pythonCode/modules/starhe_plugin/.venv/bin/pip" install -r "$PROJECT_ROOT/pythonCode/modules/starhe_plugin/requirements.txt"
+python3.13 -m venv pythonCode/modules/starhe_plugin/.venv
+pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/starhe_plugin/requirements.txt
 ```
 
 > **macOS (Homebrew)** : Python 3.13 s'installe via `brew install python@3.13`. Homebrew **n'inclut pas tkinter par défaut** — il faut aussi lancer `brew install python-tk@3.13`, sinon l'UI Tkinter échouera avec `ModuleNotFoundError: No module named '_tkinter'`. Vérifier avec : `python3.13 -c "import tkinter"`.
 
 ### 2. Lancer le prototype Tkinter (développement)
 
+> Se placer à la racine du projet (`PLUGIN1-MEDomics/`).
+
 **Windows (PowerShell) :**
 ```powershell
-& "$PROJECT_ROOT\run_tkinter.ps1"
+.\run_tkinter.ps1
 ```
 
 **macOS / Linux :**
 ```bash
-"$PROJECT_ROOT/run_tkinter.sh"
+./run_tkinter.sh
 ```
 
 Le script `run_tkinter.sh` est **autonome** : il vérifie que Python 3.13 et tkinter sont présents sur le système, crée le venv et installe les dépendances si absent, installe prepUS, puis lance l'UI. Un nouvel utilisateur sur Mac n'a besoin que de deux prérequis système :
@@ -73,42 +73,40 @@ Le script `run_tkinter.sh` est **autonome** : il vérifie que Python 3.13 et tki
 ```bash
 # Prérequis une seule fois
 brew install python@3.13 python-tk@3.13
-# Puis lancer le prototype (tout le reste est automatique)
-"$PROJECT_ROOT/run_tkinter.sh"
+# Puis lancer le prototype depuis la racine du projet (tout le reste est automatique)
+./run_tkinter.sh
 ```
 
 <details>
 <summary>Commandes manuelles équivalentes (macOS / Linux)</summary>
 
+> Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
+
 ```bash
-PROJECT_ROOT="$(pwd)"
-PYTHON="$PROJECT_ROOT/pythonCode/modules/starhe_plugin/.venv/bin/python"
-PREPUS="$PROJECT_ROOT/third_party/prepUS"
+PYTHON=pythonCode/modules/starhe_plugin/.venv/bin/python
+PREPUS=third_party/prepUS
 "$PYTHON" -c "import prepUS" 2>/dev/null || {
     "$PYTHON" -m pip install sonocrop --no-deps -q
     "$PYTHON" -m pip install "$PREPUS" --no-deps -q
 }
-cd "$PROJECT_ROOT/pythonCode/modules"
-"$PYTHON" -m starhe_plugin.ui.prototype_tkinter
+cd pythonCode/modules
+../../"$PYTHON" -m starhe_plugin.ui.prototype_tkinter
 ```
 
 </details>
 
 ### 3. Lancer le serveur Go (intégration MEDomics)
 
+> Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
+
 **Windows / macOS / Linux :**
 ```bash
-cd "$PROJECT_ROOT/go_server"
+cd go_server
 go run .
 # Écoute sur http://localhost:8080 (PORT modifiable via variable d'environnement)
 ```
 
-> Sur macOS, les chemins par défaut dans `go_server/config.go` pointent vers des chemins Windows (`F:\STAGE\...`). Il faut les surcharger via variables d'environnement :
-> ```bash
-> export STARHE_PYTHON_EXE="$PROJECT_ROOT/pythonCode/modules/starhe_plugin/.venv/bin/python"
-> export STARHE_PYTHON_PATH="$PROJECT_ROOT/pythonCode/modules"
-> cd "$PROJECT_ROOT/go_server" && go run .
-> ```
+Les chemins Python sont détectés **automatiquement** par `config.go` à partir du dossier `go_server/` (chemin relatif `../pythonCode/modules/…`). Aucune variable d'environnement n'est nécessaire si le venv a été créé à l'étape 1 et que le serveur est lancé depuis `go_server/`.
 
 Variables d'environnement du serveur Go :
 
@@ -371,14 +369,14 @@ Port local `54017` (non standard, configuré dans `config.py` et `go_server/conf
 ```
 
 - `detections_per_frame` est une **liste de listes** indexée sur les frames, longueur = `num_frames`.
-- La clé de cache est `file_path` (chemin absolu) — sensible au déplacement/renommage du fichier.
-- `replace_one({file_path: ...}, doc, upsert=True)` : un seul document par fichier.
+- La clé de cache est le couple `(file_path, analysis_mode)` — un document par fichier **et par mode** d'analyse (`original`, `crop`, `backscan`). Sensible au déplacement/renommage du fichier.
+- `replace_one({file_path: ..., analysis_mode: ...}, doc, upsert=True)` : un document par combinaison fichier + mode.
 
 ### Opérations disponibles (`db/mongo_client.py`)
 
 ```python
 save_result(file_path, num_frames, roi, risk, detections_per_frame, anon_mode, analysis_mode)
-find_by_file(file_path)   # → dict | None  (utilisé pour le cache avant analyse)
+find_by_file(file_path, analysis_mode=None)  # → dict | None  (filtre optionnel par mode)
 get_result(result_id)     # → dict | None  (par ObjectId string)
 list_results(limit=100)   # → list[dict]
 delete_result(file_path)  # → bool
@@ -428,7 +426,9 @@ Le prototype sert à valider le pipeline et l'UX avant le portage React. C'est u
 
 **Subprocess persistant RTMDet** : côté UI, `STARHEDetectModel` est utilisé exactement comme dans `pipeline.py`, dans un thread `threading.Thread` pour ne pas bloquer l'interface.
 
-**Onglets multi-fichiers** : chaque onglet stocke un `dict` d'état complet (~30 clés : frames brutes, frames prepUS, index courant, mesures, zoom, contraste, résultats IA, métadonnées, etc.). La méthode `_save_tab_state()` copie les variables `self._xxx` dans `self._tabs[i]`, et `_restore_tab_state(i)` fait l'inverse. Aucune donnée n'est rechargée depuis le disque lors d'un changement d'onglet.
+**Onglets multi-fichiers** : chaque onglet stocke un `dict` d'état complet (~30 clés : frames brutes, frames prepUS, index courant, mesures, zoom, contraste, résultats IA par mode, métadonnées, etc.). La méthode `_save_tab_state()` copie les variables `self._xxx` dans `self._tabs[i]`, et `_restore_tab_state(i)` fait l'inverse. Aucune donnée n'est rechargée depuis le disque lors d'un changement d'onglet.
+
+**Résultats par mode d'affichage** : les détections et résultats sont stockés dans des dicts indexés par mode (`_detections_by_mode` et `_results_by_mode`, clés : `"backscan"`, `"crop"`, `"original"`). Quand l'utilisateur bascule entre les modes (toggle crop/backscan), seuls les bounding boxes et résultats correspondant au mode actif sont affichés. La méthode `_refresh_results_panel()` met à jour les labels Mode, Risque, et Lésions en conséquence.
 
 **Mesures en mm** : la calibration s'effectue dans l'ordre de priorité suivant dans les métadonnées DICOM :
 1. `SequenceOfUltrasoundRegions` (tag `(0018,6011)`) — physicalDeltaX/Y en cm
@@ -538,12 +538,14 @@ PLUGIN1-MEDomics/
 
 ## Configuration (`config.py`)
 
-Tous les paramètres sont dans un seul fichier. Les chemins critiques à adapter sur une nouvelle machine :
+Tous les paramètres sont dans un seul fichier. Les chemins sont relatifs au projet — aucune adaptation nécessaire sur une nouvelle machine :
 
 ```python
-DATA_DIR   = r"F:\STAGE\DATA"           # Dossier des fichiers DICOM de test
-MODELS_DIR = os.path.join(BASE_DIR, "models")  # Checkpoints IA (non versionnés)
+DATA_DIR   = os.environ.get("STARHE_DATA_DIR", os.path.join(PROJECT_ROOT, "data"))  # Dossier des fichiers DICOM
+MODELS_DIR = os.path.join(BASE_DIR, "models")   # Checkpoints IA (non versionnés)
 ```
+
+`DATA_DIR` pointe par défaut vers `data/` à la racine du projet. Surchargeable via la variable d'environnement `STARHE_DATA_DIR`.
 
 Paramètres IA :
 
@@ -562,7 +564,6 @@ Paramètres IA :
 - **Changement d'onglet pendant une analyse** : l'analyse tourne dans un thread séparé et continue même si l'onglet source est fermé. Les résultats sont perdus si l'onglet est fermé avant la fin.
 - **prepUS et backscan** : le backscan ne fonctionne que sur des images sectorielles (mode B standard). Les images linéaires (vaisseaux superficiels) peuvent produire un backscan dégradé — utiliser `back_scan_conversion=False` dans ce cas.
 - **GPU** : STARHE-RISK passe automatiquement sur CUDA si disponible. STARHE-DETECT (RTMDet en subprocess) utilise CPU par défaut ; ajouter `--device cuda` dans le cmd de `_start_server()` pour activer le GPU.
-- **DATA_DIR** dans `config.py` contient un chemin absolu local (`F:\STAGE\DATA`). À adapter sur toute autre machine.
 
 ---
 
