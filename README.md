@@ -42,9 +42,11 @@ Deux modèles IA sont exploités :
 
 **Windows (PowerShell) :**
 ```powershell
-py -3.13 -m venv pythonCode\modules\starhe_plugin\.venv
-pythonCode\modules\starhe_plugin\.venv\Scripts\pip install -r pythonCode\modules\starhe_plugin\requirements.txt
+python -m venv pythonCode\modules\starhe_plugin\.venv
+.\pythonCode\modules\starhe_plugin\.venv\Scripts\pip install -r pythonCode\modules\starhe_plugin\requirements.txt
 ```
+
+> **Remarque** : `python` doit pointer sur Python **3.13 exactement** — 3.14+ est incompatible (tkinter cassé). Vérifiez avec `python --version` avant de lancer ces commandes. Si votre machine a plusieurs versions de Python, utilisez `py -3.13` à la place de `python` (le launcher `py` est inclus dans les installateurs officiels depuis python.org). En pratique, il est plus simple de lancer directement `.\run_tkinter.ps1` à l'étape 2 — le script vérifie la version et configure tout automatiquement.
 
 **macOS / Linux :**
 ```bash
@@ -68,7 +70,7 @@ pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/sta
 ./run_tkinter.sh
 ```
 
-Le script `run_tkinter.sh` est **autonome** : il vérifie que Python 3.13 et tkinter sont présents sur le système, crée le venv et installe les dépendances si absent, installe prepUS, puis lance l'UI. Un nouvel utilisateur sur Mac n'a besoin que de deux prérequis système :
+Le script `run_tkinter.sh` est **autonome** : il vérifie que Python 3.13 et tkinter sont présents sur le système, crée le venv et installe les dépendances si absent, installe prepUS, puis lance l'UI. Le script `run_tkinter.ps1` est également **autonome** sur Windows : il détecte Python 3.13 (via `py -3.13`, `python3.13`, ou `python`), crée le venv si absent, installe les dépendances, puis lance l'UI. Un nouvel utilisateur sur Mac n'a besoin que de deux prérequis système :
 
 ```bash
 # Prérequis une seule fois
