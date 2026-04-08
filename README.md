@@ -36,48 +36,38 @@ Deux modèles IA sont exploités :
 
 ## Installation et démarrage
 
-### 1. Créer le venv Python 3.13
-
 > **Toutes les commandes ci-dessous supposent que vous êtes dans le dossier racine du projet** (`PLUGIN1-MEDomics/`).
 
-**Windows (PowerShell) :**
-```powershell
-python -m venv pythonCode\modules\starhe_plugin\.venv
-.\pythonCode\modules\starhe_plugin\.venv\Scripts\pip install -r pythonCode\modules\starhe_plugin\requirements.txt
-```
+### 1. Lancer le prototype Tkinter (développement)
 
-> **Remarque** : `python` doit pointer sur Python **3.13 exactement** — 3.14+ est incompatible (tkinter cassé). Vérifiez avec `python --version` avant de lancer ces commandes. Si votre machine a plusieurs versions de Python, utilisez `py -3.13` à la place de `python` (le launcher `py` est inclus dans les installateurs officiels depuis python.org). En pratique, il est plus simple de lancer directement `.\run_tkinter.ps1` à l'étape 2 — le script vérifie la version et configure tout automatiquement.
-
-**macOS / Linux :**
-```bash
-python3.13 -m venv pythonCode/modules/starhe_plugin/.venv
-pythonCode/modules/starhe_plugin/.venv/bin/pip install -r pythonCode/modules/starhe_plugin/requirements.txt
-```
-
-> **macOS (Homebrew)** : Python 3.13 s'installe via `brew install python@3.13`. Homebrew **n'inclut pas tkinter par défaut** — il faut aussi lancer `brew install python-tk@3.13`, sinon l'UI Tkinter échouera avec `ModuleNotFoundError: No module named '_tkinter'`. Vérifier avec : `python3.13 -c "import tkinter"`.
-
-### 2. Lancer le prototype Tkinter (développement)
-
-> Se placer à la racine du projet (`PLUGIN1-MEDomics/`).
+Les deux scripts sont **autonomes** : ils détectent Python 3.13, créent le venv si absent, installent toutes les dépendances et prepUS, puis lancent l'interface. Seul Python 3.13 doit être installé sur le système.
 
 **Windows (PowerShell) :**
+
+> **Prérequis unique** : autoriser les scripts PowerShell locaux (à faire une seule fois, en tant qu'utilisateur) :
+> ```powershell
+> Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+> ```
+> Puis, depuis la racine du projet :
+
 ```powershell
 .\run_tkinter.ps1
 ```
 
+Le script détecte Python 3.13 sur le système (via `py -3.13`, `python3.13`, ou `python`), vérifie que tkinter est disponible, crée le venv si absent, installe les dépendances, puis lance l'UI.
+
 **macOS / Linux :**
-```bash
-./run_tkinter.sh
-```
-
-Le script `run_tkinter.sh` est **autonome** : il vérifie que Python 3.13 et tkinter sont présents sur le système, crée le venv et installe les dépendances si absent, installe prepUS, puis lance l'UI. Le script `run_tkinter.ps1` est également **autonome** sur Windows : il détecte Python 3.13 (via `py -3.13`, `python3.13`, ou `python`), crée le venv si absent, installe les dépendances, puis lance l'UI. Un nouvel utilisateur sur Mac n'a besoin que de deux prérequis système :
 
 ```bash
-# Prérequis une seule fois
+# Prérequis une seule fois (macOS Homebrew uniquement)
 brew install python@3.13 python-tk@3.13
 # Puis lancer le prototype depuis la racine du projet (tout le reste est automatique)
 ./run_tkinter.sh
 ```
+
+Le script `run_tkinter.sh` vérifie que Python 3.13 et tkinter sont présents, crée le venv et installe les dépendances si absent, installe prepUS, puis lance l'UI.
+
+> **macOS (Homebrew)** : Homebrew **n'inclut pas tkinter par défaut** — `brew install python-tk@3.13` est obligatoire, sinon l'UI échouera avec `ModuleNotFoundError: No module named '_tkinter'`. Vérifier avec : `python3.13 -c "import tkinter"`.
 
 <details>
 <summary>Commandes manuelles équivalentes (macOS / Linux)</summary>
@@ -97,7 +87,41 @@ cd pythonCode/modules
 
 </details>
 
-### 3. Lancer le serveur Go (intégration MEDomics)
+<details>
+<summary>Commandes manuelles équivalentes (Windows PowerShell)</summary>
+
+> Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
+
+```powershell
+py -3.13 -m venv pythonCode\modules\starhe_plugin\.venv
+pythonCode\modules\starhe_plugin\.venv\Scripts\pip install -r pythonCode\modules\starhe_plugin\requirements.txt
+pythonCode\modules\starhe_plugin\.venv\Scripts\pip install sonocrop --no-deps
+pythonCode\modules\starhe_plugin\.venv\Scripts\pip install third_party\prepUS --no-deps
+Set-Location pythonCode\modules
+..\..\pythonCode\modules\starhe_plugin\.venv\Scripts\python -m starhe_plugin.ui.prototype_tkinter
+```
+
+</details>
+
+<details>
+<summary>Commandes manuelles équivalentes (macOS / Linux)</summary>
+
+> Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
+
+```bash
+PYTHON=pythonCode/modules/starhe_plugin/.venv/bin/python
+PREPUS=third_party/prepUS
+"$PYTHON" -c "import prepUS" 2>/dev/null || {
+    "$PYTHON" -m pip install sonocrop --no-deps -q
+    "$PYTHON" -m pip install "$PREPUS" --no-deps -q
+}
+cd pythonCode/modules
+../../"$PYTHON" -m starhe_plugin.ui.prototype_tkinter
+```
+
+</details>
+
+### 2. Lancer le serveur Go (intégration MEDomics)
 
 > Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
 
