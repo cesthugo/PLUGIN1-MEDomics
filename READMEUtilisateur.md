@@ -8,8 +8,11 @@
 ## 🚀 Lancement de l'Interface
 
 ```powershell
-# Depuis la racine du projet
+# Windows (PowerShell)
 .\run_tkinter.ps1
+
+# macOS / Linux
+./run_tkinter.sh
 ```
 
 La fenêtre s'ouvre avec la sidebar de contrôle à gauche et la zone de visualisation à droite.
@@ -102,6 +105,13 @@ La **barre d'onglets** est située en bas de la visionneuse, comme un navigateur
 | `-` | Vitesse de lecture ×0.80 |
 | `B` | Toggle **Boucle** |
 
+### Zoom
+| Touche | Action |
+|---|---|
+| `Cmd+=` / `Ctrl+=` | **Zoom avant** (×1.25) |
+| `Cmd+-` / `Ctrl+-` | **Zoom arrière** (÷1.25) |
+| `Cmd+0` / `Ctrl+0` | **Réinitialiser** zoom à 100 % |
+
 ### Onglets
 | Touche | Action |
 |---|---|
@@ -113,15 +123,21 @@ La **barre d'onglets** est située en bas de la visionneuse, comme un navigateur
 
 ## 🔍 5. Pan & Zoom
 
-**Activation :** Clic droit → **Pan / Zoom** ou touche `P` (curseur devient une main)
+**Activation du pan :** Clic droit → **Déplacer / Zoomer** ou touche `P` (curseur devient une main)
 
 | Action | Résultat |
 |---|---|
-| **Clic-glisser** | Déplace l'image dans le canvas |
-| **Molette vers le haut** | Zoom avant (×1.15 par cran) |
-| **Molette vers le bas** | Zoom arrière (÷1.15 par cran) |
+| **Clic-glisser** (mode Pan) | Déplace l'image dans le canvas |
+| **Boutons `−` / `+`** (en-tête de la visionneuse) | Zoom arrière / avant (×1.25) |
+| `Cmd+=` / `Ctrl+=` | Zoom avant |
+| `Cmd+-` / `Ctrl+-` | Zoom arrière |
+| `Cmd+0` / `Ctrl+0` | Réinitialiser zoom à 100 % |
+
+Le **pourcentage de zoom** s'affiche entre les boutons `−` et `+` dans l'en-tête.
 
 Pour revenir à la vue initiale : touche `R` ou Clic droit → **Réinitialiser la vue**
+
+> **Note macOS (Tk 9.0)** : le scroll trackpad (molette) ne génère pas d'événement dans Tkinter avec Tk 9.0.3. Utilisez les boutons ou les raccourcis clavier pour zoomer.
 
 ---
 
@@ -134,7 +150,12 @@ Pour revenir à la vue initiale : touche `R` ou Clic droit → **Réinitialiser 
 2. **Glissez** jusqu'au point d'arrivée — une ligne jaune pointillée s'affiche en temps réel
 3. **Relâchez** — le segment est fixé, la distance s'affiche en jaune
 
-Plus ieurs mesures peuvent être tracées simultanément.
+Plusieurs mesures peuvent être tracées simultanément.
+
+### Persistance des mesures
+- Les mesures **restent visibles** lorsque vous changez de mode (Pan/Zoom, Normal, etc.)
+- Les mesures **suivent le zoom et le pan** : elles restent proportionnelles à l'image
+- Seule l'action **Réinitialiser la vue** (touche `R`) efface les mesures
 
 ### Sélectionner / Éditer / Supprimer
 | Action | Résultat |
@@ -261,10 +282,14 @@ La sidebar reste toujours sombre dans les deux modes.
 
 *Pour toute question technique, consultez le [README.md](README.md) ou la [TODOLIST.md](TODOLIST.md).*
 
-Depuis la racine du projet, exécutez le script PowerShell :
+Depuis la racine du projet :
 
 ```powershell
+# Windows (PowerShell)
 .\run_tkinter.ps1
+
+# macOS / Linux
+./run_tkinter.sh
 ```
 
 La fenêtre s'ouvre avec la sidebar de contrôle à gauche et la zone de visualisation à droite.
@@ -326,12 +351,13 @@ Le mode actif est marqué d'un **✓**.
 
 ```
 ╔══════════════════════════════╗
-║ ✓ Pan / Zoom                 ║  ← mode courant
-║   Outil de mesure            ║
-║   Défilement de séries       ║
+║ ✓ Déplacer / Zoomer          ║  ← mode courant
+║   Mesurer                    ║
 ║ ─────────────────────────────║
 ║   Contraste…                 ║
 ║   Luminosité…                ║
+║ ─────────────────────────────║
+║   Series Scroll              ║
 ║ ─────────────────────────────║
 ║   Réinitialiser la vue       ║
 ╚══════════════════════════════╝
@@ -341,13 +367,17 @@ Le mode actif est marqué d'un **✓**.
 
 ## 🔍 4. Pan & Zoom
 
-**Activation :** Clic droit → **Pan / Zoom** (curseur devient une main ✋)
+**Activation du pan :** Clic droit → **Déplacer / Zoomer** (curseur devient une main ✋)
 
 | Action | Résultat |
 |---|---|
-| **Clic-glisser** | Déplace l'image dans le canvas |
-| **Molette vers le haut** | Zoom avant (×1.1 par cran) |
-| **Molette vers le bas** | Zoom arrière (÷1.1 par cran) |
+| **Clic-glisser** (mode Pan) | Déplace l'image dans le canvas |
+| **Boutons `−` / `+`** (en-tête de la visionneuse) | Zoom arrière / avant (×1.25) |
+| `Cmd+=` / `Ctrl+=` | Zoom avant |
+| `Cmd+-` / `Ctrl+-` | Zoom arrière |
+| `Cmd+0` / `Ctrl+0` | Réinitialiser zoom à 100 % |
+
+Le **pourcentage de zoom** s'affiche entre les boutons.
 
 Pour revenir à la vue initiale : Clic droit → **Réinitialiser la vue**
 
@@ -355,11 +385,13 @@ Pour revenir à la vue initiale : Clic droit → **Réinitialiser la vue**
 
 ## 📏 5. Outil de Mesure
 
-**Activation :** Clic droit → **Outil de mesure** (curseur devient une croix ✛)
+**Activation :** Clic droit → **Mesurer** (curseur devient une croix ✛)
 
 1. **Cliquez et maintenez** le bouton gauche sur le point de départ de votre mesure
 2. **Glissez** jusqu'au point d'arrivée — une ligne jaune pointillée s'affiche en temps réel
 3. **Relâchez** pour fixer la mesure — la distance s'affiche au-dessus de la ligne
+
+Plusieurs mesures peuvent être tracées simultanément. Les mesures **persistent** lorsque vous changez de mode et **suivent le zoom/pan** de l'image.
 
 **Affichage de la distance :**
 - Si le fichier DICOM contient une calibration spatiale : **`X.X mm`**
@@ -368,7 +400,7 @@ Pour revenir à la vue initiale : Clic droit → **Réinitialiser la vue**
 > La calibration est automatiquement extraite depuis les tags `PixelSpacing`,  
 > `ImagerPixelSpacing`, ou `SequenceOfUltrasoundRegions` (échographies).
 
-Pour effacer la mesure : activez un autre mode ou cliquez sur **Réinitialiser la vue**.
+Pour effacer les mesures : cliquez sur **Réinitialiser la vue**.
 
 ---
 

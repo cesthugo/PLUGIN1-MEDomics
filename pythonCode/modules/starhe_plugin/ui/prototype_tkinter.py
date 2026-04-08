@@ -320,6 +320,9 @@ class STARHEApp(tk.Tk):
         + ou =          Vitesse lecture ×1.25
         -               Vitesse lecture ×0.80
         B               Toggle boucle
+        Cmd/Ctrl + =    Zoom avant
+        Cmd/Ctrl + -    Zoom arrière
+        Cmd/Ctrl + 0    Réinitialiser zoom
         """
         kb = [
             ("<space>",         lambda e: self._kb_do(self._toggle_play)),
@@ -343,6 +346,13 @@ class STARHEApp(tk.Tk):
             ("<equal>",         lambda e: self._kb_do(lambda: self._kb_speed(1.25))),
             ("<minus>",         lambda e: self._kb_do(lambda: self._kb_speed(0.80))),
             ("b",               lambda e: self._kb_do(self._kb_toggle_loop)),
+            # Zoom via Cmd+=/- (macOS) et Ctrl+=/- (Win/Linux)
+            ("<Command-equal>",  lambda e: self._kb_do(self._zoom_in)),
+            ("<Command-minus>",  lambda e: self._kb_do(self._zoom_out)),
+            ("<Command-0>",      lambda e: self._kb_do(self._zoom_reset)),
+            ("<Control-equal>",  lambda e: self._kb_do(self._zoom_in)),
+            ("<Control-minus>",  lambda e: self._kb_do(self._zoom_out)),
+            ("<Control-0>",      lambda e: self._kb_do(self._zoom_reset)),
         ]
         for seq, handler in kb:
             self.bind(seq, handler)
@@ -404,6 +414,58 @@ class STARHEApp(tk.Tk):
 
     def _kb_toggle_loop(self):
         self._loop_var.set(not self._loop_var.get())
+
+    # ── Zoom ──────────────────────────────────────────────────────────────────
+
+    def _zoom_in(self):
+        self._zoom = min(10.0, self._zoom * 1.25)
+        self._refresh_canvas()
+
+    def _zoom_out(self):
+        self._zoom = max(0.1, self._zoom / 1.25)
+        self._refresh_canvas()
+
+    def _zoom_reset(self):
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self._refresh_canvas()
+
+    # ── Conversion coordonnées écran ↔ image ─────────────────────────────────
+
+    def _img_transform(self) -> tuple:
+        """Renvoie (scale, off_x, off_y) pour convertir image → écran.
+
+        screen_x = img_x * scale + off_x
+        screen_y = img_y * scale + off_y
+        """
+        frames = (self._frames_cropped
+                  if (self._crop_toggle.get() and self._frames_cropped is not None)
+                  else self._frames_raw)
+        if frames is None:
+            return (1.0, 0.0, 0.0)
+        cw = self._canvas.winfo_width()  or CANVAS_W
+        ch = self._canvas.winfo_height() or CANVAS_H
+        ih, iw = frames[0].shape[:2]
+        fit_scale = min(cw / iw, ch / ih) if iw > 0 and ih > 0 else 1.0
+        scale = fit_scale * self._zoom
+        scaled_w = int(iw * scale)
+        scaled_h = int(ih * scale)
+        off_x = cw / 2 - scaled_w / 2 + self._pan_x
+        off_y = ch / 2 - scaled_h / 2 + self._pan_y
+        return (scale, off_x, off_y)
+
+    def _screen_to_img(self, sx: float, sy: float) -> tuple:
+        """Convertit coordonnées écran (canvas) → coordonnées image."""
+        scale, off_x, off_y = self._img_transform()
+        if scale == 0:
+            return (sx, sy)
+        return ((sx - off_x) / scale, (sy - off_y) / scale)
+
+    def _img_to_screen(self, ix: float, iy: float) -> tuple:
+        """Convertit coordonnées image → coordonnées écran (canvas)."""
+        scale, off_x, off_y = self._img_transform()
+        return (ix * scale + off_x, iy * scale + off_y)
 
     def _kb_next_tab(self):
         if self._tabs:
@@ -495,7 +557,9 @@ class STARHEApp(tk.Tk):
 
         # Défilement à la molette quand la souris survole la sidebar
         def _sb_scroll(event, c=_sb_canvas):
-            c.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            # macOS : delta = ±1..±5 ; Windows : delta = ±120
+            d = event.delta if abs(event.delta) < 50 else event.delta // 120
+            c.yview_scroll(int(-d), "units")
 
         _sb_canvas.bind("<Enter>", lambda _: _sb_canvas.bind_all("<MouseWheel>", _sb_scroll))
         _sb_canvas.bind("<Leave>", lambda _: _sb_canvas.unbind_all("<MouseWheel>"))
@@ -710,6 +774,24 @@ class STARHEApp(tk.Tk):
                                      font=("Segoe UI", 7, "bold"),
                                      padx=7, pady=2)
         self._mode_badge.pack(side="left", padx=(6, 0))
+
+        # Boutons zoom (compacts, dans l'en-tête de la carte)
+        zoom_frame = tk.Frame(self._card_hdr, bg=CARD_BG)
+        zoom_frame.pack(side="right", padx=(0, 8))
+        _zoom_btn_kw = dict(bg=CARD_BG, fg=BLUE_TEXT,
+                            font=("Segoe UI", 11, "bold"),
+                            bd=0, padx=4, pady=0, cursor="hand2")
+        self._btn_zoom_out = tk.Label(zoom_frame, text=" − ", **_zoom_btn_kw)
+        self._btn_zoom_out.pack(side="left")
+        self._btn_zoom_out.bind("<Button-1>", lambda e: self._zoom_out())
+        self._zoom_pct_lbl = tk.Label(zoom_frame, text="100 %", bg=CARD_BG,
+                                       fg=SBAR_MUTED, font=("Segoe UI", 8),
+                                       width=6, anchor="center")
+        self._zoom_pct_lbl.pack(side="left", padx=2)
+        self._btn_zoom_in = tk.Label(zoom_frame, text=" + ", **_zoom_btn_kw)
+        self._btn_zoom_in.pack(side="left")
+        self._btn_zoom_in.bind("<Button-1>", lambda e: self._zoom_in())
+
         self._card_divider = tk.Frame(card, bg=BORDER, height=1)
         self._card_divider.pack(fill="x")
 
@@ -734,7 +816,8 @@ class STARHEApp(tk.Tk):
         self._tab_bar_inner.bind("<Configure>", lambda e: self._tab_bar_scroll.config(
             scrollregion=self._tab_bar_scroll.bbox("all")))
         self._tab_bar_scroll.bind("<MouseWheel>",
-            lambda e: self._tab_bar_scroll.xview_scroll(int(-1 * (e.delta / 120)), "units"))
+            lambda e: self._tab_bar_scroll.xview_scroll(
+                int(-1 * (e.delta if abs(e.delta) < 50 else e.delta // 120)), "units"))
 
         # Canvas DICOM (fond sombre à l'intérieur de la carte)
         canvas_wrap = tk.Frame(card, bg=CANVAS_BG)
@@ -751,7 +834,6 @@ class STARHEApp(tk.Tk):
         self._canvas.bind("<ButtonPress-3>",   self._on_rclick_press)
         self._canvas.bind("<B3-Motion>",       self._on_rclick_drag)
         self._canvas.bind("<ButtonRelease-3>", self._on_rclick_release)
-        self._canvas.bind("<MouseWheel>",      self._on_canvas_scroll)
         # Suppression de mesure sélectionnée (le canvas doit avoir le focus)
         self._canvas.bind("<Delete>",          self._on_measure_delete)
         self._canvas.bind("<BackSpace>",       self._on_measure_delete)
@@ -1742,12 +1824,14 @@ class STARHEApp(tk.Tk):
             mode_txt = "ORIGINAL"
         if hasattr(self, "_mode_badge"):
             self._mode_badge.config(text=mode_txt)
+        if hasattr(self, "_zoom_pct_lbl"):
+            self._zoom_pct_lbl.config(text=f"{self._zoom * 100:.0f} %")
 
         self._canvas.delete("all")
         self._canvas.create_image(0, 0, anchor="nw", image=photo)
 
-        # Redessine les mesures par-dessus l'image
-        if self._view_mode == "measure":
+        # Redessine les mesures par-dessus l'image (tout mode confondu)
+        if self._measures:
             self._redraw_measures()
 
     # ── Vitesse FPS ───────────────────────────────────────────────────────────
@@ -1797,11 +1881,11 @@ class STARHEApp(tk.Tk):
             if hit is not None:
                 seg_idx, part = hit
                 self._measure_selected = seg_idx
+                img_pt = self._screen_to_img(event.x, event.y)
                 self._measure_edit = {
                     "seg_idx": seg_idx,
                     "part": part,
-                    "start_x": event.x,
-                    "start_y": event.y,
+                    "start_img": img_pt,
                     "orig_pts": list(self._measures[seg_idx]["pts"]),
                 }
                 self._measure_drawing = []
@@ -1809,7 +1893,7 @@ class STARHEApp(tk.Tk):
             else:
                 self._measure_selected = None
                 self._measure_edit = None
-                self._measure_drawing = [(event.x, event.y)]
+                self._measure_drawing = [self._screen_to_img(event.x, event.y)]
                 self._redraw_measures()
         elif self._view_mode == "normal":
             self._drag_start = (event.x, event.y, self._frame_idx)
@@ -1836,20 +1920,22 @@ class STARHEApp(tk.Tk):
             if self._measure_edit is not None:
                 ed = self._measure_edit
                 seg = self._measures[ed["seg_idx"]]
-                dx = event.x - ed["start_x"]
-                dy = event.y - ed["start_y"]
+                cur_img = self._screen_to_img(event.x, event.y)
+                dix = cur_img[0] - ed["start_img"][0]
+                diy = cur_img[1] - ed["start_img"][1]
                 ox1, oy1 = ed["orig_pts"][0]
                 ox2, oy2 = ed["orig_pts"][1]
                 if ed["part"] == "p1":
-                    seg["pts"] = [(ox1 + dx, oy1 + dy), (ox2, oy2)]
+                    seg["pts"] = [(ox1 + dix, oy1 + diy), (ox2, oy2)]
                 elif ed["part"] == "p2":
-                    seg["pts"] = [(ox1, oy1), (ox2 + dx, oy2 + dy)]
+                    seg["pts"] = [(ox1, oy1), (ox2 + dix, oy2 + diy)]
                 else:  # "seg" — déplace tout le segment
-                    seg["pts"] = [(ox1 + dx, oy1 + dy), (ox2 + dx, oy2 + dy)]
+                    seg["pts"] = [(ox1 + dix, oy1 + diy), (ox2 + dix, oy2 + diy)]
                 self._redraw_measures()
             elif self._measure_drawing:
                 self._redraw_measures(
-                    preview=(self._measure_drawing[0], (event.x, event.y))
+                    preview=(self._measure_drawing[0],
+                             self._screen_to_img(event.x, event.y))
                 )
 
     def _on_canvas_release(self, event):
@@ -1859,10 +1945,13 @@ class STARHEApp(tk.Tk):
             if self._measure_edit is not None:
                 self._measure_edit = None
             elif self._measure_drawing:
-                p1 = self._measure_drawing[0]
-                p2 = (event.x, event.y)
-                if math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > 5:
-                    self._measures.append({"pts": [p1, p2], "items": []})
+                p1_img = self._measure_drawing[0]
+                p2_img = self._screen_to_img(event.x, event.y)
+                # Vérifie distance minimale en écran
+                p1_scr = self._img_to_screen(*p1_img)
+                p2_scr = (event.x, event.y)
+                if math.hypot(p2_scr[0] - p1_scr[0], p2_scr[1] - p1_scr[1]) > 5:
+                    self._measures.append({"pts": [p1_img, p2_img], "items": []})
                 self._measure_drawing = []
                 self._redraw_measures()
 
@@ -1891,73 +1980,48 @@ class STARHEApp(tk.Tk):
         if dt < 0.25 and dx < 5 and dy < 5:
             self._show_context_menu(event)
 
-    def _on_canvas_scroll(self, event):
-        if self._view_mode == "pan":
-            # Molette = zoom centré sur la position du curseur
-            factor = 1.15 if event.delta > 0 else 1 / 1.15
-            self._zoom = max(0.1, min(10.0, self._zoom * factor))
-            self._refresh_canvas()
-        elif self._view_mode == "series":
-            if self._frames_raw is None:
-                return
-            delta = -1 if event.delta > 0 else 1
-            n = len(self._frames_raw)
-            self._frame_idx = max(0, min(n - 1, self._frame_idx + delta))
-            self._update_frame_label()
-            self._refresh_canvas()
-
     # ── Overlay de mesure ─────────────────────────────────────────────────────
 
     def _draw_measure_overlay(self, p1: tuple, p2: tuple,
                                selected: bool = False,
                                target: list | None = None):
-        """Dessine un segment de mesure sur le canvas (coordonnées écran).
+        """Dessine un segment de mesure sur le canvas (coordonnées image).
+
+        *p1* et *p2* sont en coordonnées **image** (pixels de l'image d'origine).
+        La méthode les convertit en coordonnées écran via _img_to_screen.
 
         La distance est affichée en mm si le PixelSpacing DICOM est disponible,
-        sinon en pixels. La conversion tient compte du zoom et du fit_scale
-        courants pour passer des coordonnées écran aux coordonnées image réelles.
+        sinon en pixels image.
 
         Les IDs canvas créés sont ajoutés à *target* si fourni,
         sinon à self._measure_preview_items (segment temporaire).
         selected=True → couleur orange ; False → jaune.
         """
-        x1, y1 = p1;  x2, y2 = p2
-        dist_screen = math.hypot(x2 - x1, y2 - y1)
+        # Conversion image → écran
+        sx1, sy1 = self._img_to_screen(*p1)
+        sx2, sy2 = self._img_to_screen(*p2)
         r    = 3
-        mx, my = (x1 + x2) // 2, (y1 + y2) // 2
+        mx, my = (sx1 + sx2) / 2, (sy1 + sy2) / 2
         color = "#ff9900" if selected else "#ffff00"
 
-        # ── Calcul distance réelle ──────────────────────────────────────────
-        frames = (self._frames_cropped
-                  if (self._crop_toggle.get() and self._frames_cropped is not None)
-                  else self._frames_raw)
-        if frames is not None:
-            cw = self._canvas.winfo_width()  or CANVAS_W
-            ch = self._canvas.winfo_height() or CANVAS_H
-            ih, iw = frames[0].shape[:2]
-            fit_scale = min(cw / iw, ch / ih) if iw > 0 and ih > 0 else 1.0
-            screen_per_img_px = fit_scale * self._zoom
-        else:
-            screen_per_img_px = 1.0
-
-        dist_img_px = dist_screen / screen_per_img_px if screen_per_img_px > 0 else dist_screen
+        # ── Calcul distance réelle (directement en coords image) ─────────────
+        ix1, iy1 = p1;  ix2, iy2 = p2
+        dx_img = abs(ix2 - ix1)
+        dy_img = abs(iy2 - iy1)
 
         if self._pixel_spacing is not None:
-            dx_screen = abs(x2 - x1)
-            dy_screen = abs(y2 - y1)
-            dx_img = dx_screen / screen_per_img_px
-            dy_img = dy_screen / screen_per_img_px
             dist_mm = math.hypot(dx_img * self._pixel_spacing[1],
                                   dy_img * self._pixel_spacing[0])
             dist_label = f"{dist_mm:.1f} mm"
         else:
+            dist_img_px = math.hypot(dx_img, dy_img)
             dist_label = f"{dist_img_px:.1f} px (pas de calibration)"
 
-        line   = self._canvas.create_line(x1, y1, x2, y2,
+        line   = self._canvas.create_line(sx1, sy1, sx2, sy2,
                                            fill=color, width=2, dash=(5, 3))
-        dot1   = self._canvas.create_oval(x1-r, y1-r, x1+r, y1+r,
+        dot1   = self._canvas.create_oval(sx1-r, sy1-r, sx1+r, sy1+r,
                                            fill=color, outline="")
-        dot2   = self._canvas.create_oval(x2-r, y2-r, x2+r, y2+r,
+        dot2   = self._canvas.create_oval(sx2-r, sy2-r, sx2+r, sy2+r,
                                            fill=color, outline="")
         shadow = self._canvas.create_text(mx+1, my+1,
                                            text=dist_label,
@@ -2006,16 +2070,21 @@ class STARHEApp(tk.Tk):
     # ── Hit-test mesures ──────────────────────────────────────────────────────
 
     def _measure_hit(self, x: int, y: int) -> tuple | None:
-        """Renvoie (seg_idx, 'p1'|'p2'|'seg') pour le premier segment touché, ou None."""
+        """Renvoie (seg_idx, 'p1'|'p2'|'seg') pour le premier segment touché, ou None.
+
+        *x, y* sont en coordonnées écran ; les pts stockés sont en coords image.
+        """
         ENDPOINT_R = 8
         LINE_DIST  = 6
         for i, seg in enumerate(self._measures):
-            (x1, y1), (x2, y2) = seg["pts"]
-            if math.hypot(x - x1, y - y1) <= ENDPOINT_R:
+            # Convertir les coords image en écran pour le hit-test
+            sx1, sy1 = self._img_to_screen(*seg["pts"][0])
+            sx2, sy2 = self._img_to_screen(*seg["pts"][1])
+            if math.hypot(x - sx1, y - sy1) <= ENDPOINT_R:
                 return (i, "p1")
-            if math.hypot(x - x2, y - y2) <= ENDPOINT_R:
+            if math.hypot(x - sx2, y - sy2) <= ENDPOINT_R:
                 return (i, "p2")
-            if self._dist_to_segment(x, y, x1, y1, x2, y2) <= LINE_DIST:
+            if self._dist_to_segment(x, y, sx1, sy1, sx2, sy2) <= LINE_DIST:
                 return (i, "seg")
         return None
 
@@ -2080,13 +2149,11 @@ class STARHEApp(tk.Tk):
         else:
             self._view_mode = "pan"
             self._canvas.config(cursor="fleur")
-            self._clear_measure()
 
     def _toggle_measure(self):
         if self._view_mode == "measure":
             self._view_mode = "normal"
             self._canvas.config(cursor="")
-            self._clear_measure()
         else:
             self._view_mode = "measure"
             self._canvas.config(cursor="crosshair")
