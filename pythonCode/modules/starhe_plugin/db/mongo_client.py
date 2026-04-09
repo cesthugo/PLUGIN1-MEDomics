@@ -18,6 +18,7 @@ Schéma d'un document résultat :
 from __future__ import annotations
 
 import datetime
+from pathlib import PurePosixPath
 from typing import Any
 
 from pymongo import MongoClient
@@ -26,6 +27,12 @@ from pymongo.errors import ConnectionFailure
 
 from starhe_plugin.config import MONGO_URI, MONGO_DB_NAME, MONGO_COLLECTION
 from starhe_plugin.utils.go_print import go_print
+
+
+def _normalize_path(p: str) -> str:
+    """Normalise un chemin vers des séparateurs POSIX pour que la clé
+    de cache MongoDB soit identique quel que soit l'OS d'origine."""
+    return str(PurePosixPath(p))
 
 
 def _get_collection() -> Collection:
@@ -46,45 +53,56 @@ def save_result(file_path: str,
                 risk: dict,
                 detections_per_frame: list[list[dict]],
                 anon_mode: str = "none",
-                analysis_mode: str = "original") -> str:
+                analysis_mode: str = "original") -> str | None:
     """
     Insère (ou remplace) un document de résultat dans MongoDB.
     Si un document avec le même file_path existe déjà, il est remplacé.
 
-    Retourne l'_id (str) du document inséré/remplacé.
+    Retourne l'_id (str) du document inséré/remplacé, ou None si
+    MongoDB est inaccessible (le pipeline continue sans persistence).
     """
-    col = _get_collection()
-    doc: dict[str, Any] = {
-        "file_path"            : file_path,
-        "processed_at"         : datetime.datetime.utcnow().isoformat() + "Z",
-        "num_frames"           : num_frames,
-        "roi"                  : roi,
-        "risk"                 : risk,
-        "detections_per_frame" : detections_per_frame,
-        "anon_mode"            : anon_mode,
-        "analysis_mode"        : analysis_mode,
-    }
-    result = col.replace_one(
-        {"file_path": file_path, "analysis_mode": analysis_mode},
-        doc, upsert=True)
-    doc_id = str(result.upserted_id) if result.upserted_id else "(updated)"
-    go_print("info", f"mongo_client : résultat sauvegardé (_id={doc_id}).")
-    return doc_id
+    try:
+        col = _get_collection()
+        file_path = _normalize_path(file_path)
+        doc: dict[str, Any] = {
+            "file_path"            : file_path,
+            "processed_at"         : datetime.datetime.utcnow().isoformat() + "Z",
+            "num_frames"           : num_frames,
+            "roi"                  : roi,
+            "risk"                 : risk,
+            "detections_per_frame" : detections_per_frame,
+            "anon_mode"            : anon_mode,
+            "analysis_mode"        : analysis_mode,
+        }
+        result = col.replace_one(
+            {"file_path": file_path, "analysis_mode": analysis_mode},
+            doc, upsert=True)
+        doc_id = str(result.upserted_id) if result.upserted_id else "(updated)"
+        go_print("info", f"mongo_client : résultat sauvegardé (_id={doc_id}).")
+        return doc_id
+    except Exception as exc:
+        go_print("warning", f"MongoDB indisponible — résultat non sauvegardé : {exc}")
+        return None
 
 
 def find_by_file(file_path: str, analysis_mode: str | None = None) -> dict | None:
     """
     Retourne le document de résultat associé à ce fichier DICOM et mode, ou None.
     Si analysis_mode est None, retourne le premier résultat trouvé.
+    Retourne None si MongoDB est inaccessible.
     """
-    col = _get_collection()
-    query = {"file_path": file_path}
-    if analysis_mode is not None:
-        query["analysis_mode"] = analysis_mode
-    doc = col.find_one(query)
-    if doc:
-        doc["_id"] = str(doc["_id"])
-    return doc
+    try:
+        col = _get_collection()
+        query = {"file_path": _normalize_path(file_path)}
+        if analysis_mode is not None:
+            query["analysis_mode"] = analysis_mode
+        doc = col.find_one(query)
+        if doc:
+            doc["_id"] = str(doc["_id"])
+        return doc
+    except Exception as exc:
+        go_print("warning", f"MongoDB indisponible — recherche impossible : {exc}")
+        return None
 
 
 def get_result(doc_id: str) -> dict | None:

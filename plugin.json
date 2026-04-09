@@ -1,0 +1,72 @@
+{
+  "name": "starhe",
+  "version": "1.0.0",
+  "description": "STARHE — Scoring et détection de lésions hépatiques sur échographies DICOM",
+  "author": "MEDomics",
+
+  "medomics_integration": {
+    "_comment": "Fichiers à intégrer dans le dépôt MEDomics pour activer le plugin.",
+    "go_blueprint": "medomics_integration/starhe_blueprint.go",
+    "go_blueprint_target": "go_server/blueprints/starhe/starhe.go",
+    "python_entry": "pythonCode/modules/starhe/run_starhe.py",
+    "routes": [
+      { "method": "POST", "path": "starhe/analyze/",  "handler": "handleAnalyze" },
+      { "method": "POST", "path": "starhe/progress/", "handler": "handleProgress" }
+    ],
+    "main_go_additions": [
+      "import Starhe \"go_module/blueprints/starhe\"",
+      "Starhe.AddHandleFunc()"
+    ]
+  },
+
+  "standalone": {
+    "_comment": "Configuration du serveur Go autonome (go_server/ dans ce dépôt).",
+    "go_server": "go_server/main.go",
+    "endpoints": [
+      "POST   /starhe/analyze",
+      "GET    /starhe/results",
+      "GET    /starhe/results/{id}",
+      "DELETE /starhe/results/{id}",
+      "GET    /health"
+    ]
+  },
+
+  "python": {
+    "version": "3.13",
+    "venv": "pythonCode/modules/starhe_plugin/.venv",
+    "interpreter": {
+      "windows": "pythonCode/modules/starhe_plugin/.venv/Scripts/python.exe",
+      "posix":   "pythonCode/modules/starhe_plugin/.venv/bin/python"
+    },
+    "modules_root": "pythonCode/modules",
+    "requirements": "pythonCode/modules/starhe_plugin/requirements.txt",
+    "pipeline_module": "starhe_plugin.pipeline",
+    "pipeline_function": "run_pipeline"
+  },
+
+  "third_party": [
+    {
+      "name": "prepUS",
+      "path": "third_party/prepUS",
+      "install": "pip install --no-deps {path}"
+    },
+    {
+      "name": "sonocrop",
+      "install": "pip install sonocrop --no-deps"
+    }
+  ],
+
+  "services": {
+    "mongodb": {
+      "uri_env": "MONGO_URI",
+      "default_uri": "mongodb://localhost:54017/",
+      "database": "medomics",
+      "collection": "starhe_results"
+    }
+  },
+
+  "setup": {
+    "windows": "setup.ps1",
+    "posix":   "setup.sh"
+  }
+}

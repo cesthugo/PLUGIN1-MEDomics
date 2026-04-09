@@ -37,14 +37,10 @@ starhe_plugin/
 │   ├── best_acc_mean_cls_f1_epoch_14.pth     ← poids C3D (297 MB)
 │   ├── best_coco_bbox_mAP_50_iter_2100.pth   ← poids RTMDet/DINO (419 MB)
 │   ├── rtmdet_starhe.py                      ← config mmdet RTMDet (plat)
-│   ├── c3d_starhe.py                         ← config mmaction2 C3D (plat)
-│   └── configs/
-│       ├── custom/dino_starhe.py             ← config mmdet DINO
-│       └── _base_/                           ← héritages de config DINO
-│           ├── default_runtime.py
-│           └── datasets/starhe_1.py
+│   └── c3d_starhe.py                         ← config mmaction2 C3D (plat)
 ├── db/                ← persistence MongoDB
-├── utils/             ← go_print, go_progress, go_result
+├── utils/
+│   └── go_print.py    ← go_print(), go_progress(), go_result()
 └── ui/                ← prototype interface Tkinter
 ```
 
@@ -91,6 +87,10 @@ quel modèle est utilisé par `STARHEDetectModel`. Valeurs possibles :
 - `"rtmdet"` — défaut, plus rapide, modèle local
 - `"dino"` — DINO-DETR, nécessite le package `starhe` vendorisé
 
+> **⚠ État actuel :** les fichiers de config DINO (`models/configs/custom/dino_starhe.py`
+> et `models/configs/_base_/`) **ne sont pas encore présents** sur disque.
+> Le backend DINO ne fonctionnera pas tant que ces fichiers ne sont pas ajoutés.
+
 ---
 
 ## Chemins importants (config.py)
@@ -102,7 +102,8 @@ quel modèle est utilisé par `STARHEDetectModel`. Valeurs possibles :
 | `STARHE_SHARE_ROOT` | `starhe_plugin/ai/vendor/` (= `VENDOR_DIR`) |
 | `STARHE_RISK_CHECKPOINT` | `models/best_acc_mean_cls_f1_epoch_14.pth` |
 | `STARHE_DETECT_CHECKPOINT` | `models/best_coco_bbox_mAP_50_iter_2100.pth` |
-| `STARHE_DINO_CONFIG` | `models/configs/custom/dino_starhe.py` |
+| `STARHE_DINO_CHECKPOINT` | `models/best_coco_bbox_mAP_50_iter_2100.pth` |
+| `STARHE_DINO_CONFIG` | `models/configs/custom/dino_starhe.py` ⚠ absent du disque |
 
 ---
 
@@ -119,19 +120,59 @@ quel modèle est utilisé par `STARHEDetectModel`. Valeurs possibles :
 
 ## Flux d'une requête DICOM
 
+### Mode standalone (serveur Go STARHE)
+
 ```
-Go server → pipeline.run_pipeline(dicom_path)
-    │
-    ├─ dicom/reader.py      → load_dicom() + extract_frames()
-    ├─ dicom/anonymizer.py  → anonymize()
-    ├─ dicom/prepus_bridge  → preprocess_with_prepus()   (crop + backscan)
-    │
-    ├─ ai/starhe_risk.py    → STARHERiskModel.predict(frames)
-    │       └─ models/c3d.py  (PyTorch pur, pas de subprocess)
-    │
-    ├─ ai/starhe_detect.py  → STARHEDetectModel.predict(mid_frame)
-    │       └─ subprocess → models/_rtmdet_runner.py  (ou _dino_runner.py)
-    │                              └─ models/rtmdet.py  (ou dino.py)
-    │
-    └─ db/mongo_client.py   → save_result()
+Go server STARHE (POST /starhe/analyze)
+    → subprocess : python -m starhe_plugin.pipeline <dicom_path> --anon_mode ...
+        │
+        ├─ dicom/reader.py      → load_dicom() + extract_frames()
+        ├─ dicom/anonymizer.py  → anonymize()
+        ├─ dicom/prepus_bridge  → preprocess_with_prepus()   (crop + backscan)
+        │
+        ├─ ai/starhe_risk.py    → STARHERiskModel.predict(frames)
+        │       └─ models/c3d.py  (PyTorch pur, pas de subprocess)
+        │
+        ├─ ai/starhe_detect.py  → STARHEDetectModel.predict(mid_frame)
+        │       └─ subprocess → models/_rtmdet_runner.py  (ou _dino_runner.py)
+        │                              └─ models/rtmdet.py  (ou dino.py)
+        │
+        └─ db/mongo_client.py   → save_result()  (graceful si MongoDB absent)
+```
+
+Communication : lignes `GO_PRINT|level|json` sur stdout → SSE vers le client.
+
+### Mode intégré MEDomics
+
+```
+MEDomics Go server (POST starhe/analyze/)
+    → StartPythonScripts(json, "../pythonCode/modules/starhe/run_starhe.py", id)
+        │  (env Python MEDomics — PAS le venv STARHE)
+        │
+        └─ run_starhe.py  (GoExecutionScript)
+              │  localise le venv STARHE (starhe_plugin/.venv/)
+              │  lance subprocess dans ce venv :
+              └─ python -m starhe_plugin.pipeline ...
+                    │  (même chaîne que le mode standalone ci-dessus)
+                    └─ stdout GO_PRINT|… → traduit en progress*_*/response-ready*_*
+```
+
+Communication :
+- Pipeline émet `GO_PRINT|progress|json` sur stdout
+- `run_starhe.py` traduit → `progress*_*{id}*_*{json}` (protocole MEDomics)
+- Résultat final → `response-ready*_*{filepath}`
+
+### Fichiers d'intégration MEDomics
+
+| Fichier (dans ce dépôt) | Destination dans MEDomics |
+|--------------------------|---------------------------|
+| `pythonCode/modules/starhe/run_starhe.py` | `pythonCode/modules/starhe/run_starhe.py` |
+| `medomics_integration/starhe_blueprint.go` | `go_server/blueprints/starhe/starhe.go` |
+| `plugin.json` | Manifeste (lu manuellement pour l'intégration) |
+
+Ajout requis dans `MEDomics/go_server/main.go` :
+```go
+import Starhe "go_module/blueprints/starhe"
+// dans main() :
+Starhe.AddHandleFunc()
 ```

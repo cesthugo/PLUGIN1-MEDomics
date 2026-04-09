@@ -3,13 +3,18 @@
 > **STARHE** = STratification du risque et détection du carcinome **H**épatocellulaire par **E**chographie.  
 > Extension Python/Go de la plateforme [MEDomics](https://medomicslab.gitbook.io/medomics-docs).
 
-*Version `0.1.0` — Dernière mise à jour : 7 avril 2026*
+*Version `0.2.0` — Dernière mise à jour : 10 juillet 2025*
 
 ---
 
 ## Vue d'ensemble
 
-Le plug-in analyse des ciné-clips DICOM d'échographie abdominale pour dépister le carcinome hépatocellulaire (CHC). Il s'intègre à MEDomics via un serveur Go qui orchestre l'exécution du pipeline Python et streame les résultats au frontend React via SSE (Server-Sent Events).
+Le plug-in analyse des ciné-clips DICOM d'échographie abdominale pour dépister le carcinome hépatocellulaire (CHC). Il fonctionne en **deux modes** :
+
+| Mode | Description |
+|---|---|
+| **Standalone** | Serveur Go autonome (`go_server/`) + prototype Tkinter. Le Go lance `pipeline.py` en subprocess et streame les résultats via SSE. |
+| **Intégré MEDomics** | S'intègre à la plateforme MEDomics comme *Standard Plugin*. Un adaptateur (`run_starhe.py`) traduit le protocole `GO_PRINT|…` vers le protocole MEDomics (`progress*_*` / `response-ready*_*`). Un blueprint Go (`starhe_blueprint.go`) enregistre les routes dans le serveur MEDomics. |
 
 Deux modèles IA sont exploités :
 
@@ -145,12 +150,19 @@ Variables d'environnement du serveur Go :
 | `MONGO_DB` | `medomics` | Nom de la base |
 | `MONGO_COLL` | `starhe_results` | Nom de la collection |
 
+### 3. Déployer dans MEDomics (mode intégré)
+
+> Ce mode est décrit en détail dans la section **Intégration MEDomics** ci-dessous.  
+> Le plugin se déploie dans le dépôt MEDomics via symlinks et un blueprint Go.
+
 ---
 
 ## Architecture
 
+### Mode standalone (serveur Go autonome)
+
 ```
-MEDomics Frontend (React)
+MEDomics Frontend (React) / Tkinter UI
         │ HTTP / SSE
         ▼
   Go Server (port 8080)
@@ -171,6 +183,34 @@ MEDomics Frontend (React)
         ├── db/mongo_client.py     → persistance MongoDB (pymongo)
         └── utils/go_print.py      → protocole stdout vers Go
 ```
+
+### Mode intégré MEDomics
+
+```
+MEDomics Frontend (Electron / React)
+        │ HTTP
+        ▼
+  MEDomics Go Server
+  go_server/main.go  →  import Starhe "go_module/blueprints/starhe"
+                          Starhe.AddHandleFunc()
+        │
+        ▼
+  blueprints/starhe/starhe.go          → routes: starhe/analyze/, starhe/progress/
+        │ Utils.StartPythonScripts(json, "run_starhe.py", id)
+        ▼
+  pythonCode/modules/starhe/run_starhe.py    → GoExecutionScript adapter (env conda MEDomics)
+        │ subprocess.Popen([venv_python, "-m", "starhe_plugin.pipeline", ...])
+        │ traduit GO_PRINT|progress|… → set_progress(label=…, now=pct)
+        │ traduit GO_PRINT|result|…  → send_response(result_data)
+        ▼
+  pythonCode/modules/starhe_plugin/pipeline.py  → pipeline complet (venv STARHE dédié)
+        │                                         (torch, mmdet, pydicom, etc.)
+        └── ... (mêmes modules qu'en mode standalone)
+```
+
+**Différence clé** : en mode intégré, `run_starhe.py` sert de pont entre deux environnements Python distincts :
+- L'**env MEDomics** (conda) où tourne `GoExecutionScript`
+- Le **venv STARHE** (`.venv/`) où tournent PyTorch, mmdet, et le pipeline
 
 ### Protocole Go ↔ Python (`go_print`)
 
@@ -368,6 +408,56 @@ Défini dans `ai/models/_dino_runner.py`. Pas de mode serveur — chaque frame l
 
 ---
 
+## Intégration MEDomics (Standard Plugin)
+
+Le plugin STARHE s'intègre dans la plateforme MEDomics selon le patron « Standard Plugin » (analogue aux extensions 3D Slicer). L'intégration se compose de trois pièces :
+
+### 1. Blueprint Go (`medomics_integration/starhe_blueprint.go`)
+
+Fichier Go à copier dans `MEDomics/go_server/blueprints/starhe/starhe.go`. Il enregistre deux routes :
+
+| Route | Fonction | Description |
+|---|---|---|
+| `starhe/analyze/` | `handleAnalyze` | Lance le pipeline STARHE via `Utils.StartPythonScripts()` |
+| `starhe/progress/` | `handleProgress` | Retourne la progression du job en cours |
+
+Puis dans `MEDomics/go_server/main.go` :
+```go
+import Starhe "go_module/blueprints/starhe"
+// dans main() :
+Starhe.AddHandleFunc()
+```
+
+### 2. Adaptateur Python (`pythonCode/modules/starhe/run_starhe.py`)
+
+Script Python qui hérite de `GoExecutionScript` (lib MEDomics). Il tourne dans l'environnement conda de MEDomics et :
+
+1. Reçoit `--json-param <json> --id <id>` du serveur Go
+2. Localise le venv STARHE (`.venv/` dans `starhe_plugin/`, ou via `$STARHE_PLUGIN_DIR`)
+3. Lance `python -m starhe_plugin.pipeline` en subprocess dans le venv STARHE
+4. Lit les lignes `GO_PRINT|…` et les traduit :
+   - `GO_PRINT|progress|{…}` → `self.set_progress(label=…, now=pct)`
+   - `GO_PRINT|result|{…}` → donnée collectée pour `send_response()`
+   - `GO_PRINT|error|{…}` → `go_print("[STARHE ERROR] …")`
+
+### 3. Manifeste (`plugin.json`)
+
+Fichier JSON à la racine du projet documentant les éléments d'intégration (routes, chemins, commandes à ajouter au `main.go` de MEDomics) et la configuration standalone.
+
+### Déploiement
+
+Le déploiement dans le dépôt MEDomics s'effectue par :
+
+1. **Copie** du blueprint Go → `MEDomics/go_server/blueprints/starhe/starhe.go`
+2. **Symlinks** dans `MEDomics/pythonCode/modules/` :
+   - `starhe/` → adaptateur (`run_starhe.py`)
+   - `starhe_plugin/` → le plugin complet (pipeline, IA, DICOM, DB…)
+3. **Patch** de `MEDomics/go_server/main.go` (import + `AddHandleFunc()`)
+
+> **Note Windows** : les symlinks nécessitent les droits administrateur ou le mode développeur activé.
+
+---
+
 ## Base de données MongoDB
 
 ### Connexion
@@ -513,51 +603,63 @@ PLUGIN1-MEDomics/
 │
 ├── run_tkinter.ps1                   # Lanceur UI prototype Windows (installe prepUS auto)
 ├── run_tkinter.sh                    # Lanceur UI prototype macOS/Linux (installe prepUS auto)
+├── setup.sh                          # Setup venv + dépendances macOS/Linux (sans UI)
+├── setup.ps1                         # Setup venv + dépendances Windows (sans UI)
+├── plugin.json                       # Manifeste du plugin (config standalone + intégration MEDomics)
 ├── README.md                         # Ce fichier
 ├── READMEUtilisateur.md              # Guide utilisateur de l'interface Tkinter
 ├── TODOLIST.md                       # Carnet de bord / roadmap
 ├── MEDomicsLab_LOGO.png              # Logo affiché dans l'UI
 │
-├── go_server/
+├── go_server/                        # Serveur Go autonome (mode standalone)
 │   ├── main.go                       # Routing HTTP + init MongoDB
 │   ├── config.go                     # Variables d'environnement avec valeurs par défaut
 │   └── handlers.go                   # Handlers REST + SSE streaming
 │
+├── medomics_integration/             # Fichiers destinés au dépôt MEDomics
+│   └── starhe_blueprint.go           # Blueprint Go (routes starhe/analyze, starhe/progress)
+│
 ├── third_party/
 │   └── prepUS/                       # Package prepUS vendorisé (pip install --no-deps)
 │
-└── pythonCode/modules/starhe_plugin/
+└── pythonCode/modules/
     │
-    ├── .venv/                        # Environnement virtuel Python 3.13 (non versionné)
-    ├── __init__.py                   # Hooks on_load() / on_unload() (cycle de vie MEDomics)
-    ├── config.py                     # Toutes les constantes, chemins, hyperparamètres
-    ├── pipeline.py                   # Orchestrateur principal (point d'entrée Go)
-    ├── requirements.txt              # Dépendances Python
+    ├── starhe/                       # Adaptateur MEDomics (GoExecutionScript)
+    │   ├── __init__.py
+    │   └── run_starhe.py             # Pont MEDomics → subprocess venv STARHE
     │
-    ├── ai/
-    │   ├── starhe_risk.py            # Wrapper C3D : chargement + inférence
-    │   ├── starhe_detect.py          # Wrapper RTMDet/DINO : subprocess serveur
-    │   └── models/
-    │       ├── c3d.py                # Architecture C3D en PyTorch pur (sans mmaction2)
-    │       ├── _rtmdet_runner.py     # Runner RTMDet (mode image + mode serveur)
-    │       ├── _dino_runner.py       # Runner DINO-DETR (mode image uniquement)
-    │       ├── rtmdet.py             # Stubs RTMDet pour chargement config mmdet
-    │       └── dino.py               # Stubs DINO-DETR
-    │
-    ├── db/
-    │   └── mongo_client.py           # CRUD MongoDB (save/find/list/delete)
-    │
-    ├── dicom/
-    │   ├── reader.py                 # Chargement DICOM, extraction frames, uint8
-    │   ├── anonymizer.py             # Anonymisation tags + suppression bandeau imageur
-    │   ├── prepus_bridge.py          # Intégration prepUS (export MP4 → frames numpy)
-    │   └── crop.py                   # Algo de crop maison (fallback si prepUS indisponible)
-    │
-    ├── ui/
-    │   └── prototype_tkinter.py      # Interface prototype (~2500 lignes)
-    │
-    └── utils/
-        └── go_print.py               # Protocole stdout Go ↔ Python + set_log_sink()
+    └── starhe_plugin/                # Plugin STARHE complet
+        │
+        ├── .venv/                    # Environnement virtuel Python 3.13 (non versionné)
+        ├── __init__.py               # Hooks on_load() / on_unload() (cycle de vie MEDomics)
+        ├── config.py                 # Toutes les constantes, chemins, hyperparamètres
+        ├── pipeline.py               # Orchestrateur principal (point d'entrée Go)
+        ├── requirements.txt          # Dépendances Python
+        │
+        ├── ai/
+        │   ├── starhe_risk.py        # Wrapper C3D : chargement + inférence
+        │   ├── starhe_detect.py      # Wrapper RTMDet/DINO : subprocess serveur
+        │   └── models/
+        │       ├── c3d.py            # Architecture C3D en PyTorch pur (sans mmaction2)
+        │       ├── _rtmdet_runner.py # Runner RTMDet (mode image + mode serveur)
+        │       ├── _dino_runner.py   # Runner DINO-DETR (mode image uniquement)
+        │       ├── rtmdet.py         # Stubs RTMDet pour chargement config mmdet
+        │       └── dino.py           # Stubs DINO-DETR
+        │
+        ├── db/
+        │   └── mongo_client.py       # CRUD MongoDB (save/find/list/delete) + dégradation gracieuse
+        │
+        ├── dicom/
+        │   ├── reader.py             # Chargement DICOM, extraction frames, uint8
+        │   ├── anonymizer.py         # Anonymisation tags + suppression bandeau imageur
+        │   ├── prepus_bridge.py      # Intégration prepUS (export MP4 → frames numpy)
+        │   └── crop.py               # Algo de crop maison (fallback si prepUS indisponible)
+        │
+        ├── ui/
+        │   └── prototype_tkinter.py  # Interface prototype (~2500 lignes)
+        │
+        └── utils/
+            └── go_print.py           # Protocole stdout Go ↔ Python + set_log_sink()
 ```
 
 ---
@@ -572,6 +674,21 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")   # Checkpoints IA (non versionné
 ```
 
 `DATA_DIR` pointe par défaut vers `data/` à la racine du projet. Surchargeable via la variable d'environnement `STARHE_DATA_DIR`.
+
+### Variables d'environnement MongoDB
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `MONGO_URI` | `mongodb://localhost:54017/` | URI de connexion MongoDB |
+| `MONGO_DB` | `medomics` | Nom de la base de données |
+| `MONGO_COLL` | `starhe_results` | Nom de la collection |
+
+Ces variables permettent de partager la même instance MongoDB entre le plugin standalone et la plateforme MEDomics sans modifier le code.
+
+### Compatibilité cross-platform
+
+- **Chemins** : `pathlib` est utilisé dans `mongo_client.py` et `starhe_detect.py` pour la normalisation des chemins (clés de cache, détection venv).
+- **MongoDB** : dégradation gracieuse — si MongoDB est indisponible, le pipeline s'exécute normalement mais les résultats ne sont pas mis en cache (`save_result()` et `find_by_file()` retournent `None` au lieu de lever une exception).
 
 Paramètres IA :
 

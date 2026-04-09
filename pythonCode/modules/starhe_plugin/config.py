@@ -68,9 +68,10 @@ CROP_BLACK_THRESHOLD   = 10
 CROP_MIN_CONTENT_RATIO = 0.01
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
-MONGO_URI        = "mongodb://localhost:54017/"
-MONGO_DB_NAME    = "medomics"
-MONGO_COLLECTION = "starhe_results"
+# Surchargeable via variables d'environnement (cohérent avec go_server/config.go)
+MONGO_URI        = os.environ.get("MONGO_URI",  "mongodb://localhost:54017/")
+MONGO_DB_NAME    = os.environ.get("MONGO_DB",   "medomics")
+MONGO_COLLECTION = os.environ.get("MONGO_COLL", "starhe_results")
 
 # ── Tags DICOM à anonymiser ───────────────────────────────────────────────────
 # (groupe, élément) selon le standard DICOM PS3.15 Annexe E

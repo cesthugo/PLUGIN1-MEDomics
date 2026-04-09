@@ -199,6 +199,7 @@ class STARHEDetectModel:
         frame     : (H, W, 3) uint8 RGB
         score_thr : seuil de confiance minimum
         """
+        frame = np.ascontiguousarray(frame)
         if self._backend == "rtmdet" and self._proc is not None:
             return self._predict_server(frame, score_thr)
         else:

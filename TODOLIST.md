@@ -1,6 +1,6 @@
 # 📋 TODOLIST — Plug-in STARHE / MEDomics
 > Carnet de bord opérationnel du projet.  
-> Dernière mise à jour : **7 avril 2026**
+> Dernière mise à jour : **10 juillet 2025**
 
 ---
 
@@ -87,16 +87,36 @@
 - [x] **`go_server/config.go`** — Port MongoDB `54017`, chemins venv Python configurables par var d'env
 - [x] **`go_server/handlers.go`** — Streaming SSE `GO_PRINT|` depuis Python
 
+### 🌐 Compatibilité Cross-Platform
+- [x] **`config.py`** — MongoDB configurable par variables d'environnement (`MONGO_URI`, `MONGO_DB`, `MONGO_COLL`)
+- [x] **`mongo_client.py`** — Normalisation des chemins via `PurePosixPath` pour les clés de cache + dégradation gracieuse (MongoDB indisponible → warning sans crash)
+- [x] **`starhe_detect.py`** — `np.ascontiguousarray()` pour compatibilité mémoire cross-platform
+- [x] **`plugin.json`** — Manifeste du plugin avec chemins interpréteur par OS (windows/posix)
+- [x] **`setup.sh` / `setup.ps1`** — Scripts de setup venv + dépendances (sans lancer l'UI)
+
+### 🔌 Intégration MEDomics (Standard Plugin)
+- [x] **Analyse de l'architecture MEDomics** — Protocole `StartPythonScripts()` → `GoExecutionScript` → `progress*_*{id}*_*{json}` + `response-ready*_*{filepath}`
+- [x] **`run_starhe.py`** — Adaptateur `GoExecutionScript` : lance le pipeline STARHE en subprocess (venv dédié), traduit `GO_PRINT|…` → protocole MEDomics
+- [x] **`starhe_blueprint.go`** — Blueprint Go pour le serveur MEDomics : routes `starhe/analyze/` et `starhe/progress/`
+- [x] **Déploiement dans le dépôt MEDomics** — Blueprint copié, symlinks `starhe/` et `starhe_plugin/` créés, `main.go` patché (import + `AddHandleFunc()`)
+- [x] **Compilation Go vérifiée** — `go build .` dans `MEDomics/go_server/` → exit code 0
+
 ---
 
 ## 🚧 Tâches en Cours
 
 ### 🐍 Backend Python
 - [ ] **Tests du pipeline bout en bout** — Valider `run_pipeline()` avec un fichier `.dcm` réel sur données hépatiques
+- [ ] **Test E2E de l'intégration MEDomics** — Envoyer un POST `starhe/analyze/` depuis le frontend MEDomics et vérifier le flux complet (Go → run_starhe.py → pipeline.py → MongoDB → response)
 
 ### 🖼 Prototype Tkinter
 - [ ] **Validation flux complet avec Canon Aplio i700** — Charger `A0000` → suppression bandeau + calibration mm → prepUS → inférence IA → affichage résultats + cache MongoDB
 - [ ] **Recueil de retours utilisateur** — Identifier les ajustements UX avant portage en React
+
+### 🔌 Intégration MEDomics
+- [ ] **Frontend MEDomics** — Aucune page React n'existe encore pour piloter STARHE depuis l'interface MEDomics
+- [ ] **MEDDataObject** — Les résultats ne sont pas encore encapsulés dans un `MEDDataObject` (format standard MEDomics pour les données patient/résultat)
+- [ ] **Cross-platform symlinks** — Les symlinks Unix ne fonctionnent pas nativement sur Windows (nécessitent mode développeur ou droits admin). Envisager un script d'installation avec copie comme fallback.
 
 ---
 
@@ -115,7 +135,10 @@
   - Configurer le runner RTMDet pour utiliser CUDA si disponible (`--device cuda`)
   - Gain estimé : ×10–20 sur la partie détection (RTX 30/40 : ~15–30ms/frame)
 
-### 🔀 Phase 2 : Intégration Go Server (Moyen terme)
+### 🔀 Phase 2 : Intégration Go Server (Moyen terme) — ✅ Partiellement réalisé
+
+- [x] **Blueprint Go pour MEDomics** — `starhe_blueprint.go` avec `AddHandleFunc()`, routes `analyze/` et `progress/`
+- [x] **Adaptateur GoExecutionScript** — `run_starhe.py` traduit le protocole GO_PRINT → MEDomics
 
 - [ ] **Gestionnaire de progression en temps réel**
   - Câbler les événements `go_progress()` de Python vers le frontend via SSE
@@ -131,12 +154,14 @@
 - [ ] **Composant `<InferenceResults />`** — Score STARHE-RISK, bboxes, liste frames détectées cliquables
 - [ ] **Composant `<AnalysisConsole />`** — Logs en temps réel (SSE)
 - [ ] **Intégration dans le système de navigation MEDomics**
+- [ ] **Encapsulation MEDDataObject** — Produire et consommer des MEDDataObjects pour s'intégrer dans les workflows MEDomics existants
 
 ### 🧪 Phase 4 : Tests & Déploiement (Long terme)
 
 - [ ] **Tests d'intégration bout en bout** — Frontend React → Go → Python → MongoDB
 - [ ] **Documentation API Go** — Swagger / OpenAPI
 - [ ] **Packaging du plug-in** — Compatibilité système d'extensions MEDomics
+- [ ] **Script d'installation automatisé** — Automatiser la copie du blueprint, la création des symlinks (ou copie sur Windows), et le patch de `main.go`
 
 ---
 
