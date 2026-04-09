@@ -1079,12 +1079,17 @@ class STARHEApp(tk.Tk):
             title="Sélectionner un ou plusieurs fichiers DICOM",
             initialdir=DATA_DIR,
         )
-        # Sur macOS, le dialogue natif (NSOpenPanel) filtre par UTI et masque
-        # les fichiers sans extension (A0000, IM-0001…). On désactive le filtre.
-        if platform.system() != "Darwin":
+        # "Tous fichiers" en premier = sélection par défaut sur toutes les plateformes.
+        # Les fichiers DICOM n'ont pas toujours l'extension .dcm (ex: A0000, IM-0001…).
+        # Sur macOS, NSOpenPanel masque les fichiers sans extension si un filtre UTI
+        # est actif — on garde donc "Tous fichiers" comme première option partout.
+        if platform.system() == "Darwin":
+            # Pas de filetypes : NSOpenPanel affiche tout sans filtrer par UTI
+            pass
+        else:
             kwargs["filetypes"] = [
-                ("Fichiers DICOM", "*.dcm"),
                 ("Tous fichiers", "*"),
+                ("Fichiers DICOM", "*.dcm"),
             ]
         paths = filedialog.askopenfilenames(**kwargs)
         if not paths:
