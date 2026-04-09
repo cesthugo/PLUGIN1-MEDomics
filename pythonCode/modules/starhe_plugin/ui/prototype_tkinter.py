@@ -431,6 +431,44 @@ class STARHEApp(tk.Tk):
         self._pan_y = 0.0
         self._refresh_canvas()
 
+    def _on_canvas_scroll(self, event):
+        """Zoom centré sur le curseur souris à la molette.
+
+        Fonctionne dans tous les modes.
+        - Windows / macOS : <MouseWheel>, event.delta = ±120 (Win) ou ±1..5 (macOS)
+        - Linux           : <Button-4> (scroll up) / <Button-5> (scroll down)
+
+        La formule de recentrage garantit que le point image sous le curseur
+        reste immobile après le changement de zoom :
+          new_pan = pan * f + (1 - f) * (mouse_canvas - canvas_center / 2)
+        où f = new_zoom / old_zoom.
+        """
+        if self._frames_raw is None:
+            return "break"
+
+        # Normalisation du delta selon la plateforme
+        if event.num == 4:
+            delta = 1
+        elif event.num == 5:
+            delta = -1
+        else:
+            delta = event.delta
+
+        factor = 1.1 if delta > 0 else (1.0 / 1.1)
+        new_zoom = max(0.1, min(10.0, self._zoom * factor))
+        actual_factor = new_zoom / self._zoom
+
+        cw = self._canvas.winfo_width()  or CANVAS_W
+        ch = self._canvas.winfo_height() or CANVAS_H
+        mx, my = event.x, event.y
+
+        # Recentrage : le point image sous le curseur ne bouge pas
+        self._pan_x = self._pan_x * actual_factor + (1.0 - actual_factor) * (mx - cw / 2.0)
+        self._pan_y = self._pan_y * actual_factor + (1.0 - actual_factor) * (my - ch / 2.0)
+        self._zoom  = new_zoom
+        self._refresh_canvas()
+        return "break"   # empêche la propagation vers le défilement de la sidebar
+
     # ── Conversion coordonnées écran ↔ image ─────────────────────────────────
 
     def _img_transform(self) -> tuple:
@@ -837,6 +875,10 @@ class STARHEApp(tk.Tk):
         # Suppression de mesure sélectionnée (le canvas doit avoir le focus)
         self._canvas.bind("<Delete>",          self._on_measure_delete)
         self._canvas.bind("<BackSpace>",       self._on_measure_delete)
+        # Zoom molette (Windows/macOS: <MouseWheel> ; Linux: <Button-4>/<Button-5>)
+        self._canvas.bind("<MouseWheel>",      self._on_canvas_scroll)
+        self._canvas.bind("<Button-4>",        self._on_canvas_scroll)
+        self._canvas.bind("<Button-5>",        self._on_canvas_scroll)
         self._canvas_text = self._canvas.create_text(
             CANVAS_W // 2, CANVAS_H // 2,
             text="Aucun DICOM chargé\n\nUtilisez  « Charger un fichier DICOM »  dans le panneau latéral",
