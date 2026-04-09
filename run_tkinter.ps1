@@ -5,7 +5,6 @@
 
 $VENV_DIR     = "$PSScriptRoot\pythonCode\modules\starhe_plugin\.venv"
 $PYTHON       = "$VENV_DIR\Scripts\python.exe"
-$PIP          = "$VENV_DIR\Scripts\pip.exe"
 $MODULES      = "$PSScriptRoot\pythonCode\modules"
 $PREPUS       = "$PSScriptRoot\third_party\prepUS"
 $REQUIREMENTS = "$PSScriptRoot\pythonCode\modules\starhe_plugin\requirements.txt"
@@ -61,8 +60,8 @@ if (-not (Test-Path $PYTHON)) {
         exit 1
     }
     Write-Host "Installation des dependances (cela peut prendre quelques minutes)..."
-    & $PIP install --upgrade pip --quiet
-    & $PIP install -r "$REQUIREMENTS" --quiet
+    & $PYTHON -m pip install --upgrade pip --quiet
+    & $PYTHON -m pip install -r "$REQUIREMENTS" --quiet
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Echec de l installation des dependances."
         exit 1
@@ -70,12 +69,43 @@ if (-not (Test-Path $PYTHON)) {
     Write-Host "Venv cree et dependances installees."
 }
 
+# -- 3b. S assurer que pip est disponible dans le venv -----------------------
+& $PYTHON -m pip --version 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "pip absent du venv - bootstrap via ensurepip..."
+    & $PYTHON -m ensurepip --upgrade
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Echec du bootstrap pip (ensurepip)."
+        exit 1
+    }
+    & $PYTHON -m pip install --upgrade pip --quiet
+    Write-Host "Installation des dependances (cela peut prendre quelques minutes)..."
+    & $PYTHON -m pip install -r "$REQUIREMENTS" --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Echec de l installation des dependances."
+        exit 1
+    }
+    Write-Host "pip et dependances installes avec succes."
+}
+
+# -- 3c. Installer les dependances si absentes --------------------------------
+& $PYTHON -c "import numpy" 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Dependances absentes - installation depuis requirements.txt..."
+    & $PYTHON -m pip install -r "$REQUIREMENTS" --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Echec de l installation des dependances."
+        exit 1
+    }
+    Write-Host "Dependances installees avec succes."
+}
+
 # -- 4. Installer prepUS si absent --------------------------------------------
 & $PYTHON -c "import prepUS" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "prepUS absent du venv - installation depuis third_party/prepUS..."
-    & $PIP install sonocrop --no-deps --quiet
-    & $PIP install "$PREPUS" --no-deps --quiet
+    & $PYTHON -m pip install sonocrop --no-deps --quiet
+    & $PYTHON -m pip install "$PREPUS" --no-deps --quiet
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Echec de l installation de prepUS depuis $PREPUS"
         exit 1

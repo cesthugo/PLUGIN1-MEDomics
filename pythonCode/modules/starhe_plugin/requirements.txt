@@ -10,7 +10,7 @@ opencv-python-headless>=4.9.0.80
 # ── IA / Deep Learning ───────────────────────────────────────────────────────
 torch>=2.2.0
 torchvision>=0.17.0
-einops>=0.7.0
+# einops n'est pas importé directement — dépendance transitive de mmdet (installée automatiquement)
 
 # ── Frameworks ML (mmcv-lite = Python pur, pas d'extensions C compilées) ──────
 mmengine>=0.10.0
