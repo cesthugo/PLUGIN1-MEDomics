@@ -348,6 +348,8 @@ class STARHEApp(tk.Tk):
         # Système d'onglets multi-fichiers
         self._tabs          : list[dict]      = []           # un dict d'état par onglet
         self._active_tab    : int             = -1           # index de l'onglet actif (-1 = aucun)
+        self._patients      : list[dict]      = []           # [{"name": str, "tabs": [idx_in_self._tabs, …]}, …]
+        self._active_patient: int             = -1           # index du patient actif (-1 = aucun)
         self._contrast      : float           = 1.0          # 0.1 – 3.0
         self._brightness    : float           = 0.0          # -100 – +100
         self._pixel_spacing : tuple | None    = None         # (row_mm, col_mm) extrait du tag PixelSpacing DICOM
@@ -576,12 +578,30 @@ class STARHEApp(tk.Tk):
         return (ix * scale + off_x, iy * scale + off_y)
 
     def _kb_next_tab(self):
-        if self._tabs:
-            self._switch_tab((self._active_tab + 1) % len(self._tabs))
+        if self._patients and self._active_patient >= 0:
+            patient = self._patients[self._active_patient]
+            tabs = patient["tabs"]
+            if not tabs:
+                return
+            try:
+                pos = tabs.index(self._active_tab)
+            except ValueError:
+                pos = -1
+            next_pos = (pos + 1) % len(tabs)
+            self._switch_tab(tabs[next_pos])
 
     def _kb_prev_tab(self):
-        if self._tabs:
-            self._switch_tab((self._active_tab - 1) % len(self._tabs))
+        if self._patients and self._active_patient >= 0:
+            patient = self._patients[self._active_patient]
+            tabs = patient["tabs"]
+            if not tabs:
+                return
+            try:
+                pos = tabs.index(self._active_tab)
+            except ValueError:
+                pos = 0
+            prev_pos = (pos - 1) % len(tabs)
+            self._switch_tab(tabs[prev_pos])
 
     # ── Construction UI ───────────────────────────────────────────────────────
 
@@ -876,6 +896,22 @@ class STARHEApp(tk.Tk):
 
         self._card_divider = tk.Frame(card, bg=BORDER, height=1)
         self._card_divider.pack(fill="x")
+
+        # ── Barre d'onglets PATIENTS (en haut, juste sous le divider) ─────────
+        _PTAB_BG = "#10141e"
+        self._patient_bar_outer = tk.Frame(card, bg=_PTAB_BG, height=30)
+        self._patient_bar_outer.pack(fill="x")
+        self._patient_bar_outer.pack_propagate(False)
+        self._patient_bar_scroll = tk.Canvas(self._patient_bar_outer, bg=_PTAB_BG,
+                                              highlightthickness=0, height=30)
+        self._patient_bar_scroll.pack(side="left", fill="both", expand=True)
+        self._patient_bar_inner = tk.Frame(self._patient_bar_scroll, bg=_PTAB_BG)
+        self._patient_bar_scroll.create_window((0, 0), window=self._patient_bar_inner, anchor="nw")
+        self._patient_bar_inner.bind("<Configure>", lambda e: self._patient_bar_scroll.config(
+            scrollregion=self._patient_bar_scroll.bbox("all")))
+        self._patient_bar_scroll.bind("<MouseWheel>",
+            lambda e: self._patient_bar_scroll.xview_scroll(
+                int(-1 * (e.delta if abs(e.delta) < 50 else e.delta // 120)), "units"))
 
         # ── Barre d'onglets (bas de la carte, avant canvas pour side="bottom") ────
         _TAB_BG = "#0c1018"
@@ -1265,10 +1301,35 @@ class STARHEApp(tk.Tk):
                 (v for n, v in original_sensitive if n == "StudyDate" and v != "— absent"),
                 ""
             )
-            self._tabs.append(
-                self._capture_tab_state(self._make_tab_label(_study_date, path))
+            _patient_name = next(
+                (v for n, v in original_sensitive if n == "PatientName" and v != "— absent"),
+                "Patient inconnu"
             )
-            self._active_tab = len(self._tabs) - 1
+            # Normalise le nom : remplace ^ par espace, titre
+            _patient_name = _patient_name.replace("^", " ").strip() or "Patient inconnu"
+
+            tab_state = self._capture_tab_state(
+                self._make_tab_label(_study_date, path),
+                patient_name=_patient_name,
+            )
+            self._tabs.append(tab_state)
+            new_tab_idx = len(self._tabs) - 1
+
+            # ── Groupement par patient ──────────────────────────────────────────
+            patient_idx = None
+            for pi, p in enumerate(self._patients):
+                if p["name"] == _patient_name:
+                    patient_idx = pi
+                    break
+            if patient_idx is None:
+                # Nouveau patient
+                self._patients.append({"name": _patient_name, "tabs": [new_tab_idx]})
+                patient_idx = len(self._patients) - 1
+            else:
+                self._patients[patient_idx]["tabs"].append(new_tab_idx)
+
+            self._active_patient = patient_idx
+            self._active_tab = new_tab_idx
 
         except Exception as exc:
             messagebox.showerror("Erreur de chargement", str(exc))
@@ -1287,10 +1348,11 @@ class STARHEApp(tk.Tk):
         base = os.path.splitext(os.path.basename(path))[0]
         return base[:14] if len(base) > 14 else base
 
-    def _capture_tab_state(self, label: str) -> dict:
+    def _capture_tab_state(self, label: str, patient_name: str = "") -> dict:
         """Prend un instantané de l'état courant pour le stocker dans un onglet."""
         return {
             "label":                label,
+            "patient_name":         patient_name,
             "frames_raw":           self._frames_raw,
             "frames_cropped":       self._frames_cropped,
             "frames_backscan":      self._frames_backscan,
@@ -1416,11 +1478,13 @@ class STARHEApp(tk.Tk):
         self._update_meta_widgets()
 
     def _switch_tab(self, idx: int):
-        """Bascule vers l'onglet *idx* : sauvegarde l'état courant puis restaure."""
+        """Bascule vers l'onglet global *idx* : sauvegarde l'état courant puis restaure."""
         if not (0 <= idx < len(self._tabs)):
+            self._rebuild_patient_bar()
             self._rebuild_tab_bar()
             return
         if idx == self._active_tab:
+            self._rebuild_patient_bar()
             self._rebuild_tab_bar()
             return
         if self._playing:
@@ -1434,18 +1498,39 @@ class STARHEApp(tk.Tk):
             self._canvas.delete(item)
         self._save_tab_state()
         self._active_tab = idx
+        # Met à jour le patient actif si nécessaire
+        for pi, p in enumerate(self._patients):
+            if idx in p["tabs"]:
+                self._active_patient = pi
+                break
         self._restore_tab_state(idx)
+        self._rebuild_patient_bar()
         self._rebuild_tab_bar()
         self._refresh_canvas()
 
+    def _switch_patient(self, patient_idx: int):
+        """Bascule vers un patient : active le premier onglet de ce patient."""
+        if not (0 <= patient_idx < len(self._patients)):
+            return
+        if patient_idx == self._active_patient:
+            return
+        patient = self._patients[patient_idx]
+        if not patient["tabs"]:
+            return
+        # Bascule vers le premier fichier de ce patient
+        first_tab = patient["tabs"][0]
+        self._switch_tab(first_tab)
+
     def _close_tab(self, idx: int):
-        """Ferme l'onglet *idx*."""
+        """Ferme l'onglet global *idx* et met à jour la structure patients."""
         if not self._tabs:
             return
         if len(self._tabs) == 1:
             # Dernier onglet : réinitialise tout
             self._tabs.clear()
+            self._patients.clear()
             self._active_tab = -1
+            self._active_patient = -1
             self._frames_raw = self._frames_cropped = None
             self._frames_backscan = self._frames_crop_only = None
             self._prepus_info = None
@@ -1464,6 +1549,7 @@ class STARHEApp(tk.Tk):
             self._mode_lbl.config(text="—", fg=SBAR_MUTED)
             self._populate_det_frames([])
             self._update_meta_widgets()
+            self._rebuild_patient_bar()
             self._rebuild_tab_bar()
             self._canvas.delete("all")
             self._canvas.create_text(
@@ -1471,27 +1557,63 @@ class STARHEApp(tk.Tk):
                 text="Aucun DICOM chargé\n\nUtilisez  « Charger un fichier DICOM »  dans le panneau latéral",
                 fill="#2a2a3e", font=("Segoe UI", 12), justify="center")
             return
+
         was_active = (idx == self._active_tab)
+
+        # Retire l'index de la liste des patients et renumérise
         self._tabs.pop(idx)
+        for p in self._patients:
+            p["tabs"] = [t - 1 if t > idx else t
+                         for t in p["tabs"] if t != idx]
+        # Supprime les patients sans onglets
+        self._patients = [p for p in self._patients if p["tabs"]]
+
         if was_active:
-            new_idx = max(0, idx - 1)
+            # Trouver un onglet de remplacement dans le même patient
+            old_patient_name = None
+            for p in self._patients:
+                if any(t == max(0, idx - 1) for t in p["tabs"]) or p["tabs"]:
+                    old_patient_name = p["name"]
+                    break
+            new_idx = max(0, idx - 1) if idx > 0 else 0
+            new_idx = min(new_idx, len(self._tabs) - 1)
             self._active_tab = new_idx
+            # Mettre à jour le patient actif
+            for pi, p in enumerate(self._patients):
+                if new_idx in p["tabs"]:
+                    self._active_patient = pi
+                    break
             self._restore_tab_state(new_idx)
+            self._rebuild_patient_bar()
             self._rebuild_tab_bar()
             self._refresh_canvas()
         else:
             if self._active_tab > idx:
                 self._active_tab -= 1
+            # Mettre à jour le patient actif
+            for pi, p in enumerate(self._patients):
+                if self._active_tab in p["tabs"]:
+                    self._active_patient = pi
+                    break
+            self._rebuild_patient_bar()
             self._rebuild_tab_bar()
 
     def _rebuild_tab_bar(self):
-        """Redessine tous les boutons d'onglets."""
+        """Redessine la barre d'onglets des fichiers (dates) du patient actif."""
         for w in self._tab_bar_inner.winfo_children():
             w.destroy()
         _TAB_BG     = "#0c1018"
         _TAB_ACT_BG = "#131c2e"
-        for i, tab in enumerate(self._tabs):
-            is_active = (i == self._active_tab)
+        if self._active_patient < 0 or self._active_patient >= len(self._patients):
+            self._tab_bar_inner.update_idletasks()
+            self._tab_bar_scroll.config(scrollregion=self._tab_bar_scroll.bbox("all"))
+            return
+        patient = self._patients[self._active_patient]
+        for tab_global_idx in patient["tabs"]:
+            if tab_global_idx >= len(self._tabs):
+                continue
+            tab = self._tabs[tab_global_idx]
+            is_active = (tab_global_idx == self._active_tab)
             bg  = _TAB_ACT_BG if is_active else _TAB_BG
             fg  = "#e5e7eb"   if is_active else "#6b7280"
             frm = tk.Frame(self._tab_bar_inner, bg=bg, cursor="hand2")
@@ -1509,13 +1631,39 @@ class STARHEApp(tk.Tk):
                 bg="#000000", fg="#ffffff", cursor="hand2",
                 font=("Segoe UI", 9), padx=3, pady=1)
             close_lbl.pack(side="left", pady=2)
-            close_lbl.bind("<Button-1>", lambda e, ci=i: self._close_tab(ci))
+            _gi = tab_global_idx
+            close_lbl.bind("<Button-1>", lambda e, ci=_gi: self._close_tab(ci))
             close_lbl.bind("<Enter>", lambda e, l=close_lbl: l.configure(fg="#ff4444"))
             close_lbl.bind("<Leave>", lambda e, l=close_lbl: l.configure(fg="#ffffff"))
             for w in (frm, inner, lbl):
-                w.bind("<Button-1>", lambda e, ci=i: self._switch_tab(ci))
+                w.bind("<Button-1>", lambda e, ci=_gi: self._switch_tab(ci))
         self._tab_bar_inner.update_idletasks()
         self._tab_bar_scroll.config(scrollregion=self._tab_bar_scroll.bbox("all"))
+
+    def _rebuild_patient_bar(self):
+        """Redessine la barre d'onglets patients (en haut du viewer)."""
+        for w in self._patient_bar_inner.winfo_children():
+            w.destroy()
+        _PTAB_BG     = "#10141e"
+        _PTAB_ACT_BG = "#1a2238"
+        for pi, patient in enumerate(self._patients):
+            is_active = (pi == self._active_patient)
+            bg  = _PTAB_ACT_BG if is_active else _PTAB_BG
+            fg  = "#e5e7eb"    if is_active else "#6b7280"
+            frm = tk.Frame(self._patient_bar_inner, bg=bg, cursor="hand2")
+            frm.pack(side="left", padx=(0, 1), fill="y")
+            # Barre bleue en bas de l'onglet patient actif
+            inner = tk.Frame(frm, bg=bg)
+            inner.pack(fill="both", expand=True)
+            lbl = tk.Label(inner, text=patient["name"],
+                           bg=bg, fg=fg, font=("Segoe UI", 8, "bold"),
+                           padx=10, pady=4, cursor="hand2")
+            lbl.pack(side="left")
+            tk.Frame(frm, bg=BLUE if is_active else _PTAB_BG, height=2).pack(fill="x", side="bottom")
+            for w in (frm, inner, lbl):
+                w.bind("<Button-1>", lambda e, idx=pi: self._switch_patient(idx))
+        self._patient_bar_inner.update_idletasks()
+        self._patient_bar_scroll.config(scrollregion=self._patient_bar_scroll.bbox("all"))
 
     def _run_prepus_internal(self):
         """Exécute le pré-traitement prepUS (backscan 512×512) sans interaction UI."""
