@@ -90,6 +90,7 @@ FONT_TITLE  = ("Segoe UI", 12, "bold")
 FONT_SEC    = ("Segoe UI",  7, "bold")
 FONT_BODY   = ("Segoe UI",  9)
 FONT_SMALL  = ("Segoe UI",  8)
+FONT_MEASURE = ("Segoe UI", 11, "bold")
 FONT_MONO   = ("Consolas",  8)
 FONT_BTN    = ("Segoe UI",  9,  "bold")
 FONT_BTN_P  = ("Segoe UI", 10, "bold")
@@ -105,6 +106,74 @@ def _ndarray_to_photoimage(arr: np.ndarray, max_w: int, max_h: int) -> ImageTk.P
 
     img.thumbnail((max_w, max_h), Image.LANCZOS)
     return ImageTk.PhotoImage(img)
+
+
+def _map_bbox_backscan_to_original(bbox: list, prepus_info: dict) -> list:
+    """
+    Convertit une bounding box de l'espace backscan (512×512) vers
+    l'espace de l'image DICOM originale en inversant la transformation
+    polaire de prepUS, puis en ajoutant l'offset de crop.
+
+    bbox        : [x0, y0, x1, y1] en pixels backscan (x=col, y=row)
+    prepus_info : dict issu de info.json (clés "crop" et "backscan")
+    Retourne      [x0, y0, x1, y1] en pixels de l'image originale.
+    """
+    bsc  = prepus_info["backscan"]
+    crop = prepus_info["crop"]
+
+    rc      = bsc["rc"]
+    dc      = bsc["dc"]
+    theta_c = bsc["theta_c"]
+    xoff    = bsc["xoffset"]   # valeurs telles que stockées par prepUS
+    yoff    = bsc["yoffset"]
+    bsc_h   = bsc["height"]
+    bsc_w   = bsc["width"]
+
+    delta_r     = dc / bsc_h
+    delta_theta = theta_c / bsc_w
+
+    x0, y0, x1, y1 = bbox          # backscan : x=col (bj), y=row (bi)
+
+    # Échantillonner des points le long des 4 bords (transformation non-linéaire)
+    N = 12
+    bj_vals = np.linspace(x0, x1, N)
+    bi_vals = np.linspace(y0, y1, N)
+
+    sample_points = (
+        [(bj, y0) for bj in bj_vals] +  # bord haut
+        [(bj, y1) for bj in bj_vals] +  # bord bas
+        [(x0, bi) for bi in bi_vals] +  # bord gauche
+        [(x1, bi) for bi in bi_vals]    # bord droit
+    )
+
+    orig_cols: list[float] = []
+    orig_rows: list[float] = []
+    for bj, bi in sample_points:
+        r     = rc + bi * delta_r
+        angle = -theta_c / 2 + bj * delta_theta
+        # coord_transform avec le swap xoffset/yoffset du CLI prepUS
+        crop_row = r * math.cos(angle) - yoff
+        crop_col = r * math.sin(angle) + xoff
+        orig_rows.append(crop_row + crop["ymin"])
+        orig_cols.append(crop_col + crop["xmin"])
+
+    return [min(orig_cols), min(orig_rows), max(orig_cols), max(orig_rows)]
+
+
+def _map_all_detections_to_original(
+    per_frame: list[list[dict]],
+    prepus_info: dict,
+) -> list[list[dict]]:
+    """Remappe toutes les détections (toutes frames) du backscan vers l'image originale."""
+    mapped: list[list[dict]] = []
+    for frame_dets in per_frame:
+        mapped_dets: list[dict] = []
+        for det in frame_dets:
+            new_det = dict(det)
+            new_det["bbox"] = _map_bbox_backscan_to_original(det["bbox"], prepus_info)
+            mapped_dets.append(new_det)
+        mapped.append(mapped_dets)
+    return mapped
 
 
 def _draw_detections_on_array(frame: np.ndarray,
@@ -243,6 +312,7 @@ class STARHEApp(tk.Tk):
         self._frames_cropped  : np.ndarray | None = None
         self._frames_backscan : np.ndarray | None = None  # résultat backscan prepUS
         self._frames_crop_only: np.ndarray | None = None  # résultat crop-seulement prepUS
+        self._prepus_info     : dict | None       = None  # info.json de prepUS (crop + backscan)
         self._roi             : tuple | None      = None
         self._frame_idx            : int               = 0
         self._detections_by_mode   : dict[str, list[list[dict]]] = {}   # mode→per-frame dets
@@ -269,8 +339,8 @@ class STARHEApp(tk.Tk):
         self._drag_start    : tuple | None    = None         # (ex, ey, val_a, val_b)
         self._press_time    : float           = 0.0          # horodatage du ButtonPress-1
         self._press_pos     : tuple           = (0, 0)       # position du ButtonPress-1
-        # Mesures multiples
-        self._measures              : list            = []   # [{pts:[(x1,y1),(x2,y2)], items:[...]}]
+        # Mesures multiples (par frame)
+        self._measures_by_frame     : dict[int, list] = {}   # frame_idx -> [{pts:[(x1,y1),(x2,y2)], items:[...]}]
         self._measure_drawing       : list            = []   # [(x,y)] ou [] — segment en cours
         self._measure_selected      : int | None      = None # index segment sélectionné
         self._measure_edit          : dict | None     = None # édition drag
@@ -680,35 +750,9 @@ class STARHEApp(tk.Tk):
         self._sbtn(sc, "⏮   Revenir au début", self._reset_video) \
             .pack(fill="x", padx=10, pady=(0, 6))
 
-        # ─── PRÉ-TRAITEMENT ──────────────────────────────────────────────────
-        _sh("Pré-traitement")
-        self._btn_preprocess = self._sbtn(sc, "⚙   Pré-Traitement",
-                                          self._on_preprocess)
-        self._btn_preprocess.pack(fill="x", padx=10, pady=(6, 2))
-
-        # Indicateur d'état du pré-traitement
-        self._preprocess_status = tk.Label(sc, text="",
-                                           bg=SIDEBAR_BG, fg=SBAR_MUTED,
-                                           font=FONT_SMALL, anchor="w")
-        self._preprocess_status.pack(fill="x", padx=14, pady=(0, 4))
-
-        # Options pré-traitement
-        prepus_opts = tk.Frame(sc, bg=SIDEBAR_BG)
-        prepus_opts.pack(fill="x", padx=16, pady=(0, 2))
+        # Variables internes (pré-traitement automatique, pas d'UI)
         self._prepus_bsc = tk.BooleanVar(value=True)
-        tk.Checkbutton(prepus_opts, text="Backscan (512×512)",
-                       variable=self._prepus_bsc,
-                       command=self._on_bsc_toggle,
-                       bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
-                       activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
-                       cursor="hand2", font=FONT_SMALL).pack(anchor="w")
-
         self._crop_toggle = tk.BooleanVar(value=False)
-        tk.Checkbutton(sc, text="Afficher résultat pré-traitement",
-                       variable=self._crop_toggle, command=self._on_crop_toggle,
-                       bg=SIDEBAR_BG, fg=SBAR_FG, selectcolor=SIDEBAR_SEC,
-                       activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
-                       cursor="hand2", font=FONT_SMALL).pack(anchor="w", padx=16)
 
         # ─── ANALYSE IA ──────────────────────────────────────────────────────
         _sh("Analyse IA")
@@ -957,16 +1001,16 @@ class STARHEApp(tk.Tk):
     # ── Mode d'affichage courant (pour associer les détections au bon mode) ───
 
     def _current_display_mode(self) -> str:
-        """Retourne le mode d'affichage actif : 'backscan', 'crop' ou 'original'."""
+        """Retourne le mode d'affichage actif : 'backscan' ou 'original'."""
         if self._crop_toggle.get() and self._frames_cropped is not None:
-            return "backscan" if self._prepus_bsc.get() else "crop"
+            return "backscan"
         return "original"
 
     def _active_detections(self) -> list[list[dict]]:
         """Retourne les détections correspondant au mode d'affichage courant."""
         return self._detections_by_mode.get(self._current_display_mode(), [])
 
-    _MODE_LABELS = {"backscan": "Backscan 512×512", "crop": "Pré-traitement (crop)", "original": "Original"}
+    _MODE_LABELS = {"backscan": "Analyse STARHE", "original": "Original"}
 
     def _refresh_results_panel(self):
         """Met à jour la section Résultats selon le mode d'affichage courant."""
@@ -984,35 +1028,6 @@ class STARHEApp(tk.Tk):
         _dets = self._active_detections()
         det_idxs = [i for i, d in enumerate(_dets) if d]
         self._populate_det_frames(det_idxs)
-
-    # ── Bascule cropped / original ───────────────────────────────────────────
-
-    def _on_crop_toggle(self):
-        """Bascule la vue cropped/original et met à jour les résultats affichés."""
-        self._refresh_results_panel()
-        self._refresh_canvas()
-
-    # ── Bascule backscan / crop-seulement ─────────────────────────────────────
-
-    def _on_bsc_toggle(self):
-        """Bascule la vue entre backscan et crop-seulement si les deux sont disponibles."""
-        if self._frames_backscan is None and self._frames_crop_only is None:
-            return  # prepUS pas encore exécuté, la checkbox n'est qu'un paramètre
-        want_bsc = self._prepus_bsc.get()
-        if want_bsc and self._frames_backscan is not None:
-            self._frames_cropped = self._frames_backscan
-            self._log("Vue → backscan (512×512)")
-        elif not want_bsc and self._frames_crop_only is not None:
-            self._frames_cropped = self._frames_crop_only
-            self._log("Vue → crop seulement")
-        else:
-            self._log("Version demandée non disponible — relancez prepUS avec ce mode.",
-                      level="warning")
-            return
-        self._crop_toggle.set(True)
-        # Rafraîchir le panneau Résultats pour le nouveau mode
-        self._refresh_results_panel()
-        self._refresh_canvas()
 
     # ── Scale de navigation ───────────────────────────────────────────────────
 
@@ -1148,6 +1163,7 @@ class STARHEApp(tk.Tk):
             self._frames_cropped   = None
             self._frames_backscan  = None
             self._frames_crop_only = None
+            self._prepus_info      = None
             self._roi              = None
             self._frame_idx             = 0
             self._detections_by_mode    = {}
@@ -1279,6 +1295,7 @@ class STARHEApp(tk.Tk):
             "frames_cropped":       self._frames_cropped,
             "frames_backscan":      self._frames_backscan,
             "frames_crop_only":     self._frames_crop_only,
+            "prepus_info":          self._prepus_info,
             "roi":                  self._roi,
             "frame_idx":            self._frame_idx,
             "detections_by_mode":   {k: list(v) for k, v in self._detections_by_mode.items()},
@@ -1288,7 +1305,7 @@ class STARHEApp(tk.Tk):
             "base_fps":             self._base_fps,
             "original_sensitive":   list(self._original_sensitive),
             "kept_metadata":        list(self._kept_metadata),
-            "measures":             [{"pts": list(s["pts"])} for s in self._measures],
+            "measures_by_frame":    {f: [{"pts": list(s["pts"])} for s in segs] for f, segs in self._measures_by_frame.items()},
             "measure_selected":     self._measure_selected,
             "zoom":                 self._zoom,
             "pan_x":               self._pan_x,
@@ -1302,8 +1319,6 @@ class STARHEApp(tk.Tk):
             "info_val":             self._info_var.get(),
             "label_file_text":      self._label_file.cget("text"),
             "label_file_fg":        self._label_file.cget("fg"),
-            "preprocess_text":      self._preprocess_status.cget("text"),
-            "preprocess_fg":        self._preprocess_status.cget("fg"),
         }
 
     def _save_tab_state(self):
@@ -1315,6 +1330,7 @@ class STARHEApp(tk.Tk):
         s["frames_cropped"]        = self._frames_cropped
         s["frames_backscan"]       = self._frames_backscan
         s["frames_crop_only"]      = self._frames_crop_only
+        s["prepus_info"]           = self._prepus_info
         s["roi"]                   = self._roi
         s["frame_idx"]             = self._frame_idx
         s["detections_by_mode"]    = {k: list(v) for k, v in self._detections_by_mode.items()}
@@ -1324,7 +1340,7 @@ class STARHEApp(tk.Tk):
         s["base_fps"]              = self._base_fps
         s["original_sensitive"]    = list(self._original_sensitive)
         s["kept_metadata"]         = list(self._kept_metadata)
-        s["measures"]              = [{"pts": list(seg["pts"])} for seg in self._measures]
+        s["measures_by_frame"]     = {f: [{"pts": list(seg["pts"])} for seg in segs] for f, segs in self._measures_by_frame.items()}
         s["measure_selected"]      = self._measure_selected
         s["zoom"]                  = self._zoom
         s["pan_x"]                 = self._pan_x
@@ -1338,8 +1354,6 @@ class STARHEApp(tk.Tk):
         s["info_val"]              = self._info_var.get()
         s["label_file_text"]       = self._label_file.cget("text")
         s["label_file_fg"]         = self._label_file.cget("fg")
-        s["preprocess_text"]       = self._preprocess_status.cget("text")
-        s["preprocess_fg"]         = self._preprocess_status.cget("fg")
 
     def _restore_tab_state(self, idx: int):
         """Restaure l'état d'un onglet dans les variables d'instance et l'UI."""
@@ -1348,6 +1362,7 @@ class STARHEApp(tk.Tk):
         self._frames_cropped        = s.get("frames_cropped")
         self._frames_backscan       = s.get("frames_backscan")
         self._frames_crop_only      = s.get("frames_crop_only")
+        self._prepus_info           = s.get("prepus_info")
         self._roi                   = s.get("roi")
         self._frame_idx             = s.get("frame_idx", 0)
         self._detections_by_mode    = {k: list(v) for k, v in s.get("detections_by_mode", {}).items()}
@@ -1358,8 +1373,9 @@ class STARHEApp(tk.Tk):
         self._original_sensitive    = list(s.get("original_sensitive", []))
         self._kept_metadata         = list(s.get("kept_metadata", []))
         # Mesures : items canvas seront recréés par _redraw_measures / _refresh_canvas
-        self._measures              = [{"pts": list(seg["pts"]), "items": []}
-                                       for seg in s.get("measures", [])]
+        self._measures_by_frame     = {f: [{"pts": list(seg["pts"]), "items": []}
+                                           for seg in segs]
+                                       for f, segs in s.get("measures_by_frame", {}).items()}
         self._measure_drawing       = []
         self._measure_preview_items = []
         self._measure_selected      = s.get("measure_selected")
@@ -1394,9 +1410,6 @@ class STARHEApp(tk.Tk):
         self._label_file.config(
             text=s.get("label_file_text", "Aucun fichier sélectionné"),
             fg=s.get("label_file_fg", SBAR_MUTED))
-        self._preprocess_status.config(
-            text=s.get("preprocess_text", ""),
-            fg=s.get("preprocess_fg", SBAR_MUTED))
         _active_dets = self._active_detections()
         det_idxs = [i for i, d in enumerate(_active_dets) if d]
         self._populate_det_frames(det_idxs)
@@ -1413,9 +1426,10 @@ class STARHEApp(tk.Tk):
         if self._playing:
             self._toggle_play()
         # Supprime les items canvas de mesure (seront recréés sur le nouvel onglet)
-        for seg in self._measures:
-            for item in seg["items"]:
-                self._canvas.delete(item)
+        for segs in self._measures_by_frame.values():
+            for seg in segs:
+                for item in seg["items"]:
+                    self._canvas.delete(item)
         for item in self._measure_preview_items:
             self._canvas.delete(item)
         self._save_tab_state()
@@ -1434,6 +1448,7 @@ class STARHEApp(tk.Tk):
             self._active_tab = -1
             self._frames_raw = self._frames_cropped = None
             self._frames_backscan = self._frames_crop_only = None
+            self._prepus_info = None
             self._detections_by_mode = {}
             self._results_by_mode = {}
             self._dicom_path = None
@@ -1447,7 +1462,6 @@ class STARHEApp(tk.Tk):
             self._risk_lbl.config(text="—", fg=SBAR_MUTED)
             self._det_lbl .config(text="—", fg=SBAR_MUTED)
             self._mode_lbl.config(text="—", fg=SBAR_MUTED)
-            self._preprocess_status.config(text="", fg=SBAR_MUTED)
             self._populate_det_frames([])
             self._update_meta_widgets()
             self._rebuild_tab_bar()
@@ -1503,70 +1517,36 @@ class STARHEApp(tk.Tk):
         self._tab_bar_inner.update_idletasks()
         self._tab_bar_scroll.config(scrollregion=self._tab_bar_scroll.bbox("all"))
 
-    def _on_preprocess(self):
-        """Lance le pré-traitement prepUS dans un thread (backscan selon checkbox)."""
-        if self._frames_raw is None:
-            messagebox.showwarning("Aucun DICOM", "Chargez d'abord un fichier DICOM.")
-            return
-        self._btn_preprocess.config(state="disabled")
-        self._preprocess_status.config(text="⟳  Traitement en cours…", fg=WARN_FG)
-        self._log("Pré-traitement prepUS (removeLayout) en cours…")
-        t = threading.Thread(target=self._run_prepus_thread, daemon=True)
-        t.start()
+    def _run_prepus_internal(self):
+        """Exécute le pré-traitement prepUS (backscan 512×512) sans interaction UI."""
+        import numpy as _np
+        self._log("  → Pré-traitement prepUS (backscan 512×512) en cours…")
+        backscan_arr, crop_only_arr, info = preprocess_with_prepus(
+            self._frames_raw,
+            fps=22.0,
+            thresh=-1.0,
+            back_scan_conversion=True,
+            backscan_width=512,
+            backscan_height=512,
+        )
 
-    def _run_prepus_thread(self):
-        """
-        Toujours lancé avec back_scan_conversion=True pour obtenir les deux sorties :
-          - backscan_video.mp4 → image rectangulaire 512×512 (scan inverse)
-          - video.mp4          → crop masqué par prepUS (annotations supprimées)
-        La checkbox détermine uniquement ce qui est AFFICHÉ après le traitement.
-        """
-        try:
-            want_bsc = self._prepus_bsc.get()
-            self._log(f"  → removeLayoutFile | backscan=on "
-                      f"| affichage={'backscan' if want_bsc else 'crop masqué'}…")
-            backscan_arr, crop_only_arr, info = preprocess_with_prepus(
-                self._frames_raw,
-                fps=22.0,
-                thresh=-1.0,
-                back_scan_conversion=True,   # toujours True → produit video.mp4 masqué
-                backscan_width=512,
-                backscan_height=512,
-            )
-            import numpy as _np
+        def _rgb(a):
+            return _np.stack([a, a, a], axis=-1)
 
-            def _rgb(a):
-                return _np.stack([a, a, a], axis=-1)
+        self._frames_backscan  = _rgb(backscan_arr)
+        self._frames_crop_only = _rgb(crop_only_arr) if crop_only_arr is not None \
+                                 else self._frames_backscan
+        self._frames_cropped = self._frames_backscan
+        self._prepus_info = info
+        self._roi = None
 
-            self._frames_backscan  = _rgb(backscan_arr)
-            self._frames_crop_only = _rgb(crop_only_arr) if crop_only_arr is not None \
-                                     else self._frames_backscan
+        shape_str = f"{backscan_arr.shape[2]}×{backscan_arr.shape[1]}"
+        msg = f"  → Pré-traitement OK — {backscan_arr.shape[0]} frames, {shape_str} px"
+        if info and "crop" in info:
+            c = info["crop"]
+            msg += f" | crop y=[{c['ymin']},{c['ymax']}] x=[{c['xmin']},{c['xmax']}]"
+        self._log(msg, level="success")
 
-            # Affiche selon la préférence de la checkbox
-            self._frames_cropped = self._frames_backscan if want_bsc \
-                                   else self._frames_crop_only
-            self._roi = None
-
-            ref = backscan_arr if want_bsc \
-                  else (crop_only_arr if crop_only_arr is not None else backscan_arr)
-            shape_str = f"{ref.shape[2]}×{ref.shape[1]}"
-            msg = f"Pré-traitement terminé — {ref.shape[0]} frames, {shape_str} px"
-            if info and "crop" in info:
-                c = info["crop"]
-                msg += f" | crop y=[{c['ymin']},{c['ymax']}] x=[{c['xmin']},{c['xmax']}]"
-            msg += "  ·  ☑ bascule backscan/crop disponible"
-
-            self.after(0, lambda: self._crop_toggle.set(True))
-            self.after(0, self._refresh_canvas)
-            self.after(0, lambda: self._btn_preprocess.config(state="normal"))
-            self.after(0, lambda: self._preprocess_status.config(
-                text="✓  Terminé", fg=SUCCESS_FG))
-            self._log(msg, level="success")
-        except Exception as exc:
-            self.after(0, lambda: self._btn_preprocess.config(state="normal"))
-            self.after(0, lambda: self._preprocess_status.config(
-                text="✗  Erreur", fg=DANGER_FG))
-            self._log(f"ERREUR pré-traitement : {exc}", level="error")
     def _on_reset_analysis(self):
         """Supprime le cache MongoDB pour le fichier actuel et réinitialise l'affichage."""
         if not getattr(self, "_dicom_path", None):
@@ -1584,6 +1564,9 @@ class STARHEApp(tk.Tk):
         else:
             self._log("⚠  Aucun résultat en cache à supprimer.")
         # Réinitialise l'affichage
+        self._crop_toggle.set(False)
+        self._detections_by_mode = {}
+        self._results_by_mode = {}
         self._risk_lbl.config(text="—", fg=SBAR_MUTED)
         self._det_lbl.config(text="—", fg=SBAR_MUTED)
         if hasattr(self, "_mode_lbl"):
@@ -1592,6 +1575,7 @@ class STARHEApp(tk.Tk):
             self._det_frames_widget.config(state="normal")
             self._det_frames_widget.delete("1.0", "end")
             self._det_frames_widget.config(state="disabled")
+        self._refresh_canvas()
 
     def _on_run_pipeline(self):
         """Lance l'analyse IA dans un thread pour ne pas bloquer l'UI."""
@@ -1607,24 +1591,15 @@ class STARHEApp(tk.Tk):
         t.start()
 
     def _run_ia_thread(self):
-        """Exécutée dans un thread secondaire — détection sur chaque frame."""
+        """Exécutée dans un thread secondaire — pré-traitement + détection."""
         def _re_enable():
             btn = getattr(self, "_btn_pipeline", None)
             if btn:
                 btn.config(state="normal")
 
         try:
-            frames = (self._frames_cropped
-                      if self._frames_cropped is not None
-                      else self._frames_raw)
-            n = len(frames)
-
-            # Mode d'analyse courant
-            if self._crop_toggle.get() and self._frames_cropped is not None:
-                _analysis_mode = "backscan" if self._prepus_bsc.get() else "crop"
-            else:
-                _analysis_mode = "original"
-            _mode_labels = {"backscan": "Backscan 512×512", "crop": "Pré-traitement (crop)", "original": "Original"}
+            _analysis_mode = "backscan"
+            n = len(self._frames_raw)
 
             # ─── VÉRIFICATION CACHE MONGODB ────────────────────────────────────────
             if self._dicom_path:
@@ -1632,13 +1607,10 @@ class STARHEApp(tk.Tk):
                     from starhe_plugin.db.mongo_client import find_by_file, save_result
                     cached = find_by_file(self._dicom_path, analysis_mode=_analysis_mode)
                     if cached:
-                        cached_mode = cached.get("analysis_mode", "original")
-                        cached_mode_label = _mode_labels.get(cached_mode, cached_mode)
                         self._log(
-                            f"  → Résultat en cache (MongoDB, mode={cached_mode_label}, {cached['processed_at'][:10]}).",
+                            f"  → Résultat en cache (MongoDB, mode=Backscan, {cached['processed_at'][:10]}).",
                             level="success"
                         )
-                        # Restaure les résultats depuis le cache
                         per_frame    = cached.get("detections_per_frame", [[] for _ in range(n)])
                         risk_cached  = cached.get("risk", {})
                         score = risk_cached.get("score", 0.0)
@@ -1648,8 +1620,13 @@ class STARHEApp(tk.Tk):
                         ) else RISK_LOW_FG
                         n_frames_with_det = sum(1 for d in per_frame if d)
                         det_fg = WARN_FG if n_frames_with_det > 0 else SUCCESS_FG
-                        self._detections_by_mode[cached_mode] = per_frame
-                        self._results_by_mode[cached_mode] = {
+                        # Remapper les détections vers l'espace original
+                        if self._frames_cropped is None:
+                            self._run_prepus_internal()
+                        if self._prepus_info and "backscan" in self._prepus_info:
+                            per_frame = _map_all_detections_to_original(per_frame, self._prepus_info)
+                        self._detections_by_mode["original"] = per_frame
+                        self._results_by_mode["original"] = {
                             "risk_text": f"{label}  ({score:.1%})",
                             "risk_fg":   risk_fg,
                             "det_text":  f"{n_frames_with_det}/{n} frames avec lésion(s)",
@@ -1661,6 +1638,13 @@ class STARHEApp(tk.Tk):
                 except Exception as exc:
                     self._log(f"  MongoDB cache inaccessible : {exc} — analyse en cours…",
                               level="error")
+
+            # ─── PRÉ-TRAITEMENT (prepUS backscan) ─────────────────────────────────
+            self.after(0, lambda: self._det_lbl.config(
+                text="Pré-traitement en cours…", fg=SBAR_MUTED))
+            self._run_prepus_internal()
+            frames = self._frames_cropped
+            n = len(frames)
 
             # ─── STARHE-RISK ───────────────────────────────────────────────────
             self._log("  → STARHE-RISK (C3D) en cours…")
@@ -1704,19 +1688,22 @@ class STARHEApp(tk.Tk):
                     # Mise à jour progressive de l'UI tous les batches
                     frames_done = min(batch_start + batch_size, n_sampled)
                     n_det = sum(1 for d in per_frame if d)
-                    self._detections_by_mode[_analysis_mode] = list(per_frame)
                     self.after(0, lambda fd=frames_done, nd=n_det:
                                self._det_lbl.config(
                                    text=f"Analyse… {fd}/{n_sampled} lots  ({nd} frames)",
                                    fg=SBAR_MUTED))
-                    self.after(0, self._refresh_canvas)
 
-            # Résultat final
-            self._detections_by_mode[_analysis_mode] = per_frame
+            # ── Remappage backscan → original ──────────────────────────────────
+            if self._prepus_info and "backscan" in self._prepus_info:
+                per_frame = _map_all_detections_to_original(per_frame, self._prepus_info)
+                self._log("  → Détections remappées vers l'espace original.")
+
+            # Résultat final — stocké sous le mode "original"
+            self._detections_by_mode["original"] = per_frame
             n_frames_with_det = sum(1 for d in per_frame if d)
             det_fg = WARN_FG if n_frames_with_det > 0 else SUCCESS_FG
             _det_text = f"{n_frames_with_det}/{n} frames avec lésion(s)"
-            self._results_by_mode[_analysis_mode] = {
+            self._results_by_mode["original"] = {
                 "risk_text": _risk_text,
                 "risk_fg":   risk_fg,
                 "det_text":  _det_text,
@@ -1733,9 +1720,7 @@ class STARHEApp(tk.Tk):
             self.after(0, lambda idxs=detected_indices:
                        self._populate_det_frames(idxs))
 
-            if n_frames_with_det > 0 and self._frames_cropped is not None:
-                self.after(0, lambda: self._crop_toggle.set(True))
-
+            # Afficher l'image originale avec les bboxes remappées
             self.after(0, self._refresh_canvas)
 
             # ─── SAUVEGARDE MONGODB ────────────────────────────────────────────────
@@ -1863,10 +1848,9 @@ class STARHEApp(tk.Tk):
         self._photo_ref = photo
 
         # ── Badge mode d'affichage ──────────────────────────────────────────
-        if use_cropped and self._frames_backscan is not None and self._prepus_bsc.get():
-            mode_txt = "BACKSCAN 512×512"
-        elif use_cropped:
-            mode_txt = "CROP + MASQUE"
+        has_dets = bool(self._detections_by_mode.get("original"))
+        if has_dets:
+            mode_txt = "ANALYSE STARHE"
         else:
             mode_txt = "ORIGINAL"
         if hasattr(self, "_mode_badge"):
@@ -1878,7 +1862,7 @@ class STARHEApp(tk.Tk):
         self._canvas.create_image(0, 0, anchor="nw", image=photo)
 
         # Redessine les mesures par-dessus l'image (tout mode confondu)
-        if self._measures:
+        if self._measures_by_frame.get(self._frame_idx):
             self._redraw_measures()
 
     # ── Vitesse FPS ───────────────────────────────────────────────────────────
@@ -1933,7 +1917,7 @@ class STARHEApp(tk.Tk):
                     "seg_idx": seg_idx,
                     "part": part,
                     "start_img": img_pt,
-                    "orig_pts": list(self._measures[seg_idx]["pts"]),
+                    "orig_pts": list(self._measures_by_frame.get(self._frame_idx, [])[seg_idx]["pts"]),
                 }
                 self._measure_drawing = []
                 self._redraw_measures()
@@ -1966,7 +1950,7 @@ class STARHEApp(tk.Tk):
         elif self._view_mode == "measure":
             if self._measure_edit is not None:
                 ed = self._measure_edit
-                seg = self._measures[ed["seg_idx"]]
+                seg = self._measures_by_frame.get(self._frame_idx, [])[ed["seg_idx"]]
                 cur_img = self._screen_to_img(event.x, event.y)
                 dix = cur_img[0] - ed["start_img"][0]
                 diy = cur_img[1] - ed["start_img"][1]
@@ -1998,7 +1982,7 @@ class STARHEApp(tk.Tk):
                 p1_scr = self._img_to_screen(*p1_img)
                 p2_scr = (event.x, event.y)
                 if math.hypot(p2_scr[0] - p1_scr[0], p2_scr[1] - p1_scr[1]) > 5:
-                    self._measures.append({"pts": [p1_img, p2_img], "items": []})
+                    self._measures_by_frame.setdefault(self._frame_idx, []).append({"pts": [p1_img, p2_img], "items": []})
                 self._measure_drawing = []
                 self._redraw_measures()
 
@@ -2070,12 +2054,13 @@ class STARHEApp(tk.Tk):
                                            fill=color, outline="")
         dot2   = self._canvas.create_oval(sx2-r, sy2-r, sx2+r, sy2+r,
                                            fill=color, outline="")
-        shadow = self._canvas.create_text(mx+1, my+1,
+        label_y = my - 15
+        shadow = self._canvas.create_text(mx+1, label_y+1,
                                            text=dist_label,
-                                           fill="#000000", font=FONT_SMALL)
-        label  = self._canvas.create_text(mx, my,
+                                           fill="#000000", font=FONT_MEASURE)
+        label  = self._canvas.create_text(mx, label_y,
                                            text=dist_label,
-                                           fill=color, font=FONT_SMALL)
+                                           fill=color, font=FONT_MEASURE)
         items = [line, dot1, dot2, shadow, label]
         if target is not None:
             target.extend(items)
@@ -2083,10 +2068,11 @@ class STARHEApp(tk.Tk):
             self._measure_preview_items.extend(items)
 
     def _clear_measure(self):
-        for seg in self._measures:
-            for item in seg["items"]:
-                self._canvas.delete(item)
-        self._measures.clear()
+        for segs in self._measures_by_frame.values():
+            for seg in segs:
+                for item in seg["items"]:
+                    self._canvas.delete(item)
+        self._measures_by_frame.clear()
         self._measure_drawing.clear()
         for item in self._measure_preview_items:
             self._canvas.delete(item)
@@ -2097,7 +2083,7 @@ class STARHEApp(tk.Tk):
     def _redraw_measures(self, preview: tuple | None = None):
         """Redessine tous les segments finalisés + éventuellement un segment en cours."""
         # Supprime les items canvas de chaque segment puis les recrée
-        for i, seg in enumerate(self._measures):
+        for i, seg in enumerate(self._measures_by_frame.get(self._frame_idx, [])):
             for item in seg["items"]:
                 self._canvas.delete(item)
             seg["items"].clear()
@@ -2123,7 +2109,7 @@ class STARHEApp(tk.Tk):
         """
         ENDPOINT_R = 8
         LINE_DIST  = 6
-        for i, seg in enumerate(self._measures):
+        for i, seg in enumerate(self._measures_by_frame.get(self._frame_idx, [])):
             # Convertir les coords image en écran pour le hit-test
             sx1, sy1 = self._img_to_screen(*seg["pts"][0])
             sx2, sy2 = self._img_to_screen(*seg["pts"][1])
@@ -2150,7 +2136,10 @@ class STARHEApp(tk.Tk):
         """Supprime le segment de mesure sélectionné (touche Delete/BackSpace)."""
         if self._view_mode != "measure" or self._measure_selected is None:
             return
-        seg = self._measures.pop(self._measure_selected)
+        frame_measures = self._measures_by_frame.get(self._frame_idx, [])
+        if self._measure_selected >= len(frame_measures):
+            return
+        seg = frame_measures.pop(self._measure_selected)
         for item in seg["items"]:
             self._canvas.delete(item)
         self._measure_selected = None
