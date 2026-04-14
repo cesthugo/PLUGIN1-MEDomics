@@ -157,7 +157,14 @@ def _map_bbox_backscan_to_original(bbox: list, prepus_info: dict) -> list:
         orig_rows.append(crop_row + crop["ymin"])
         orig_cols.append(crop_col + crop["xmin"])
 
-    return [min(orig_cols), min(orig_rows), max(orig_cols), max(orig_rows)]
+    # Clipper aux limites de la zone de crop (cône échographique)
+    ox0 = max(min(orig_cols), crop["xmin"])
+    oy0 = max(min(orig_rows), crop["ymin"])
+    ox1 = min(max(orig_cols), crop["xmax"])
+    oy1 = min(max(orig_rows), crop["ymax"])
+    if ox1 <= ox0 or oy1 <= oy0:
+        return bbox  # bbox entièrement hors crop → retourner tel quel
+    return [ox0, oy0, ox1, oy1]
 
 
 def _map_all_detections_to_original(
@@ -432,7 +439,13 @@ class STARHEApp(tk.Tk):
     def _kb_guard(self) -> bool:
         """Renvoie True si le focus est dans un champ de texte éditable."""
         w = self.focus_get()
-        return isinstance(w, (tk.Entry, tk.Text, scrolledtext.ScrolledText))
+        if not isinstance(w, (tk.Entry, tk.Text, scrolledtext.ScrolledText)):
+            return False
+        # Ne pas bloquer les raccourcis si le widget texte est désactivé
+        try:
+            return str(w.cget("state")) == "normal"
+        except Exception:
+            return False
 
     def _kb_do(self, fn):
         """Exécute *fn* sauf si un widget de texte a le focus."""
@@ -1768,11 +1781,8 @@ class STARHEApp(tk.Tk):
                         ) else RISK_LOW_FG
                         n_frames_with_det = sum(1 for d in per_frame if d)
                         det_fg = WARN_FG if n_frames_with_det > 0 else SUCCESS_FG
-                        # Remapper les détections vers l'espace original
-                        if self._frames_cropped is None:
-                            self._run_prepus_internal()
-                        if self._prepus_info and "backscan" in self._prepus_info:
-                            per_frame = _map_all_detections_to_original(per_frame, self._prepus_info)
+                        # Les détections en cache sont DÉJÀ en espace original
+                        # (remappées lors de la première analyse avant sauvegarde)
                         self._detections_by_mode["original"] = per_frame
                         self._results_by_mode["original"] = {
                             "risk_text": f"{label}  ({score:.1%})",
@@ -1916,6 +1926,7 @@ class STARHEApp(tk.Tk):
                 w.tag_bind(tag, "<Leave>",
                            lambda e: w.config(cursor="arrow"))
         w.config(state="disabled")
+        self._canvas.focus_set()
 
     def _goto_frame(self, idx: int):
         """Navigue vers le frame idx (0-based) et rafraîchit l'affichage."""
@@ -1926,6 +1937,7 @@ class STARHEApp(tk.Tk):
             return
         self._frame_idx = max(0, min(len(frames) - 1, idx))
         self._refresh_canvas()
+        self._canvas.focus_set()
 
     # ── Affichage canvas ──────────────────────────────────────────────────────
 
@@ -2443,6 +2455,15 @@ class STARHEApp(tk.Tk):
     # ── Log ───────────────────────────────────────────────────────────────────
 
     def _log(self, message: str, level: str = "info"):
+        import json, sys
+        # Miroir go_print (thread-safe, pas de Tk)
+        print(f"GO_PRINT|{level}|" + json.dumps({"level": level, "message": message}),
+              flush=True)
+        # Toutes les opérations Tk doivent passer par le thread principal
+        self.after(0, self._log_to_widget, message, level)
+
+    def _log_to_widget(self, message: str, level: str):
+        """Écrit dans le widget console (appelée dans le thread principal)."""
         color_map = {
             "info"   : "#8892a4",
             "success": SUCCESS_FG,
@@ -2464,11 +2485,6 @@ class STARHEApp(tk.Tk):
 
         self._log_widget.configure(state="disabled")
         self._log_widget.see("end")
-
-        # Miroir go_print
-        import json, sys
-        print(f"GO_PRINT|{level}|" + json.dumps({"level": level, "message": message}),
-              flush=True)
 
 
 # ── Point d'entrée ─────────────────────────────────────────────────────────────
