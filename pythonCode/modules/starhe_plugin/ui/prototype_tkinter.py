@@ -1820,17 +1820,17 @@ class STARHEApp(tk.Tk):
 
             # STARHE-DETECT — inférence par lots (batch inference)
             from starhe_plugin.ai.starhe_detect import STARHEDetectModel
-            from starhe_plugin.config import DETECT_EVERY_N, DETECT_BATCH_SIZE
-            stride     = max(1, DETECT_EVERY_N)
-            batch_size = max(1, DETECT_BATCH_SIZE)
+            from starhe_plugin.config import DETECT_EVERY_N
+            stride    = max(1, DETECT_EVERY_N)
             # Indices des frames à analyser (echantillonnage temporel)
-            sampled = list(range(0, n, stride))
+            sampled   = list(range(0, n, stride))
             n_sampled = len(sampled)
-            self._log(f"  → STARHE-DETECT : {n_sampled}/{n} frames (stride={stride}, batch={batch_size})…")
 
             per_frame: list[list[dict]] = [[] for _ in range(n)]
 
             with STARHEDetectModel() as detect_model:
+                batch_size = detect_model.batch_size  # computed from hardware
+                self._log(f"  → STARHE-DETECT : {n_sampled}/{n} frames (stride={stride}, batch={batch_size})…")
                 for batch_start in range(0, n_sampled, batch_size):
                     batch_indices = sampled[batch_start: batch_start + batch_size]
                     batch_frames  = [frames[i] for i in batch_indices]
@@ -2208,20 +2208,41 @@ class STARHEApp(tk.Tk):
             dist_img_px = math.hypot(dx_img, dy_img)
             dist_label = f"{dist_img_px:.1f} px (pas de calibration)"
 
+        # ── Label position: perpendicular offset from midpoint ────────────────
+        # Compute the unit vector perpendicular to the segment so the label
+        # never overlaps the dashed line regardless of its angle.
+        dx_s   = sx2 - sx1
+        dy_s   = sy2 - sy1
+        seg_len = math.hypot(dx_s, dy_s) or 1.0
+        perp_x = -dy_s / seg_len   # rotate 90°
+        perp_y =  dx_s / seg_len
+        if perp_y > 0:             # always push toward the top of the screen
+            perp_x, perp_y = -perp_x, -perp_y
+        LABEL_OFFSET = 18
+        lx = mx + perp_x * LABEL_OFFSET
+        ly = my + perp_y * LABEL_OFFSET
+
         line   = self._canvas.create_line(sx1, sy1, sx2, sy2,
                                            fill=color, width=2, dash=(5, 3))
         dot1   = self._canvas.create_oval(sx1-r, sy1-r, sx1+r, sy1+r,
                                            fill=color, outline="")
         dot2   = self._canvas.create_oval(sx2-r, sy2-r, sx2+r, sy2+r,
                                            fill=color, outline="")
-        label_y = my - 15
-        shadow = self._canvas.create_text(mx+1, label_y+1,
+        shadow = self._canvas.create_text(lx+1, ly+1,
                                            text=dist_label,
                                            fill="#000000", font=FONT_MEASURE)
-        label  = self._canvas.create_text(mx, label_y,
+        label  = self._canvas.create_text(lx, ly,
                                            text=dist_label,
                                            fill=color, font=FONT_MEASURE)
-        items = [line, dot1, dot2, shadow, label]
+        # Dark background rectangle behind the label for readability
+        PAD  = 3
+        bbox = self._canvas.bbox(label)
+        bg   = self._canvas.create_rectangle(
+            bbox[0] - PAD, bbox[1] - PAD, bbox[2] + PAD, bbox[3] + PAD,
+            fill="#1a1a2e", outline="",
+        )
+        self._canvas.tag_lower(bg, shadow)
+        items = [line, dot1, dot2, bg, shadow, label]
         if target is not None:
             target.extend(items)
         else:

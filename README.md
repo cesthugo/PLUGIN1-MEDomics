@@ -371,17 +371,98 @@ starhe_detect.py (main process)
 
 1. `STARHEDetectModel.__init__()` calls `_start_server()`
 2. `_start_server()` launches the subprocess with `--mode server`
-3. Blocking wait for the `[rtmdet_server] READY` line on stdout
-4. Any other line = failure → `RuntimeError` with the last 2000 characters of stderr
+3. Blocking wait for the `[rtmdet_server] READY {hw_json}` line on stdout
+4. The runner embeds hardware info in the READY signal (see below)
+5. `_start_server()` reads that info and computes the optimal batch size
+6. Any other line = failure → `RuntimeError` with the last 2000 characters of stderr
+
+### Adaptive hardware detection
+
+After loading the model, the runner reports available memory in the READY signal:
+
+```
+# NVIDIA GPU (CUDA)
+[rtmdet_server] READY {"device": "cuda", "vram_free_mb": 5800.1, "vram_total_mb": 8192.0}
+# Apple Silicon (MPS)
+[rtmdet_server] READY {"device": "mps", "unified_mem_total_mb": 24576.0}
+# CPU only
+[rtmdet_server] READY {"device": "cpu"}
+```
+
+Device selection in the runner:
+
+```python
+if torch.cuda.is_available():
+    device = "cuda"
+elif torch.backends.mps.is_available():   # Apple Silicon (M-series)
+    device = "mps"
+else:
+    device = "cpu"
+```
+
+`_start_server()` parses this JSON and calls `utils/hardware.py::compute_optimal_batch_size()`:
+
+```python
+# utils/hardware.py
+_FRAME_COST_MB = 50   # estimated memory cost per 640×640 frame
+_MAX_BATCH_GPU = 32   # NVIDIA GPU cap
+_MAX_BATCH_MPS = 16   # Apple Silicon cap (GPU+CPU share the same pool)
+_MAX_BATCH_CPU = 4    # CPU cap
+_GPU_SAFETY    = 0.80  # fraction of free VRAM used
+_MPS_SAFETY    = 0.30  # conservative: unified memory shared between GPU and CPU
+_CPU_SAFETY    = 0.20  # only 20 % of free RAM
+
+def compute_optimal_batch_size(device, vram_free_mb=None):
+    if device == "cuda":
+        usable = vram_free_mb * _GPU_SAFETY       # e.g. 5800 × 0.80 = 4640 MB
+        batch  = min(int(usable / _FRAME_COST_MB), _MAX_BATCH_GPU)  # → capped 32
+    elif device == "mps":
+        total_ram = get_free_ram_mb() * 2         # approximate total unified memory
+        batch     = min(int(total_ram * _MPS_SAFETY / _FRAME_COST_MB), _MAX_BATCH_MPS)
+    else:                                          # cpu
+        batch = min(int(get_free_ram_mb() * _CPU_SAFETY / _FRAME_COST_MB), _MAX_BATCH_CPU)
+    return max(1, batch)
+```
+
+Typical results on common hardware:
+
+| Hardware | device | batch_size |
+|---|---|---|
+| NVIDIA RTX 3080 (10 GB) | `cuda` | 32 (capped) |
+| Apple M5 Pro (24 GB unified) | `mps` | ~14 |
+| Apple M5 (16 GB unified) | `mps` | ~9 |
+| CPU only (16 GB free RAM) | `cpu` | 4 (capped) |
+
+The result is stored in `detect_model.batch_size` and used directly by the pipeline.
+
+Setting `DETECT_BATCH_SIZE = "auto"` in `config.py` activates this logic (default). Set it to an integer (e.g. `4`) to force a fixed size and bypass hardware detection.
+
+### Frame serialization: base64 over pipe (no disk I/O)
+
+Frames are no longer written to disk as PNG files. They are encoded as raw BGR bytes and transmitted directly over stdin:
+
+```python
+# parent process (starhe_detect.py)
+bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+b64 = base64.b64encode(bgr.tobytes()).decode("ascii")
+req = json.dumps({"frame_b64": b64, "shape": list(bgr.shape), "score_thr": score_thr})
+proc.stdin.write(req + "\n")
+
+# subprocess (_rtmdet_runner.py)
+raw   = base64.b64decode(req["frame_b64"])
+frame = np.frombuffer(raw, dtype=np.uint8).reshape(req["shape"])
+```
+
+For batches, `frame_b64` becomes `frames_b64` (list) and `shape` becomes `shapes` (list of shapes). The legacy file-path protocol (`image` / `images` keys) is preserved for backward compatibility.
 
 ### Sending a batch of frames
 
 ```python
-# In predict_batch(frames):
+# In predict_batch(frames) — base64 in-memory protocol:
 payload = {
-    "type":      "batch",
-    "images":    [base64(png(frame)) for frame in frames],
-    "score_thr": score_thr,
+    "frames_b64": [base64.b64encode(cv2.cvtColor(f, cv2.COLOR_RGB2BGR).tobytes()).decode() for f in frames],
+    "shapes":     [list(cv2.cvtColor(f, cv2.COLOR_RGB2BGR).shape) for f in frames],
+    "score_thr":  score_thr,
 }
 proc.stdin.write(json.dumps(payload) + "\n")
 proc.stdin.flush()
@@ -389,18 +470,23 @@ response = json.loads(proc.stdout.readline())
 # response = [[det, ...], [det, ...], ...]  — one list per frame
 ```
 
-### Temporal subsampling
+### Temporal subsampling + active batch
 
-In `pipeline.py`, only 1 frame out of every `DETECT_EVERY_N=4` is sent to the model. The 3 intermediate frames inherit the same detections:
+In `pipeline.py`, only 1 frame out of every `DETECT_EVERY_N=4` is analysed. The intermediate frames inherit the same detections. The sampled frames are now grouped into batches of `detect_model.batch_size` before being sent:
 
 ```python
-for i in range(0, n_frames, stride):
-    dets = detect_model.predict(frames[i])
-    for j in range(i, min(i + stride, n_frames)):
-        detections_per_frame[j] = dets
+sampled = list(range(0, n_frames, stride))        # every 4th frame
+bs      = detect_model.batch_size                 # auto-computed from hardware
+for b_start in range(0, len(sampled), bs):
+    batch_idx    = sampled[b_start : b_start + bs]
+    batch_frames = [frames_processed[i] for i in batch_idx]
+    batch_dets   = detect_model.predict_batch(batch_frames)  # single network pass
+    for idx, dets in zip(batch_idx, batch_dets):
+        for j in range(idx, min(idx + stride, n_frames)):
+            detections.append({**d, "frame": j} for d in dets)
 ```
 
-Practical gain: ×4 on inference time, negligible impact on accuracy (lesions move little from one frame to the next).
+Practical gain: ×4 from temporal subsampling × batch parallelism on GPU (actual factor depends on hardware).
 
 ### DINO backend (alternative)
 
@@ -594,6 +680,40 @@ mmengine (mmdet dependency) calls `inspect.getmodule()` on Python frame objects.
 
 tqdm is not in the mmdet dependencies. If absent, mmdet raises an `ImportError` on import. The stub injects a minimal module where `tqdm.tqdm(iterable)` returns the iterable as-is.
 
+### 4. NMS CPU coercion (MPS compatibility)
+
+On Apple Silicon (`device="mps"`), the NMS inputs (`bboxes`, `scores`) produced by the RTMDet head are MPS tensors. `torchvision.ops.nms` does not support MPS, and `mmengine.InstanceData.__getitem__` only accepts `torch.LongTensor` (CPU type) — passing an MPS tensor causes an `AssertionError`. The patch forces all NMS operands to CPU before calling `torchvision.ops.nms`:
+
+```python
+def _tv_nms_fwd(ctx, bboxes, scores, iou_threshold, offset, score_threshold, max_num):
+    bboxes = bboxes.float().cpu()   # force CPU — MPS not supported by torchvision NMS
+    scores = scores.float().cpu()
+    ...
+    return inds   # always a CPU torch.LongTensor
+```
+
+### 5. `InstanceData` MPS patch
+
+Even with CPU NMS indices, the `InstanceData` fields (bboxes, scores…) produced by the head are still on MPS. Indexing an MPS tensor with a CPU index (`mps_tensor[cpu_index]`) raises a cross-device error. The patch detects any non-standard device in the `InstanceData` fields and copies everything to CPU before indexing:
+
+```python
+def _mps_safe_getitem(self, item):
+    if isinstance(item, torch.Tensor) and item.device.type not in ("cpu", "cuda"):
+        item = item.cpu()
+    has_nonstandard = any(
+        isinstance(v, torch.Tensor) and v.device.type not in ("cpu", "cuda")
+        for v in self.values()
+    )
+    if has_nonstandard:
+        cpu_self = type(self)()
+        for k, v in self.items():
+            cpu_self[k] = v.cpu() if isinstance(v, torch.Tensor) else v
+        return _orig_inst_getitem(cpu_self, item)
+    return _orig_inst_getitem(self, item)
+```
+
+This patch is applied after mmdet is imported (patch 6 in the runner), so it has no effect on CUDA or CPU inference.
+
 ---
 
 ## Full Project Structure
@@ -697,7 +817,7 @@ AI parameters:
 | `DETECT_BACKEND` | `"rtmdet"` | Change to `"dino"` to test DINO-DETR |
 | `DETECT_SCORE_THRESHOLD` | `0.70` | Minimum confidence threshold, affects display and cache |
 | `DETECT_EVERY_N` | `4` | Temporal subsampling (1 = all frames) |
-| `DETECT_BATCH_SIZE` | `4` | Batch size sent to the RTMDet subprocess |
+| `DETECT_BATCH_SIZE` | `"auto"` | Batch size for RTMDet: `"auto"` = compute from VRAM/RAM via `utils/hardware.py`; set to an integer to force a fixed value |
 
 ---
 

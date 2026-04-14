@@ -58,10 +58,10 @@ DETECT_SCORE_THRESHOLD = 0.70
 # 1 = toutes les frames (désactivé), 4 = gain ×4 (recommandé)
 DETECT_EVERY_N = 4
 
-# Taille des lots pour l'inférence RTMDet (batch inference)
-# Plus grand = moins d'overhead IPC mais plus de RAM GPU/CPU
-# 4 = bon compromis ; mettre 1 pour désactiver le batch
-DETECT_BATCH_SIZE = 4
+# RTMDet batch inference size.
+# "auto" = detect hardware (VRAM/RAM) and compute optimal batch size.
+# integer = fixed batch size (e.g. 4); set to 1 to disable batching.
+DETECT_BATCH_SIZE = "auto"
 
 # ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
 CROP_BLACK_THRESHOLD   = 10

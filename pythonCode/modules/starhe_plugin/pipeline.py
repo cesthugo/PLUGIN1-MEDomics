@@ -99,16 +99,23 @@ def run_pipeline(dicom_path: str,
         go_progress(step := step + 1, TOTAL_STEPS,
                     f"Inférence STARHE-DETECT ({n_analysed}/{n_frames} frames, stride={stride})…")
         with STARHEDetectModel() as detect_model:
-            for i in range(0, n_frames, stride):
-                frm        = frames_processed[i]
-                frame_dets = detect_model.predict(frm)
+            sampled = list(range(0, n_frames, stride))
+            bs = detect_model.batch_size
+            go_print("info",
+                     f"DETECT : batch_size={bs}, {len(sampled)} sampled frames à analyser.")
+            for b_start in range(0, len(sampled), bs):
+                batch_idx    = sampled[b_start:b_start + bs]
+                batch_frames = [frames_processed[i] for i in batch_idx]
+                batch_dets   = detect_model.predict_batch(batch_frames)
                 # Propager les détections sur les frames intermédiaires
-                for j in range(i, min(i + stride, n_frames)):
-                    for d in frame_dets:
-                        detections.append({**d, "frame": j})
-                if (i // stride + 1) % 5 == 0 or i + stride >= n_frames:
+                for idx, frame_dets in zip(batch_idx, batch_dets):
+                    for j in range(idx, min(idx + stride, n_frames)):
+                        for d in frame_dets:
+                            detections.append({**d, "frame": j})
+                done = b_start + len(batch_idx)
+                if done % 5 == 0 or done >= len(sampled):
                     go_print("info",
-                             f"DETECT : frame {i + 1}/{n_frames} —"
+                             f"DETECT : {done}/{len(sampled)} sampled frames —"
                              f" {len(set(d['frame'] for d in detections))} frames avec détection(s).")
     else:
         step += 1

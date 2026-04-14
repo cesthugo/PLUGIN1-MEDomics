@@ -22,11 +22,13 @@ import tempfile
 import subprocess
 from pathlib import Path
 
+import base64
 import numpy as np
 import cv2
 
 from starhe_plugin.config import (
     DETECT_BACKEND,
+    DETECT_BATCH_SIZE,
     STARHE_DETECT_CONFIG,
     STARHE_DETECT_CHECKPOINT,
     STARHE_DINO_CONFIG,
@@ -122,9 +124,10 @@ class STARHEDetectModel:
     """
 
     def __init__(self, device: str | None = None, backend: str = DETECT_BACKEND):
-        self._backend  = backend
-        self._proc     = None          # subprocess.Popen
-        self._tmp_dir  = None          # dossier temporaire pour les frames PNG
+        self._backend    = backend
+        self._proc       = None          # subprocess.Popen
+        self._tmp_dir    = None          # dossier temporaire (fallback one-shot)
+        self.batch_size  = 1             # updated by _start_server() if auto
         if backend == "rtmdet":
             self._start_server()
         else:
@@ -134,8 +137,6 @@ class STARHEDetectModel:
 
     def _start_server(self):
         """Lance le runner RTMDet en mode serveur et attend le signal READY."""
-        import tempfile as _tmp
-        self._tmp_dir = _tmp.mkdtemp(prefix="starhe_srv_")
         cmd = [
             sys.executable,
             str(_RTMDET_RUNNER),
@@ -153,7 +154,7 @@ class STARHEDetectModel:
             text=True,
             bufsize=1,          # line-buffered
         )
-        # Attendre le signal READY du runner
+        # Attendre le signal READY du runner (inclut les infos hardware)
         ready_line = self._proc.stdout.readline().strip()
         if "[rtmdet_server] READY" not in ready_line:
             stderr_out = self._proc.stderr.read(2000) if self._proc.stderr else ""
@@ -161,7 +162,34 @@ class STARHEDetectModel:
             raise RuntimeError(
                 f"Le serveur RTMDet n'a pas répondu READY. Reçu: {ready_line!r}\n{stderr_out}"
             )
-        go_print("info", "STARHE-DETECT : serveur prêt — modèle chargé en mémoire.")
+
+        # ── Parse hardware info from READY message ────────────────────────
+        hw_info = {}
+        hw_json = ready_line.split("READY", 1)[-1].strip()
+        if hw_json:
+            try:
+                hw_info = json.loads(hw_json)
+            except json.JSONDecodeError:
+                pass
+
+        # ── Compute optimal batch size ────────────────────────────────────
+        if DETECT_BATCH_SIZE == "auto":
+            from starhe_plugin.utils.hardware import compute_optimal_batch_size
+            self.batch_size = compute_optimal_batch_size(
+                device=hw_info.get("device", "cpu"),
+                vram_free_mb=hw_info.get("vram_free_mb"),
+            )
+        else:
+            self.batch_size = int(DETECT_BATCH_SIZE)
+
+        device_str = hw_info.get("device", "?")
+        vram_str = (
+            f", vram_free={hw_info['vram_free_mb']:.0f} MB"
+            if "vram_free_mb" in hw_info else ""
+        )
+        go_print("info",
+                 f"STARHE-DETECT : serveur prêt — batch_size={self.batch_size}"
+                 f", device={device_str}{vram_str}")
 
     def close(self):
         """Ferme proprement le subprocess serveur."""
@@ -206,13 +234,11 @@ class STARHEDetectModel:
             return self._predict_oneshot(frame, score_thr)
 
     def _predict_server(self, frame: np.ndarray, score_thr: float) -> list:
-        """Envoie la frame au serveur via stdin et récupère le résultat via stdout."""
-        # Sauvegarde temporaire de la frame
-        tmp_path = os.path.join(self._tmp_dir, "frame.png")
+        """Envoie la frame au serveur via stdin (base64) et récupère le résultat."""
         bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(tmp_path, bgr)
-
-        req = json.dumps({"image": tmp_path, "score_thr": score_thr})
+        b64 = base64.b64encode(bgr.tobytes()).decode("ascii")
+        req = json.dumps({"frame_b64": b64, "shape": list(bgr.shape),
+                          "score_thr": score_thr})
         try:
             self._proc.stdin.write(req + "\n")
             self._proc.stdin.flush()
@@ -230,27 +256,28 @@ class STARHEDetectModel:
     def predict_batch(self, frames: list[np.ndarray],
                       score_thr: float = DETECT_SCORE_THRESHOLD) -> list[list]:
         """
-        Inférence en lot : envoie N frames en une seule requête au serveur.
-        Retourne une liste de N listes de détections.
+        Batch inference: sends N frames in a single request to the server
+        via base64 encoding (no disk I/O).
+        Returns a list of N detection lists.
 
-        frames    : liste de (H, W, 3) uint8 RGB
-        score_thr : seuil de confiance minimum
+        frames    : list of (H, W, 3) uint8 RGB
+        score_thr : minimum confidence threshold
         """
         if not frames:
             return []
         if self._backend != "rtmdet" or self._proc is None:
-            # Fallback séquentiel
             return [self._predict_oneshot(f, score_thr) for f in frames]
 
-        # Sauvegarde toutes les frames dans le dossier temporaire
-        paths = []
-        for i, frame in enumerate(frames):
-            tmp_path = os.path.join(self._tmp_dir, f"batch_{i:04d}.png")
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(tmp_path, bgr)
-            paths.append(tmp_path)
+        # Encode all frames as base64 BGR
+        frames_b64 = []
+        shapes = []
+        for frame in frames:
+            bgr = cv2.cvtColor(np.ascontiguousarray(frame), cv2.COLOR_RGB2BGR)
+            frames_b64.append(base64.b64encode(bgr.tobytes()).decode("ascii"))
+            shapes.append(list(bgr.shape))
 
-        req = json.dumps({"images": paths, "score_thr": score_thr})
+        req = json.dumps({"frames_b64": frames_b64, "shapes": shapes,
+                          "score_thr": score_thr})
         try:
             self._proc.stdin.write(req + "\n")
             self._proc.stdin.flush()
@@ -260,7 +287,6 @@ class STARHEDetectModel:
             resp = json.loads(resp_line)
             if isinstance(resp, dict) and "error" in resp:
                 raise RuntimeError(f"Erreur runner batch : {resp['error']}")
-            # resp est une liste de N listes
             return resp
         except Exception as exc:
             go_print("error", f"DETECT batch : {exc} — fallback séquentiel.")
