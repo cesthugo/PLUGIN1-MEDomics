@@ -1,83 +1,83 @@
 ﻿# STARHE Plugin — MEDomics
 
-> **STARHE** = STratification du risque et détection du carcinome **H**épatocellulaire par **E**chographie.  
-> Extension Python/Go de la plateforme [MEDomics](https://medomicslab.gitbook.io/medomics-docs).
+> **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
+> Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.2.0` — Dernière mise à jour : 10 juillet 2025*
+*Version `0.2.0` — Last updated: April 14, 2026*
 
 ---
 
-## Vue d'ensemble
+## Overview
 
-Le plug-in analyse des ciné-clips DICOM d'échographie abdominale pour dépister le carcinome hépatocellulaire (CHC). Il fonctionne en **deux modes** :
+The plug-in analyzes abdominal ultrasound DICOM cine-clips to screen for hepatocellular carcinoma (HCC). It operates in **two modes**:
 
 | Mode | Description |
 |---|---|
-| **Standalone** | Serveur Go autonome (`go_server/`) + prototype Tkinter. Le Go lance `pipeline.py` en subprocess et streame les résultats via SSE. |
-| **Intégré MEDomics** | S'intègre à la plateforme MEDomics comme *Standard Plugin*. Un adaptateur (`run_starhe.py`) traduit le protocole `GO_PRINT|…` vers le protocole MEDomics (`progress*_*` / `response-ready*_*`). Un blueprint Go (`starhe_blueprint.go`) enregistre les routes dans le serveur MEDomics. |
+| **Standalone** | Standalone Go server (`go_server/`) + Tkinter prototype. Go launches `pipeline.py` as a subprocess and streams results via SSE. |
+| **MEDomics Integrated** | Integrates into the MEDomics platform as a *Standard Plugin*. An adapter (`run_starhe.py`) translates the `GO_PRINT|…` protocol to the MEDomics protocol (`progress*_*` / `response-ready*_*`). A Go blueprint (`starhe_blueprint.go`) registers routes in the MEDomics server. |
 
-Deux modèles IA sont exploités :
+Two AI models are used:
 
-| Modèle | Architecture | Tâche | Checkpoint |
+| Model | Architecture | Task | Checkpoint |
 |---|---|---|---|
-| **STARHE-RISK** | C3D (3D-CNN, PyTorch pur) | Classification binaire : risque CHC faible / élevé | `models/best_acc_mean_cls_f1_epoch_14.pth` |
-| **STARHE-DETECT** | RTMDet (mmdet) ou DINO-DETR | Détection et localisation de lésions hépatiques | `models/best_coco_bbox_mAP_50_iter_2100.pth` |
+| **STARHE-RISK** | C3D (3D-CNN, pure PyTorch) | Binary classification: low / high HCC risk | `models/best_acc_mean_cls_f1_epoch_14.pth` |
+| **STARHE-DETECT** | RTMDet (mmdet) or DINO-DETR | Detection and localization of hepatic lesions | `models/best_coco_bbox_mAP_50_iter_2100.pth` |
 
 ---
 
-## Prérequis
+## Prerequisites
 
-| Outil | Version minimale | Notes |
+| Tool | Minimum Version | Notes |
 |---|---|---|
-| Python | 3.13 | tkinter inclus ; 3.14 incompatible (tkinter cassé). Sur macOS Homebrew : `brew install python@3.13 python-tk@3.13` |
-| MongoDB | 4.x+ | Service local sur le port **54017** (non standard) |
-| Go | 1.21+ | Requis uniquement pour le serveur REST |
-| Node.js | 18+ | Requis uniquement pour le frontend MEDomics |
-| CUDA (optionnel) | 11.8+ | Inférence GPU ; CPU utilisé si absent |
+| Python | 3.13 | tkinter included; 3.14 incompatible (tkinter broken). On macOS Homebrew: `brew install python@3.13 python-tk@3.13` |
+| MongoDB | 4.x+ | Local service on port **54017** (non-standard) |
+| Go | 1.21+ | Required only for the REST server |
+| Node.js | 18+ | Required only for the MEDomics frontend |
+| CUDA (optional) | 11.8+ | GPU inference; CPU used if absent |
 
-> **Port MongoDB 54017** : MEDomics utilise délibérément un port non standard pour éviter les conflits avec les instances MongoDB système. Ce port est codé dans `config.py` ET dans `go_server/config.go`.
+> **MongoDB port 54017**: MEDomics deliberately uses a non-standard port to avoid conflicts with system MongoDB instances. This port is hardcoded in `config.py` AND in `go_server/config.go`.
 
 ---
 
-## Installation et démarrage
+## Installation and Getting Started
 
-> **Toutes les commandes ci-dessous supposent que vous êtes dans le dossier racine du projet** (`PLUGIN1-MEDomics/`).
+> **All commands below assume you are in the project root directory** (`PLUGIN1-MEDomics/`).
 
-### 1. Lancer le prototype Tkinter (développement)
+### 1. Launch the Tkinter prototype (development)
 
-Les deux scripts sont **autonomes** : ils détectent Python 3.13, créent le venv si absent, installent toutes les dépendances et prepUS, puis lancent l'interface. Seul Python 3.13 doit être installé sur le système.
+Both scripts are **self-contained**: they detect Python 3.13, create the venv if absent, install all dependencies and prepUS, then launch the interface. Only Python 3.13 needs to be installed on the system.
 
-**Windows (PowerShell) :**
+**Windows (PowerShell):**
 
-> **Prérequis unique** : autoriser les scripts PowerShell locaux (à faire une seule fois, en tant qu'utilisateur) :
+> **One-time prerequisite**: allow local PowerShell scripts (to do once, as user):
 > ```powershell
 > Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 > ```
-> Puis, depuis la racine du projet :
+> Then, from the project root:
 
 ```powershell
 .\run_tkinter.ps1
 ```
 
-Le script détecte Python 3.13 sur le système (via `py -3.13`, `python3.13`, ou `python`), vérifie que tkinter est disponible, crée le venv si absent, installe les dépendances, puis lance l'UI.
+The script detects Python 3.13 on the system (via `py -3.13`, `python3.13`, or `python`), checks that tkinter is available, creates the venv if absent, installs dependencies, then launches the UI.
 
-**macOS / Linux :**
+**macOS / Linux:**
 
 ```bash
-# Prérequis une seule fois (macOS Homebrew uniquement)
+# One-time prerequisite (macOS Homebrew only)
 brew install python@3.13 python-tk@3.13
-# Puis lancer le prototype depuis la racine du projet (tout le reste est automatique)
+# Then launch the prototype from the project root (everything else is automatic)
 ./run_tkinter.sh
 ```
 
-Le script `run_tkinter.sh` vérifie que Python 3.13 et tkinter sont présents, crée le venv et installe les dépendances si absent, installe prepUS, puis lance l'UI.
+The `run_tkinter.sh` script checks that Python 3.13 and tkinter are present, creates the venv and installs dependencies if absent, installs prepUS, then launches the UI.
 
-> **macOS (Homebrew)** : Homebrew **n'inclut pas tkinter par défaut** — `brew install python-tk@3.13` est obligatoire, sinon l'UI échouera avec `ModuleNotFoundError: No module named '_tkinter'`. Vérifier avec : `python3.13 -c "import tkinter"`.
+> **macOS (Homebrew)**: Homebrew **does not include tkinter by default** — `brew install python-tk@3.13` is mandatory, otherwise the UI will fail with `ModuleNotFoundError: No module named '_tkinter'`. Verify with: `python3.13 -c "import tkinter"`.
 
 <details>
-<summary>Commandes manuelles équivalentes (macOS / Linux)</summary>
+<summary>Equivalent manual commands (macOS / Linux)</summary>
 
-> Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
+> From the project root (`PLUGIN1-MEDomics/`):
 
 ```bash
 PYTHON=pythonCode/modules/starhe_plugin/.venv/bin/python
@@ -93,9 +93,9 @@ cd pythonCode/modules
 </details>
 
 <details>
-<summary>Commandes manuelles équivalentes (Windows PowerShell)</summary>
+<summary>Equivalent manual commands (Windows PowerShell)</summary>
 
-> Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
+> From the project root (`PLUGIN1-MEDomics/`):
 
 ```powershell
 py -3.13 -m venv pythonCode\modules\starhe_plugin\.venv
@@ -109,9 +109,9 @@ Set-Location pythonCode\modules
 </details>
 
 <details>
-<summary>Commandes manuelles équivalentes (macOS / Linux)</summary>
+<summary>Equivalent manual commands (macOS / Linux)</summary>
 
-> Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
+> From the project root (`PLUGIN1-MEDomics/`):
 
 ```bash
 PYTHON=pythonCode/modules/starhe_plugin/.venv/bin/python
@@ -126,65 +126,65 @@ cd pythonCode/modules
 
 </details>
 
-### 2. Lancer le serveur Go (intégration MEDomics)
+### 2. Launch the Go server (MEDomics integration)
 
-> Depuis la racine du projet (`PLUGIN1-MEDomics/`) :
+> From the project root (`PLUGIN1-MEDomics/`):
 
-**Windows / macOS / Linux :**
+**Windows / macOS / Linux:**
 ```bash
 cd go_server
 go run .
-# Écoute sur http://localhost:8080 (PORT modifiable via variable d'environnement)
+# Listens on http://localhost:8080 (PORT configurable via environment variable)
 ```
 
-Les chemins Python sont détectés **automatiquement** par `config.go` à partir du dossier `go_server/` (chemin relatif `../pythonCode/modules/…`). Aucune variable d'environnement n'est nécessaire si le venv a été créé à l'étape 1 et que le serveur est lancé depuis `go_server/`.
+Python paths are detected **automatically** by `config.go` from the `go_server/` directory (relative path `../pythonCode/modules/…`). No environment variables are necessary if the venv was created in step 1 and the server is launched from `go_server/`.
 
-Variables d'environnement du serveur Go :
+Go server environment variables:
 
-| Variable | Défaut | Description |
+| Variable | Default | Description |
 |---|---|---|
-| `PORT` | `8080` | Port HTTP du serveur |
-| `STARHE_PYTHON_EXE` | chemin absolu dans `config.go` | Python 3.13 du venv |
-| `STARHE_PYTHON_PATH` | chemin absolu dans `config.go` | Dossier racine des modules Python |
-| `MONGO_URI` | `mongodb://localhost:54017/` | URI MongoDB |
-| `MONGO_DB` | `medomics` | Nom de la base |
-| `MONGO_COLL` | `starhe_results` | Nom de la collection |
+| `PORT` | `8080` | HTTP server port |
+| `STARHE_PYTHON_EXE` | absolute path in `config.go` | Python 3.13 from venv |
+| `STARHE_PYTHON_PATH` | absolute path in `config.go` | Root directory of Python modules |
+| `MONGO_URI` | `mongodb://localhost:54017/` | MongoDB URI |
+| `MONGO_DB` | `medomics` | Database name |
+| `MONGO_COLL` | `starhe_results` | Collection name |
 
-### 3. Déployer dans MEDomics (mode intégré)
+### 3. Deploy in MEDomics (integrated mode)
 
-> Ce mode est décrit en détail dans la section **Intégration MEDomics** ci-dessous.  
-> Le plugin se déploie dans le dépôt MEDomics via symlinks et un blueprint Go.
+> This mode is described in detail in the **MEDomics Integration** section below.  
+> The plugin is deployed in the MEDomics repository via symlinks and a Go blueprint.
 
 ---
 
 ## Architecture
 
-### Mode standalone (serveur Go autonome)
+### Standalone mode (standalone Go server)
 
 ```
 MEDomics Frontend (React) / Tkinter UI
         │ HTTP / SSE
         ▼
   Go Server (port 8080)
-  go_server/main.go      → routing HTTP
-  go_server/handlers.go  → logique, subprocess Python, SSE streaming
-  go_server/config.go    → variables d'environnement
-        │ subprocess os/exec  (stdout pipe, ligne par ligne)
+  go_server/main.go      → HTTP routing
+  go_server/handlers.go  → logic, Python subprocess, SSE streaming
+  go_server/config.go    → environment variables
+        │ subprocess os/exec  (stdout pipe, line by line)
         ▼
   Python Engine
-  starhe_plugin/pipeline.py  → orchestrateur principal
+  starhe_plugin/pipeline.py  → main orchestrator
         │
-        ├── dicom/reader.py        → lecture DICOM (pydicom)
-        ├── dicom/anonymizer.py    → anonymisation tags
-        ├── dicom/prepus_bridge.py → prétraitement prepUS
+        ├── dicom/reader.py        → DICOM reading (pydicom)
+        ├── dicom/anonymizer.py    → tag anonymization
+        ├── dicom/prepus_bridge.py → prepUS preprocessing
         ├── ai/starhe_risk.py      → STARHE-RISK (C3D, PyTorch)
-        ├── ai/starhe_detect.py    → STARHE-DETECT (RTMDet subprocess serveur)
-        │       └── ai/models/_rtmdet_runner.py  (subprocess secondaire)
-        ├── db/mongo_client.py     → persistance MongoDB (pymongo)
-        └── utils/go_print.py      → protocole stdout vers Go
+        ├── ai/starhe_detect.py    → STARHE-DETECT (RTMDet subprocess server)
+        │       └── ai/models/_rtmdet_runner.py  (secondary subprocess)
+        ├── db/mongo_client.py     → MongoDB persistence (pymongo)
+        └── utils/go_print.py      → stdout protocol to Go
 ```
 
-### Mode intégré MEDomics
+### MEDomics integrated mode
 
 ```
 MEDomics Frontend (Electron / React)
@@ -198,71 +198,71 @@ MEDomics Frontend (Electron / React)
   blueprints/starhe/starhe.go          → routes: starhe/analyze/, starhe/progress/
         │ Utils.StartPythonScripts(json, "run_starhe.py", id)
         ▼
-  pythonCode/modules/starhe/run_starhe.py    → GoExecutionScript adapter (env conda MEDomics)
+  pythonCode/modules/starhe/run_starhe.py    → GoExecutionScript adapter (MEDomics conda env)
         │ subprocess.Popen([venv_python, "-m", "starhe_plugin.pipeline", ...])
-        │ traduit GO_PRINT|progress|… → set_progress(label=…, now=pct)
-        │ traduit GO_PRINT|result|…  → send_response(result_data)
+        │ translates GO_PRINT|progress|… → set_progress(label=…, now=pct)
+        │ translates GO_PRINT|result|…  → send_response(result_data)
         ▼
-  pythonCode/modules/starhe_plugin/pipeline.py  → pipeline complet (venv STARHE dédié)
+  pythonCode/modules/starhe_plugin/pipeline.py  → full pipeline (dedicated STARHE venv)
         │                                         (torch, mmdet, pydicom, etc.)
-        └── ... (mêmes modules qu'en mode standalone)
+        └── ... (same modules as in standalone mode)
 ```
 
-**Différence clé** : en mode intégré, `run_starhe.py` sert de pont entre deux environnements Python distincts :
-- L'**env MEDomics** (conda) où tourne `GoExecutionScript`
-- Le **venv STARHE** (`.venv/`) où tournent PyTorch, mmdet, et le pipeline
+**Key difference**: in integrated mode, `run_starhe.py` serves as a bridge between two distinct Python environments:
+- The **MEDomics env** (conda) where `GoExecutionScript` runs
+- The **STARHE venv** (`.venv/`) where PyTorch, mmdet, and the pipeline run
 
-### Protocole Go ↔ Python (`go_print`)
+### Go ↔ Python protocol (`go_print`)
 
-Chaque ligne de sortie Python respecte le format :
-
-```
-GO_PRINT|<niveau>|<message JSON>
-```
-
-Niveaux : `info`, `warning`, `error`, `progress`, `result`.
-
-Le serveur Go parse chaque ligne avec `bufio.Scanner` et la relaie en SSE au frontend :
+Each Python output line follows the format:
 
 ```
-data: {"level":"progress","message":"Chargement DICOM…","data":{"step":1,"total":6}}
-data: {"level":"result","message":"Pipeline terminé","data":{...}}
+GO_PRINT|<level>|<JSON message>
+```
+
+Levels: `info`, `warning`, `error`, `progress`, `result`.
+
+The Go server parses each line with `bufio.Scanner` and relays it as SSE to the frontend:
+
+```
+data: {"level":"progress","message":"Loading DICOM…","data":{"step":1,"total":6}}
+data: {"level":"result","message":"Pipeline completed","data":{...}}
 data: [DONE]
 ```
 
-En mode UI Tkinter, le sink peut être redirigé vers un callback Python via `set_log_sink()` (voir `utils/go_print.py`) — les lignes n'atteignent pas stdout.
+In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log_sink()` (see `utils/go_print.py`) — lines do not reach stdout.
 
 ---
 
-## Pipeline d'analyse (`pipeline.py`)
+## Analysis Pipeline (`pipeline.py`)
 
 ```
 run_pipeline(dicom_path, anon_mode, run_detection, back_scan_conversion, ...)
 ```
 
-Étapes dans l'ordre :
+Steps in order:
 
-1. **Chargement DICOM** — `load_dicom()` avec `pydicom force=True` (supporte les fichiers sans extension).
-2. **Anonymisation** — mode `"hash"` (SHA-256 tronqué) ou `"remove"`. Les 16 tags DICOM sensibles sont définis dans `config.DICOM_SENSITIVE_TAGS`. L'anonymisation est réversible côté UI (les valeurs originales sont sauvegardées en mémoire avant anonymisation).
-3. **Extraction des frames** — `extract_frames()` retourne `(T, H, W)` ou `(T, H, W, 3)` en `uint8`.
-4. **Prétraitement prepUS** — voir section dédiée ci-dessous.
-5. **STARHE-RISK** — inférence C3D sur le clip complet.
-6. **STARHE-DETECT** — inférence RTMDet frame par frame (avec sous-échantillonnage temporel).
-7. **Sauvegarde MongoDB** — upsert sur `file_path`.
+1. **DICOM Loading** — `load_dicom()` with `pydicom force=True` (supports files without extension).
+2. **Anonymization** — mode `"hash"` (truncated SHA-256) or `"remove"`. The 16 sensitive DICOM tags are defined in `config.DICOM_SENSITIVE_TAGS`. Anonymization is reversible on the UI side (original values are saved in memory before anonymization).
+3. **Frame Extraction** — `extract_frames()` returns `(T, H, W)` or `(T, H, W, 3)` in `uint8`.
+4. **prepUS Preprocessing** — see dedicated section below.
+5. **STARHE-RISK** — C3D inference on the full clip.
+6. **STARHE-DETECT** — RTMDet frame-by-frame inference (with temporal subsampling).
+7. **MongoDB Save** — upsert on `file_path`.
 
 ---
 
-## Prétraitement prepUS (`dicom/prepus_bridge.py`)
+## prepUS Preprocessing (`dicom/prepus_bridge.py`)
 
-prepUS est le preprocesseur d'images ultrasonores de MEDomics. Il est **vendorisé** dans `third_party/prepUS/` pour s'affranchir d'une dépendance externe.
+prepUS is the ultrasound image preprocessor from MEDomics. It is **vendored** in `third_party/prepUS/` to avoid an external dependency.
 
-### Ce que fait prepUS
+### What prepUS does
 
-- Détecte et supprime les éléments statiques de l'interface de l'échographe (texte, règles, bordures) par analyse de la variabilité temporelle des pixels.
-- Crop le cône US pour supprimer les marges noires.
-- Effectue une conversion scan inverse (backscan) : reconstruction de l'image dans un espace cartésien 512×512, ce qui corrige la distorsion du secteur de l'ultrason.
+- Detects and removes static elements from the ultrasound machine interface (text, rulers, borders) by analyzing temporal pixel variability.
+- Crops the US cone to remove black margins.
+- Performs an inverse scan conversion (backscan): reconstructs the image in a 512×512 Cartesian space, correcting the ultrasound sector distortion.
 
-### Appel dans le code
+### Code usage
 
 ```python
 backscan_frames, crop_only_frames, info = preprocess_with_prepus(
@@ -273,32 +273,32 @@ backscan_frames, crop_only_frames, info = preprocess_with_prepus(
 )
 ```
 
-Retourne un tuple `(backscan, crop_only, info_dict)` :
-- `backscan` : `(T, 512, 512)` uint8 gris — utilisé pour l'inférence IA
-- `crop_only` : `(T, H_crop, W_crop)` uint8 gris — utilisé pour la visualisation
-- `info_dict` : clés `crop` (xmin/ymin/xmax/ymax), paramètres backscan
+Returns a tuple `(backscan, crop_only, info_dict)`:
+- `backscan`: `(T, 512, 512)` uint8 grayscale — used for AI inference
+- `crop_only`: `(T, H_crop, W_crop)` uint8 grayscale — used for visualization
+- `info_dict`: keys `crop` (xmin/ymin/xmax/ymax), backscan parameters
 
-### Implémentation interne
+### Internal implementation
 
-1. Export des frames numpy → MP4 temporaire (OpenCV `VideoWriter`)
-2. Appel `prepUS.cli.removeLayoutFile(mp4, out_dir, back_scan_conversion=True, ...)`
-3. Lecture de `out_dir/backscan_video.mp4` → numpy
-4. Lecture de `out_dir/video.mp4` (crop sans backscan) → numpy
-5. Lecture de `out_dir/infos.json` → dict ROI
-6. Nettoyage du dossier temporaire
+1. Export numpy frames → temporary MP4 (OpenCV `VideoWriter`)
+2. Call `prepUS.cli.removeLayoutFile(mp4, out_dir, back_scan_conversion=True, ...)`
+3. Read `out_dir/backscan_video.mp4` → numpy
+4. Read `out_dir/video.mp4` (crop without backscan) → numpy
+5. Read `out_dir/infos.json` → ROI dict
+6. Cleanup of temporary directory
 
-> **Attention** : prepUS doit être installé avec `--no-deps` pour éviter les conflits avec la version OpenCV du venv. Le script `run_tkinter.ps1` gère cela automatiquement.
+> **Warning**: prepUS must be installed with `--no-deps` to avoid conflicts with the venv's OpenCV version. The `run_tkinter.ps1` script handles this automatically.
 
 ---
 
-## Modèle STARHE-RISK (C3D)
+## STARHE-RISK Model (C3D)
 
 ### Architecture
 
-C3D est un réseau convolutif 3D (spatiotemporel) défini dans `ai/models/c3d.py` en PyTorch pur — **sans dépendance mmaction2/mmcv** à l'exécution.
+C3D is a 3D convolutional network (spatiotemporal) defined in `ai/models/c3d.py` in pure PyTorch — **no mmaction2/mmcv dependency** at runtime.
 
 ```
-Entrée : (N, 3, 16, 112, 112)  — N clips, 3 canaux, 16 frames, 112×112
+Input:  (N, 3, 16, 112, 112)  — N clips, 3 channels, 16 frames, 112×112
   conv1a → pool1
   conv2a → pool2
   conv3a → conv3b → pool3
@@ -306,78 +306,78 @@ Entrée : (N, 3, 16, 112, 112)  — N clips, 3 canaux, 16 frames, 112×112
   conv5a → conv5b → pool5
   flatten → fc6(4096) → relu → dropout
             fc7(4096) → relu
-  tête I3DHead : fc_cls(2) → softmax
-Sortie : (N, 2)  — proba [risque_faible, risque_élevé]
+  I3DHead: fc_cls(2) → softmax
+Output: (N, 2)  — prob [low_risk, high_risk]
 ```
 
-### Pourquoi PyTorch pur sans mmaction2
+### Why pure PyTorch without mmaction2
 
-Le checkpoint `.pth` a été entraîné avec mmaction2 (framework mmcv). Pour éviter les conflits de dépendances (mmcv incompatible Python 3.13), les noms des sous-modules (`backbone.conv1a.conv.weight`, `cls_head.fc_cls.weight`, etc.) sont **reproduits exactement** dans `c3d.py`. Le checkpoint se charge donc directement avec `torch.load` sans remise en correspondance des clés.
+The `.pth` checkpoint was trained with mmaction2 (mmcv framework). To avoid dependency conflicts (mmcv incompatible with Python 3.13), the submodule names (`backbone.conv1a.conv.weight`, `cls_head.fc_cls.weight`, etc.) are **exactly reproduced** in `c3d.py`. The checkpoint therefore loads directly with `torch.load` without key remapping.
 
-### Prétraitement d'un clip
+### Clip preprocessing
 
 ```python
-clips = preprocess_clips(frames)  # retourne (10, 3, 16, 112, 112)
+clips = preprocess_clips(frames)  # returns (10, 3, 16, 112, 112)
 ```
 
-- **10 clips** échantillonnés uniformément sur toute la durée (`NUM_CLIPS=10`)
-- Chaque clip : 16 frames consécutives (`clip_len=16`)
-- Resize → 128px (petit côté), center crop → 112×112
-- Normalisation : `mean=[104, 117, 128]`, `std=[1, 1, 1]` (valeurs BGR, pas de division par 255)
+- **10 clips** uniformly sampled over the entire duration (`NUM_CLIPS=10`)
+- Each clip: 16 consecutive frames (`clip_len=16`)
+- Resize → 128px (short side), center crop → 112×112
+- Normalization: `mean=[104, 117, 128]`, `std=[1, 1, 1]` (BGR values, no division by 255)
 
-### Inférence
+### Inference
 
 ```python
 logits = model(clips)           # (10, 2)
 probs  = softmax(logits, dim=1) # (10, 2)
-avg    = probs.mean(dim=0)      # (2,)  — moyenne des 10 clips
-risk_score = avg[1]             # probabilité classe "risque élevé"
+avg    = probs.mean(dim=0)      # (2,)  — average of 10 clips
+risk_score = avg[1]             # "high risk" class probability
 ```
 
-Seuil d'affichage : aucun seuil appliqué, le score brut [0–1] est retourné.
+Display threshold: no threshold applied, the raw [0–1] score is returned.
 
 ---
 
-## Modèle STARHE-DETECT (RTMDet)
+## STARHE-DETECT Model (RTMDet)
 
-### Problème : mmcv incompatible Python 3.13
+### Problem: mmcv incompatible with Python 3.13
 
-mmdet/mmcv utilise des extensions C compilées (`mmcv._ext`) et des métadonnées de frame Python 2 incompatibles avec Python 3.13. La solution adoptée est un **subprocess isolé** qui exécute le runner RTMDet dans un contexte où les patches nécessaires sont appliqués.
+mmdet/mmcv uses compiled C extensions (`mmcv._ext`) and Python 2 frame metadata incompatible with Python 3.13. The adopted solution is an **isolated subprocess** that runs the RTMDet runner in a context where the necessary patches are applied.
 
-### Architecture subprocess persistant
+### Persistent subprocess architecture
 
 ```
-starhe_detect.py (processus principal)
+starhe_detect.py (main process)
         │
         │  os.Popen([python, _rtmdet_runner.py, --mode server, ...])
         ▼
     _rtmdet_runner.py (subprocess)
-        │ applique 3 patches AVANT tout import mmcv :
-        │   1. stub mmcv._ext (remplace l'extension C absente)
-        │   2. stub tqdm (facultatif, évite une ImportError)
-        │   3. patch inspect.getmodule (Python 3.13 / mmengine compat)
+        │ applies 3 patches BEFORE any mmcv import:
+        │   1. mmcv._ext stub (replaces missing C extension)
+        │   2. tqdm stub (optional, avoids an ImportError)
+        │   3. inspect.getmodule patch (Python 3.13 / mmengine compat)
         │
-        │ charge le modèle RTMDet (428 MB) UNE SEULE FOIS
-        │ émet "READY" sur stdout
+        │ loads RTMDet model (428 MB) ONCE
+        │ emits "READY" on stdout
         │
-        │ boucle stdin/stdout JSON
+        │ stdin/stdout JSON loop
         ▼
     {"type":"batch","images":["base64...", ...], "score_thr": 0.70}
         │
     [[{"bbox":[x0,y0,x1,y1],"score":0.87,"label":"tumor"}], [...], ...]
 ```
 
-### Séquence d'initialisation
+### Initialization sequence
 
-1. `STARHEDetectModel.__init__()` appelle `_start_server()`
-2. `_start_server()` lance le subprocess avec `--mode server`
-3. Attente bloquante de la ligne `[rtmdet_server] READY` sur stdout
-4. Toute autre ligne = échec → `RuntimeError` avec les 2000 derniers caractères de stderr
+1. `STARHEDetectModel.__init__()` calls `_start_server()`
+2. `_start_server()` launches the subprocess with `--mode server`
+3. Blocking wait for the `[rtmdet_server] READY` line on stdout
+4. Any other line = failure → `RuntimeError` with the last 2000 characters of stderr
 
-### Envoi d'un batch de frames
+### Sending a batch of frames
 
 ```python
-# Dans predict_batch(frames) :
+# In predict_batch(frames):
 payload = {
     "type":      "batch",
     "images":    [base64(png(frame)) for frame in frames],
@@ -386,12 +386,12 @@ payload = {
 proc.stdin.write(json.dumps(payload) + "\n")
 proc.stdin.flush()
 response = json.loads(proc.stdout.readline())
-# response = [[det, ...], [det, ...], ...]  — une liste par frame
+# response = [[det, ...], [det, ...], ...]  — one list per frame
 ```
 
-### Sous-échantillonnage temporel
+### Temporal subsampling
 
-Dans `pipeline.py`, seule 1 frame sur `DETECT_EVERY_N=4` est envoyée au modèle. Les 3 frames intermédiaires héritent des mêmes détections :
+In `pipeline.py`, only 1 frame out of every `DETECT_EVERY_N=4` is sent to the model. The 3 intermediate frames inherit the same detections:
 
 ```python
 for i in range(0, n_frames, stride):
@@ -400,80 +400,80 @@ for i in range(0, n_frames, stride):
         detections_per_frame[j] = dets
 ```
 
-Gain pratique : ×4 sur le temps d'inférence, négligeable sur la précision (les lésions bougent peu d'une frame à l'autre).
+Practical gain: ×4 on inference time, negligible impact on accuracy (lesions move little from one frame to the next).
 
-### Backend DINO (alternatif)
+### DINO backend (alternative)
 
-Défini dans `ai/models/_dino_runner.py`. Pas de mode serveur — chaque frame lance un subprocess séparé (lent, à n'utiliser qu'en développement). Sélectionnable via `DETECT_BACKEND = "dino"` dans `config.py`.
+Defined in `ai/models/_dino_runner.py`. No server mode — each frame launches a separate subprocess (slow, for development use only). Selectable via `DETECT_BACKEND = "dino"` in `config.py`.
 
 ---
 
-## Intégration MEDomics (Standard Plugin)
+## MEDomics Integration (Standard Plugin)
 
-Le plugin STARHE s'intègre dans la plateforme MEDomics selon le patron « Standard Plugin » (analogue aux extensions 3D Slicer). L'intégration se compose de trois pièces :
+The STARHE plugin integrates into the MEDomics platform following the "Standard Plugin" pattern (analogous to 3D Slicer extensions). The integration consists of three parts:
 
-### 1. Blueprint Go (`medomics_integration/starhe_blueprint.go`)
+### 1. Go Blueprint (`medomics_integration/starhe_blueprint.go`)
 
-Fichier Go à copier dans `MEDomics/go_server/blueprints/starhe/starhe.go`. Il enregistre deux routes :
+Go file to copy into `MEDomics/go_server/blueprints/starhe/starhe.go`. It registers two routes:
 
-| Route | Fonction | Description |
+| Route | Function | Description |
 |---|---|---|
-| `starhe/analyze/` | `handleAnalyze` | Lance le pipeline STARHE via `Utils.StartPythonScripts()` |
-| `starhe/progress/` | `handleProgress` | Retourne la progression du job en cours |
+| `starhe/analyze/` | `handleAnalyze` | Launches the STARHE pipeline via `Utils.StartPythonScripts()` |
+| `starhe/progress/` | `handleProgress` | Returns the progress of the current job |
 
-Puis dans `MEDomics/go_server/main.go` :
+Then in `MEDomics/go_server/main.go`:
 ```go
 import Starhe "go_module/blueprints/starhe"
-// dans main() :
+// in main():
 Starhe.AddHandleFunc()
 ```
 
-### 2. Adaptateur Python (`pythonCode/modules/starhe/run_starhe.py`)
+### 2. Python Adapter (`pythonCode/modules/starhe/run_starhe.py`)
 
-Script Python qui hérite de `GoExecutionScript` (lib MEDomics). Il tourne dans l'environnement conda de MEDomics et :
+Python script that inherits from `GoExecutionScript` (MEDomics lib). It runs in the MEDomics conda environment and:
 
-1. Reçoit `--json-param <json> --id <id>` du serveur Go
-2. Localise le venv STARHE (`.venv/` dans `starhe_plugin/`, ou via `$STARHE_PLUGIN_DIR`)
-3. Lance `python -m starhe_plugin.pipeline` en subprocess dans le venv STARHE
-4. Lit les lignes `GO_PRINT|…` et les traduit :
+1. Receives `--json-param <json> --id <id>` from the Go server
+2. Locates the STARHE venv (`.venv/` in `starhe_plugin/`, or via `$STARHE_PLUGIN_DIR`)
+3. Launches `python -m starhe_plugin.pipeline` as a subprocess in the STARHE venv
+4. Reads `GO_PRINT|…` lines and translates them:
    - `GO_PRINT|progress|{…}` → `self.set_progress(label=…, now=pct)`
-   - `GO_PRINT|result|{…}` → donnée collectée pour `send_response()`
+   - `GO_PRINT|result|{…}` → data collected for `send_response()`
    - `GO_PRINT|error|{…}` → `go_print("[STARHE ERROR] …")`
 
-### 3. Manifeste (`plugin.json`)
+### 3. Manifest (`plugin.json`)
 
-Fichier JSON à la racine du projet documentant les éléments d'intégration (routes, chemins, commandes à ajouter au `main.go` de MEDomics) et la configuration standalone.
+JSON file at the project root documenting the integration elements (routes, paths, commands to add to MEDomics `main.go`) and the standalone configuration.
 
-### Déploiement
+### Deployment
 
-Le déploiement dans le dépôt MEDomics s'effectue par :
+Deployment in the MEDomics repository is done by:
 
-1. **Copie** du blueprint Go → `MEDomics/go_server/blueprints/starhe/starhe.go`
-2. **Symlinks** dans `MEDomics/pythonCode/modules/` :
-   - `starhe/` → adaptateur (`run_starhe.py`)
-   - `starhe_plugin/` → le plugin complet (pipeline, IA, DICOM, DB…)
-3. **Patch** de `MEDomics/go_server/main.go` (import + `AddHandleFunc()`)
+1. **Copy** the Go blueprint → `MEDomics/go_server/blueprints/starhe/starhe.go`
+2. **Symlinks** in `MEDomics/pythonCode/modules/`:
+   - `starhe/` → adapter (`run_starhe.py`)
+   - `starhe_plugin/` → the complete plugin (pipeline, AI, DICOM, DB…)
+3. **Patch** `MEDomics/go_server/main.go` (import + `AddHandleFunc()`)
 
-> **Note Windows** : les symlinks nécessitent les droits administrateur ou le mode développeur activé.
+> **Windows note**: symlinks require administrator rights or developer mode enabled.
 
 ---
 
-## Base de données MongoDB
+## MongoDB Database
 
-### Connexion
+### Connection
 
-Port local `54017` (non standard, configuré dans `config.py` et `go_server/config.go`). Chaque appel `_get_collection()` ouvre une connexion avec timeout 3s — pas de pool global côté Python (pymongo gère son propre pool).
+Local port `54017` (non-standard, configured in `config.py` and `go_server/config.go`). Each `_get_collection()` call opens a connection with 3s timeout — no global pool on the Python side (pymongo manages its own pool).
 
-### Schéma d'un document
+### Document schema
 
 ```json
 {
   "_id"                  : "<ObjectId>",
-  "file_path"            : "/chemin/absolu/fichier.dcm",
+  "file_path"            : "/absolute/path/file.dcm",
   "processed_at"         : "2026-04-01T14:22:11Z",
   "num_frames"           : 180,
   "roi"                  : [x0, y0, x1, y1],
-  "risk"                 : {"score": 0.82, "label": "Risque élevé"},
+  "risk"                 : {"score": 0.82, "label": "High risk"},
   "detections_per_frame" : [
     [],
     [{"bbox": [120, 80, 200, 160], "score": 0.91, "label": "tumor"}],
@@ -484,40 +484,40 @@ Port local `54017` (non standard, configuré dans `config.py` et `go_server/conf
 }
 ```
 
-- `detections_per_frame` est une **liste de listes** indexée sur les frames, longueur = `num_frames`.
-- La clé de cache est le couple `(file_path, analysis_mode)` — un document par fichier **et par mode** d'analyse (`original`, `crop`, `backscan`). Sensible au déplacement/renommage du fichier.
-- `replace_one({file_path: ..., analysis_mode: ...}, doc, upsert=True)` : un document par combinaison fichier + mode.
+- `detections_per_frame` is a **list of lists** indexed by frame, length = `num_frames`.
+- The cache key is the pair `(file_path, analysis_mode)` — one document per file **and per** analysis mode (`original`, `crop`, `backscan`). Sensitive to file relocation/renaming.
+- `replace_one({file_path: ..., analysis_mode: ...}, doc, upsert=True)`: one document per file + mode combination.
 
-### Opérations disponibles (`db/mongo_client.py`)
+### Available operations (`db/mongo_client.py`)
 
 ```python
 save_result(file_path, num_frames, roi, risk, detections_per_frame, anon_mode, analysis_mode)
-find_by_file(file_path, analysis_mode=None)  # → dict | None  (filtre optionnel par mode)
-get_result(result_id)     # → dict | None  (par ObjectId string)
+find_by_file(file_path, analysis_mode=None)  # → dict | None  (optional filter by mode)
+get_result(result_id)     # → dict | None  (by ObjectId string)
 list_results(limit=100)   # → list[dict]
 delete_result(file_path)  # → bool
 ```
 
 ---
 
-## Serveur Go (`go_server/`)
+## Go Server (`go_server/`)
 
 ### Endpoints
 
-| Méthode | Route | Description |
+| Method | Route | Description |
 |---|---|---|
 | `GET` | `/health` | Healthcheck |
-| `POST` | `/starhe/analyze` | Lance pipeline.py et streame via SSE |
-| `GET` | `/starhe/results` | Liste les résultats (paramètre `?limit=N`) |
-| `GET` | `/starhe/results/{id}` | Un résultat par ObjectId |
-| `DELETE` | `/starhe/results/{id}` | Supprime un résultat |
+| `POST` | `/starhe/analyze` | Launches pipeline.py and streams via SSE |
+| `GET` | `/starhe/results` | Lists results (parameter `?limit=N`) |
+| `GET` | `/starhe/results/{id}` | One result by ObjectId |
+| `DELETE` | `/starhe/results/{id}` | Deletes a result |
 
 ### `POST /starhe/analyze`
 
-Corps JSON :
+JSON body:
 ```json
 {
-  "dicom_path"           : "/chemin/absolu/fichier.dcm",
+  "dicom_path"           : "/absolute/path/file.dcm",
   "anon_mode"            : "hash",
   "run_detection"        : true,
   "back_scan_conversion" : true,
@@ -526,191 +526,191 @@ Corps JSON :
 }
 ```
 
-Le handler lance `python -m starhe_plugin.pipeline` en subprocess, lit chaque ligne `GO_PRINT|...` et la relaie en SSE. Le flux se termine par `data: [DONE]`.
+The handler launches `python -m starhe_plugin.pipeline` as a subprocess, reads each `GO_PRINT|...` line and relays it as SSE. The stream ends with `data: [DONE]`.
 
 ### CORS
 
-Le middleware `withCORS` dans `main.go` ajoute les headers `Access-Control-Allow-*` pour tous les endpoints — nécessaire pour que le frontend React (Electron) puisse appeler l'API.
+The `withCORS` middleware in `main.go` adds `Access-Control-Allow-*` headers for all endpoints — required for the React frontend (Electron) to call the API.
 
 ---
 
-## Interface prototype Tkinter (`ui/prototype_tkinter.py`)
+## Tkinter Prototype Interface (`ui/prototype_tkinter.py`)
 
-Le prototype sert à valider le pipeline et l'UX avant le portage React. C'est un fichier unique d'environ 2500 lignes.
+The prototype is used to validate the pipeline and UX before porting to React. It is a single file of about 2500 lines.
 
-### Points techniques non évidents
+### Non-obvious technical points
 
-**Subprocess persistant RTMDet** : côté UI, `STARHEDetectModel` est utilisé exactement comme dans `pipeline.py`, dans un thread `threading.Thread` pour ne pas bloquer l'interface.
+**Persistent RTMDet subprocess**: on the UI side, `STARHEDetectModel` is used exactly as in `pipeline.py`, in a `threading.Thread` to avoid blocking the interface.
 
-**Onglets multi-fichiers** : chaque onglet stocke un `dict` d'état complet (~30 clés : frames brutes, frames prepUS, index courant, mesures, zoom, contraste, résultats IA par mode, métadonnées, etc.). La méthode `_save_tab_state()` copie les variables `self._xxx` dans `self._tabs[i]`, et `_restore_tab_state(i)` fait l'inverse. Aucune donnée n'est rechargée depuis le disque lors d'un changement d'onglet.
+**Multi-file tabs**: each tab stores a complete state `dict` (~30 keys: raw frames, prepUS frames, current index, measurements, zoom, contrast, AI results per mode, metadata, etc.). The `_save_tab_state()` method copies `self._xxx` variables into `self._tabs[i]`, and `_restore_tab_state(i)` does the reverse. No data is reloaded from disk when switching tabs.
 
-**Résultats par mode d'affichage** : les détections et résultats sont stockés dans des dicts indexés par mode (`_detections_by_mode` et `_results_by_mode`, clés : `"backscan"`, `"crop"`, `"original"`). Quand l'utilisateur bascule entre les modes (toggle crop/backscan), seuls les bounding boxes et résultats correspondant au mode actif sont affichés. La méthode `_refresh_results_panel()` met à jour les labels Mode, Risque, et Lésions en conséquence.
+**Results per display mode**: detections and results are stored in dicts indexed by mode (`_detections_by_mode` and `_results_by_mode`, keys: `"backscan"`, `"crop"`, `"original"`). When the user toggles between modes (toggle crop/backscan), only the bounding boxes and results for the active mode are displayed. The `_refresh_results_panel()` method updates the Mode, Risk, and Lesions labels accordingly.
 
-**Mesures en mm** : la calibration s'effectue dans l'ordre de priorité suivant dans les métadonnées DICOM :
-1. `SequenceOfUltrasoundRegions` (tag `(0018,6011)`) — physicalDeltaX/Y en cm
-2. `PixelSpacing` (tag `(0028,0030)`) — en mm
-3. `ImagerPixelSpacing` (tag `(0018,1164)`) — en mm
+**Measurements in mm**: calibration follows this priority order from DICOM metadata:
+1. `SequenceOfUltrasoundRegions` (tag `(0018,6011)`) — physicalDeltaX/Y in cm
+2. `PixelSpacing` (tag `(0028,0030)`) — in mm
+3. `ImagerPixelSpacing` (tag `(0018,1164)`) — in mm
 
-La valeur `pixel_spacing` (mm/px) est stockée dans l'état de l'onglet et utilisée par `_draw_measure_overlay()` pour afficher la distance en mm.
+The `pixel_spacing` value (mm/px) is stored in the tab state and used by `_draw_measure_overlay()` to display the distance in mm.
 
-**Boucle de lecture** : la méthode `_tick()` est appelée via `self.after(delay_ms, self._tick)`. Le délai est calculé depuis `FrameTime` DICOM (en ms) divisé par `_speed_mult`. Pour les vitesses ≥1, des frames sont sautées (`_skip_n`) au lieu de diminuer le délai (limité à ~15ms par `after`).
+**Playback loop**: the `_tick()` method is called via `self.after(delay_ms, self._tick)`. The delay is calculated from the DICOM `FrameTime` (in ms) divided by `_speed_mult`. For speeds ≥1, frames are skipped (`_skip_n`) instead of reducing the delay (limited to ~15ms by `after`).
 
-**go_print côté UI** : à l'initialisation, `set_log_sink(lambda level, msg: self._append_log(msg))` redirige tous les messages vers la console de l'interface. Le sink est réinitialisé à `None` à la fermeture.
+**go_print on the UI side**: at initialization, `set_log_sink(lambda level, msg: self._append_log(msg))` redirects all messages to the interface console. The sink is reset to `None` on close.
 
-**Zoom et pan** : toutes les coordonnées canvas sont recalculées à chaque `_refresh_canvas()` en appliquant la transformation affine `(x * zoom + pan_x, y * zoom + pan_y)`. Les images sont redimensionnées via `PIL.Image.resize` avec `LANCZOS`.
+**Zoom and pan**: all canvas coordinates are recalculated at each `_refresh_canvas()` by applying the affine transform `(x * zoom + pan_x, y * zoom + pan_y)`. Images are resized via `PIL.Image.resize` with `LANCZOS`.
 
-**Anonymisation à l'import** : les valeurs originales sont sauvegardées dans `original_sensitive` (liste de tuples `(nom_tag, valeur)`) avant anonymisation. Elles sont affichées en rouge dans le panneau métadonnées. Les valeurs anonymisées sont dans `kept_metadata`.
+**Anonymization at import**: original values are saved in `original_sensitive` (list of tuples `(tag_name, value)`) before anonymization. They are displayed in red in the metadata panel. Anonymized values are in `kept_metadata`.
 
-### Raccourcis clavier
+### Keyboard shortcuts
 
-Un guard `_kb_guard()` vérifie que le focus n'est pas sur un widget de texte (`tk.Entry`, `tk.Text`, `scrolledtext.ScrolledText`) avant d'exécuter le raccourci — évite les interférences avec la saisie utilisateur.
+A `_kb_guard()` guard checks that focus is not on a text widget (`tk.Entry`, `tk.Text`, `scrolledtext.ScrolledText`) before executing the shortcut — avoids interference with user input.
 
 ---
 
-## Compatibilité Python 3.13
+## Python 3.13 Compatibility
 
-Python 3.13 a introduit plusieurs changements incompatibles avec mmcv/mmdet. Voici les patches appliqués dans `_rtmdet_runner.py` **avant tout import mmcv** :
+Python 3.13 introduced several changes incompatible with mmcv/mmdet. Here are the patches applied in `_rtmdet_runner.py` **before any mmcv import**:
 
-### 1. Stub `mmcv._ext`
+### 1. `mmcv._ext` stub
 
-mmcv tente d'importer une extension C compilée `mmcv._ext` (`NMSop`, etc.). Cette extension n'existe pas dans les versions récentes ou avec des builds incompatibles. Le stub remplace le module par un objet Python dont chaque attribut lève une `RuntimeError` uniquement si appelé :
+mmcv attempts to import a compiled C extension `mmcv._ext` (`NMSop`, etc.). This extension does not exist in recent versions or with incompatible builds. The stub replaces the module with a Python object whose every attribute raises a `RuntimeError` only if called:
 
 ```python
 class _CExtStub(types.ModuleType):
     def __getattr__(self, name):
         def _unavailable(*a, **kw):
-            raise RuntimeError(f"mmcv._ext.{name}: C-extension absente.")
+            raise RuntimeError(f"mmcv._ext.{name}: C-extension missing.")
         return _unavailable
 sys.modules["mmcv._ext"] = _CExtStub("mmcv._ext")
 ```
 
-L'inférence RTMDet n'utilise pas en pratique les fonctions NMS de l'extension (PyTorch fournit les siennes).
+RTMDet inference does not in practice use the NMS functions from the extension (PyTorch provides its own).
 
-### 2. Patch `inspect.getmodule`
+### 2. `inspect.getmodule` patch
 
-mmengine (dépendance de mmdet) appelle `inspect.getmodule()` sur des objets de frame Python. En Python 3.13, cela peut lever `AttributeError` ou `OSError` dans certains contextes. Le patch enveloppe l'appel original dans un try/except et retourne `None` en cas d'échec (comportement tolerable pour mmengine).
+mmengine (mmdet dependency) calls `inspect.getmodule()` on Python frame objects. In Python 3.13, this can raise `AttributeError` or `OSError` in certain contexts. The patch wraps the original call in a try/except and returns `None` on failure (tolerable behavior for mmengine).
 
-### 3. Stub `tqdm`
+### 3. `tqdm` stub
 
-tqdm n'est pas dans les dépendances mmdet. Si absent, mmdet lève une `ImportError` à l'import. Le stub injecte un module minimal où `tqdm.tqdm(iterable)` retourne l'itérable tel quel.
+tqdm is not in the mmdet dependencies. If absent, mmdet raises an `ImportError` on import. The stub injects a minimal module where `tqdm.tqdm(iterable)` returns the iterable as-is.
 
 ---
 
-## Structure complète du projet
+## Full Project Structure
 
 ```
 PLUGIN1-MEDomics/
 │
-├── run_tkinter.ps1                   # Lanceur UI prototype Windows (installe prepUS auto)
-├── run_tkinter.sh                    # Lanceur UI prototype macOS/Linux (installe prepUS auto)
-├── setup.sh                          # Setup venv + dépendances macOS/Linux (sans UI)
-├── setup.ps1                         # Setup venv + dépendances Windows (sans UI)
-├── plugin.json                       # Manifeste du plugin (config standalone + intégration MEDomics)
-├── README.md                         # Ce fichier
-├── READMEUtilisateur.md              # Guide utilisateur de l'interface Tkinter
-├── TODOLIST.md                       # Carnet de bord / roadmap
-├── MEDomicsLab_LOGO.png              # Logo affiché dans l'UI
+├── run_tkinter.ps1                   # Windows UI prototype launcher (auto-installs prepUS)
+├── run_tkinter.sh                    # macOS/Linux UI prototype launcher (auto-installs prepUS)
+├── setup.sh                          # macOS/Linux venv + dependencies setup (without UI)
+├── setup.ps1                         # Windows venv + dependencies setup (without UI)
+├── plugin.json                       # Plugin manifest (standalone config + MEDomics integration)
+├── README.md                         # This file
+├── READMEUtilisateur.md              # Tkinter interface user guide
+├── TODOLIST.md                       # Logbook / roadmap
+├── MEDomicsLab_LOGO.png              # Logo displayed in the UI
 │
-├── go_server/                        # Serveur Go autonome (mode standalone)
-│   ├── main.go                       # Routing HTTP + init MongoDB
-│   ├── config.go                     # Variables d'environnement avec valeurs par défaut
-│   └── handlers.go                   # Handlers REST + SSE streaming
+├── go_server/                        # Standalone Go server (standalone mode)
+│   ├── main.go                       # HTTP routing + MongoDB init
+│   ├── config.go                     # Environment variables with default values
+│   └── handlers.go                   # REST handlers + SSE streaming
 │
-├── medomics_integration/             # Fichiers destinés au dépôt MEDomics
-│   └── starhe_blueprint.go           # Blueprint Go (routes starhe/analyze, starhe/progress)
+├── medomics_integration/             # Files intended for the MEDomics repository
+│   └── starhe_blueprint.go           # Go blueprint (routes starhe/analyze, starhe/progress)
 │
 ├── third_party/
-│   └── prepUS/                       # Package prepUS vendorisé (pip install --no-deps)
+│   └── prepUS/                       # Vendored prepUS package (pip install --no-deps)
 │
 └── pythonCode/modules/
     │
-    ├── starhe/                       # Adaptateur MEDomics (GoExecutionScript)
+    ├── starhe/                       # MEDomics adapter (GoExecutionScript)
     │   ├── __init__.py
-    │   └── run_starhe.py             # Pont MEDomics → subprocess venv STARHE
+    │   └── run_starhe.py             # MEDomics → STARHE venv subprocess bridge
     │
-    └── starhe_plugin/                # Plugin STARHE complet
+    └── starhe_plugin/                # Complete STARHE plugin
         │
-        ├── .venv/                    # Environnement virtuel Python 3.13 (non versionné)
-        ├── __init__.py               # Hooks on_load() / on_unload() (cycle de vie MEDomics)
-        ├── config.py                 # Toutes les constantes, chemins, hyperparamètres
-        ├── pipeline.py               # Orchestrateur principal (point d'entrée Go)
-        ├── requirements.txt          # Dépendances Python
+        ├── .venv/                    # Python 3.13 virtual environment (not versioned)
+        ├── __init__.py               # on_load() / on_unload() hooks (MEDomics lifecycle)
+        ├── config.py                 # All constants, paths, hyperparameters
+        ├── pipeline.py               # Main orchestrator (Go entry point)
+        ├── requirements.txt          # Python dependencies
         │
         ├── ai/
-        │   ├── starhe_risk.py        # Wrapper C3D : chargement + inférence
-        │   ├── starhe_detect.py      # Wrapper RTMDet/DINO : subprocess serveur
+        │   ├── starhe_risk.py        # C3D wrapper: loading + inference
+        │   ├── starhe_detect.py      # RTMDet/DINO wrapper: subprocess server
         │   └── models/
-        │       ├── c3d.py            # Architecture C3D en PyTorch pur (sans mmaction2)
-        │       ├── _rtmdet_runner.py # Runner RTMDet (mode image + mode serveur)
-        │       ├── _dino_runner.py   # Runner DINO-DETR (mode image uniquement)
-        │       ├── rtmdet.py         # Stubs RTMDet pour chargement config mmdet
-        │       └── dino.py           # Stubs DINO-DETR
+        │       ├── c3d.py            # C3D architecture in pure PyTorch (without mmaction2)
+        │       ├── _rtmdet_runner.py # RTMDet runner (image mode + server mode)
+        │       ├── _dino_runner.py   # DINO-DETR runner (image mode only)
+        │       ├── rtmdet.py         # RTMDet stubs for mmdet config loading
+        │       └── dino.py           # DINO-DETR stubs
         │
         ├── db/
-        │   └── mongo_client.py       # CRUD MongoDB (save/find/list/delete) + dégradation gracieuse
+        │   └── mongo_client.py       # MongoDB CRUD (save/find/list/delete) + graceful degradation
         │
         ├── dicom/
-        │   ├── reader.py             # Chargement DICOM, extraction frames, uint8
-        │   ├── anonymizer.py         # Anonymisation tags + suppression bandeau imageur
-        │   ├── prepus_bridge.py      # Intégration prepUS (export MP4 → frames numpy)
-        │   └── crop.py               # Algo de crop maison (fallback si prepUS indisponible)
+        │   ├── reader.py             # DICOM loading, frame extraction, uint8
+        │   ├── anonymizer.py         # Tag anonymization + imager banner removal
+        │   ├── prepus_bridge.py      # prepUS integration (MP4 export → numpy frames)
+        │   └── crop.py               # Custom crop algorithm (fallback if prepUS unavailable)
         │
         ├── ui/
-        │   └── prototype_tkinter.py  # Interface prototype (~2500 lignes)
+        │   └── prototype_tkinter.py  # Prototype interface (~2500 lines)
         │
         └── utils/
-            └── go_print.py           # Protocole stdout Go ↔ Python + set_log_sink()
+            └── go_print.py           # Go ↔ Python stdout protocol + set_log_sink()
 ```
 
 ---
 
 ## Configuration (`config.py`)
 
-Tous les paramètres sont dans un seul fichier. Les chemins sont relatifs au projet — aucune adaptation nécessaire sur une nouvelle machine :
+All parameters are in a single file. Paths are relative to the project — no adaptation needed on a new machine:
 
 ```python
-DATA_DIR   = os.environ.get("STARHE_DATA_DIR", os.path.join(PROJECT_ROOT, "data"))  # Dossier des fichiers DICOM
-MODELS_DIR = os.path.join(BASE_DIR, "models")   # Checkpoints IA (non versionnés)
+DATA_DIR   = os.environ.get("STARHE_DATA_DIR", os.path.join(PROJECT_ROOT, "data"))  # DICOM files directory
+MODELS_DIR = os.path.join(BASE_DIR, "models")   # AI checkpoints (not versioned)
 ```
 
-`DATA_DIR` pointe par défaut vers `data/` à la racine du projet. Surchargeable via la variable d'environnement `STARHE_DATA_DIR`.
+`DATA_DIR` defaults to `data/` at the project root. Overridable via the `STARHE_DATA_DIR` environment variable.
 
-### Variables d'environnement MongoDB
+### MongoDB environment variables
 
-| Variable | Défaut | Description |
+| Variable | Default | Description |
 |---|---|---|
-| `MONGO_URI` | `mongodb://localhost:54017/` | URI de connexion MongoDB |
-| `MONGO_DB` | `medomics` | Nom de la base de données |
-| `MONGO_COLL` | `starhe_results` | Nom de la collection |
+| `MONGO_URI` | `mongodb://localhost:54017/` | MongoDB connection URI |
+| `MONGO_DB` | `medomics` | Database name |
+| `MONGO_COLL` | `starhe_results` | Collection name |
 
-Ces variables permettent de partager la même instance MongoDB entre le plugin standalone et la plateforme MEDomics sans modifier le code.
+These variables allow sharing the same MongoDB instance between the standalone plugin and the MEDomics platform without modifying the code.
 
-### Compatibilité cross-platform
+### Cross-platform compatibility
 
-- **Chemins** : `pathlib` est utilisé dans `mongo_client.py` et `starhe_detect.py` pour la normalisation des chemins (clés de cache, détection venv).
-- **MongoDB** : dégradation gracieuse — si MongoDB est indisponible, le pipeline s'exécute normalement mais les résultats ne sont pas mis en cache (`save_result()` et `find_by_file()` retournent `None` au lieu de lever une exception).
+- **Paths**: `pathlib` is used in `mongo_client.py` and `starhe_detect.py` for path normalization (cache keys, venv detection).
+- **MongoDB**: graceful degradation — if MongoDB is unavailable, the pipeline runs normally but results are not cached (`save_result()` and `find_by_file()` return `None` instead of raising an exception).
 
-Paramètres IA :
+AI parameters:
 
-| Paramètre | Valeur | Effet |
+| Parameter | Value | Effect |
 |---|---|---|
-| `DETECT_BACKEND` | `"rtmdet"` | Changer en `"dino"` pour tester DINO-DETR |
-| `DETECT_SCORE_THRESHOLD` | `0.70` | Seuil de confiance minimum, affecte l'affichage et le cache |
-| `DETECT_EVERY_N` | `4` | Sous-échantillonnage temporel (1 = toutes les frames) |
-| `DETECT_BATCH_SIZE` | `4` | Taille des lots envoyés au subprocess RTMDet |
+| `DETECT_BACKEND` | `"rtmdet"` | Change to `"dino"` to test DINO-DETR |
+| `DETECT_SCORE_THRESHOLD` | `0.70` | Minimum confidence threshold, affects display and cache |
+| `DETECT_EVERY_N` | `4` | Temporal subsampling (1 = all frames) |
+| `DETECT_BATCH_SIZE` | `4` | Batch size sent to the RTMDet subprocess |
 
 ---
 
-## Limitations connues et points d'attention
+## Known Limitations and Points of Attention
 
-- **Clé de cache MongoDB = chemin absolu** : si le fichier DICOM est déplacé ou renommé, l'analyse est relancée même si elle a déjà été effectuée.
-- **Changement d'onglet pendant une analyse** : l'analyse tourne dans un thread séparé et continue même si l'onglet source est fermé. Les résultats sont perdus si l'onglet est fermé avant la fin.
-- **prepUS et backscan** : le backscan ne fonctionne que sur des images sectorielles (mode B standard). Les images linéaires (vaisseaux superficiels) peuvent produire un backscan dégradé — utiliser `back_scan_conversion=False` dans ce cas.
-- **GPU** : STARHE-RISK passe automatiquement sur CUDA si disponible. STARHE-DETECT (RTMDet en subprocess) utilise CPU par défaut ; ajouter `--device cuda` dans le cmd de `_start_server()` pour activer le GPU.
+- **MongoDB cache key = absolute path**: if the DICOM file is moved or renamed, the analysis is re-run even if it was already performed.
+- **Tab switch during analysis**: the analysis runs in a separate thread and continues even if the source tab is closed. Results are lost if the tab is closed before completion.
+- **prepUS and backscan**: backscan only works on sector images (standard B-mode). Linear images (superficial vessels) may produce a degraded backscan — use `back_scan_conversion=False` in that case.
+- **GPU**: STARHE-RISK automatically switches to CUDA if available. STARHE-DETECT (RTMDet in subprocess) uses CPU by default; add `--device cuda` in the `_start_server()` cmd to enable GPU.
 
 ---
 
-## Autres documents
+## Other Documents
 
-- [READMEUtilisateur.md](READMEUtilisateur.md) — Guide d'utilisation de l'interface Tkinter
-- [TODOLIST.md](TODOLIST.md) — Carnet de bord, tâches accomplies et roadmap
+- [READMEUtilisateur.md](READMEUtilisateur.md) — User guide for the Tkinter interface
+- [TODOLIST.md](TODOLIST.md) — Logbook, completed tasks and roadmap

@@ -1,11 +1,11 @@
-# 👤 Guide Utilisateur — Interface STARHE
+# 👤 User Guide — STARHE Interface
 
-> Ce document explique comment utiliser le prototype d'interface du plug-in STARHE,  
-> dédié à l'analyse échographique hépatique pour la détection du carcinome hépatocellulaire (CHC).
+> This document explains how to use the STARHE plug-in interface prototype,  
+> dedicated to hepatic ultrasound analysis for hepatocellular carcinoma (HCC) detection.
 
 ---
 
-## 🚀 Lancement de l'Interface
+## 🚀 Launching the Interface
 
 ```powershell
 # Windows (PowerShell)
@@ -15,274 +15,274 @@
 ./run_tkinter.sh
 ```
 
-La fenêtre s'ouvre avec la sidebar de contrôle à gauche et la zone de visualisation à droite.
+The window opens with the control sidebar on the left and the viewing area on the right.
 
 ---
 
-## 📂 1. Charger un ou Plusieurs Fichiers DICOM
+## 📂 1. Load One or More DICOM Files
 
-1. Dans la sidebar, section **FICHIER DICOM**, cliquez sur **📂 Charger un fichier DICOM**.
-2. La boîte de dialogue permet de sélectionner **un ou plusieurs fichiers** simultanément (`Ctrl+clic` ou `Shift+clic`).
-3. Formats acceptés :
-   - Fichiers `.dcm` classiques
-   - **Fichiers sans extension** (ex. `A0000`, `IM-0001`) — utilisez le filtre **« Tous fichiers »**
+1. In the sidebar, section **DICOM FILE**, click **📂 Load a DICOM file**.
+2. The dialog allows selecting **one or more files** simultaneously (`Ctrl+click` or `Shift+click`).
+3. Accepted formats:
+   - Standard `.dcm` files
+   - **Files without extension** (e.g. `A0000`, `IM-0001`) — use the **"All files"** filter
 
-**À l'import, automatiquement :**
-- Les **métadonnées sensibles** sont supprimées des tags DICOM
-- Le **bandeau d'en-tête** de l'imageur est **noirci**
-- Le **pixel spacing** est extrait pour les mesures en millimètres
-- Un **onglet** est créé pour chaque fichier chargé, intitulé par la date du DICOM (`JJ/MM/AAAA`)
+**On import, automatically:**
+- **Sensitive metadata** are removed from DICOM tags
+- The imager **header banner** is **blacked out**
+- **Pixel spacing** is extracted for millimeter measurements
+- A **tab** is created for each loaded file, labeled with the DICOM date (`DD/MM/YYYY`)
 
 ---
 
-## 📄 2. Onglets Multi-Fichiers
+## 📄 2. Multi-File Tabs
 
-La **barre d'onglets** est située en bas de la visionneuse, comme un navigateur web.
+The **tab bar** is located at the bottom of the viewer, like a web browser.
 
-| Action | Résultat |
+| Action | Result |
 |---|---|
-| Cliquer sur un onglet | Bascule vers ce fichier (la visionneuse, les résultats, les mesures et l'état de lecture sont préservés) |
-| Cliquer sur **×** d'un onglet | Ferme ce fichier (le dernier onglet réinitialise tout) |
-| Cliquer sur **+** (à droite) | Ouvre le sélect eur de fichiers pour ajouter d'autres DICOM |
-| Défilement horizontal molette | Défile si trop d'onglets |
-| `Ctrl+Tab` | Onglet suivant |
-| `Ctrl+Shift+Tab` | Onglet précédent |
-| `Ctrl+W` | Ferme l'onglet actif |
+| Click on a tab | Switches to that file (viewer, results, measurements and playback state are preserved) |
+| Click on a tab's **×** | Closes that file (the last tab resets everything) |
+| Click on **+** (on the right) | Opens the file selector to add more DICOM files |
+| Horizontal mouse wheel scroll | Scrolls if too many tabs |
+| `Ctrl+Tab` | Next tab |
+| `Ctrl+Shift+Tab` | Previous tab |
+| `Ctrl+W` | Close active tab |
 
-**Label des onglets :** extrait du tag `StudyDate` DICOM (format `JJ/MM/AAAA`). Si absent, le nom du fichier est utilisé.
-
----
-
-## ▶ 3. Navigation dans la Séquence
-
-### Boutons de navigation
-| Contrôle | Action |
-|---|---|
-| **◄** | Frame précédente |
-| **►** | Frame suivante |
-| Scrollbar horizontale | Glisser pour aller directement à une position |
-| **► Play** | Lance la lecture automatique |
-| **⏸ Pause** | Met la lecture en pause |
-| **⏮ Revenir au début** | Stoppe et revient au frame 0 |
-
-### Vitesse de lecture
-- Slider **×-vitesse** (0.25× à 3.0×) dans la sidebar
-- La vitesse de base est calibrée automatiquement depuis le tag `FrameTime` du DICOM
-- En dessous de ×1 : lecture ralentie ; au-dessus : frames sautées pour accélérer
-
-### Mode boucle
-- Cochez **Boucle** pour que la lecture recommence automatiquement à la fin de la séquence
+**Tab labels:** extracted from the DICOM `StudyDate` tag (format `DD/MM/YYYY`). If absent, the file name is used.
 
 ---
 
-## ⌨️ 4. Raccourcis Clavier
+## ▶ 3. Sequence Navigation
 
-> Les raccourcis sont désactivés lorsqu'un champ de saisie a le focus.
-
-### Navigation vidéo
-| Touche | Action |
+### Navigation buttons
+| Control | Action |
 |---|---|
-| `Espace` | ► Play / ⏸ Pause |
-| `←` / `→` | Frame précédente / suivante |
+| **◄** | Previous frame |
+| **►** | Next frame |
+| Horizontal scrollbar | Drag to go directly to a position |
+| **► Play** | Start automatic playback |
+| **⏸ Pause** | Pause playback |
+| **⏮ Back to start** | Stop and return to frame 0 |
+
+### Playback speed
+- **×-speed** slider (0.25× to 3.0×) in the sidebar
+- Base speed is automatically calibrated from the DICOM `FrameTime` tag
+- Below ×1: slowed playback; above: frames skipped to speed up
+
+### Loop mode
+- Check **Loop** to have playback automatically restart at the end of the sequence
+
+---
+
+## ⌨️ 4. Keyboard Shortcuts
+
+> Shortcuts are disabled when an input field has focus.
+
+### Video navigation
+| Key | Action |
+|---|---|
+| `Space` | ► Play / ⏸ Pause |
+| `←` / `→` | Previous / Next frame |
 | `Shift+←` / `Shift+→` | −10 / +10 frames |
-| `Home` / `End` | Premier / Dernier frame |
+| `Home` / `End` | First / Last frame |
 
-### Modes de vue
-| Touche | Action |
+### View modes
+| Key | Action |
 |---|---|
 | `P` | Toggle **Pan/Zoom** |
-| `M` | Toggle **Mesure** |
-| `S` | Toggle **Défilement série** (molette = frames) |
-| `Échap` | Désélectionne la mesure active, sinon réinitialise la vue |
-| `R` | **Réinitialiser** la vue (zoom, pan, contraste, luminosité) |
+| `M` | Toggle **Measure** |
+| `S` | Toggle **Series Scroll** (wheel = frames) |
+| `Esc` | Deselect active measurement, otherwise reset view |
+| `R` | **Reset** view (zoom, pan, contrast, brightness) |
 
-### Ajustements image
-| Touche | Action |
+### Image adjustments
+| Key | Action |
 |---|---|
-| `C` | Ouvrir dialog **Contraste** |
-| `L` | Ouvrir dialog **Luminosité** |
-| `+` ou `=` | Vitesse de lecture ×1.25 |
-| `-` | Vitesse de lecture ×0.80 |
-| `B` | Toggle **Boucle** |
+| `C` | Open **Contrast** dialog |
+| `L` | Open **Brightness** dialog |
+| `+` or `=` | Playback speed ×1.25 |
+| `-` | Playback speed ×0.80 |
+| `B` | Toggle **Loop** |
 
 ### Zoom
-| Touche | Action |
+| Key | Action |
 |---|---|
-| `Cmd+=` / `Ctrl+=` | **Zoom avant** (×1.25) |
-| `Cmd+-` / `Ctrl+-` | **Zoom arrière** (÷1.25) |
-| `Cmd+0` / `Ctrl+0` | **Réinitialiser** zoom à 100 % |
+| `Cmd+=` / `Ctrl+=` | **Zoom in** (×1.25) |
+| `Cmd+-` / `Ctrl+-` | **Zoom out** (÷1.25) |
+| `Cmd+0` / `Ctrl+0` | **Reset** zoom to 100% |
 
-### Onglets
-| Touche | Action |
+### Tabs
+| Key | Action |
 |---|---|
-| `Ctrl+Tab` | Onglet suivant |
-| `Ctrl+Shift+Tab` | Onglet précédent |
-| `Ctrl+W` | Fermer l'onglet actif |
+| `Ctrl+Tab` | Next tab |
+| `Ctrl+Shift+Tab` | Previous tab |
+| `Ctrl+W` | Close active tab |
 
 ---
 
 ## 🔍 5. Pan & Zoom
 
-**Activation du pan :** Clic droit → **Déplacer / Zoomer** ou touche `P` (curseur devient une main)
+**Pan activation:** Right-click → **Move / Zoom** or key `P` (cursor becomes a hand)
 
-| Action | Résultat |
+| Action | Result |
 |---|---|
-| **Clic-glisser** (mode Pan) | Déplace l'image dans le canvas |
-| **Boutons `−` / `+`** (en-tête de la visionneuse) | Zoom arrière / avant (×1.25) |
-| `Cmd+=` / `Ctrl+=` | Zoom avant |
-| `Cmd+-` / `Ctrl+-` | Zoom arrière |
-| `Cmd+0` / `Ctrl+0` | Réinitialiser zoom à 100 % |
+| **Click-drag** (Pan mode) | Moves the image in the canvas |
+| **`−` / `+` buttons** (viewer header) | Zoom out / in (×1.25) |
+| `Cmd+=` / `Ctrl+=` | Zoom in |
+| `Cmd+-` / `Ctrl+-` | Zoom out |
+| `Cmd+0` / `Ctrl+0` | Reset zoom to 100% |
 
-Le **pourcentage de zoom** s'affiche entre les boutons `−` et `+` dans l'en-tête.
+The **zoom percentage** is displayed between the `−` and `+` buttons in the header.
 
-Pour revenir à la vue initiale : touche `R` ou Clic droit → **Réinitialiser la vue**
+To return to the initial view: key `R` or Right-click → **Reset View**
 
-> **Note macOS (Tk 9.0)** : le scroll trackpad (molette) ne génère pas d'événement dans Tkinter avec Tk 9.0.3. Utilisez les boutons ou les raccourcis clavier pour zoomer.
+> **macOS note (Tk 9.0)**: trackpad scroll (wheel) does not generate events in Tkinter with Tk 9.0.3. Use buttons or keyboard shortcuts to zoom.
 
 ---
 
-## 📏 6. Outil de Mesure (Multi-Segments)
+## 📏 6. Measurement Tool (Multi-Segments)
 
-**Activation :** Clic droit → **Outil de mesure** ou touche `M` (curseur devient une croix)
+**Activation:** Right-click → **Measurement tool** or key `M` (cursor becomes a crosshair)
 
-### Dessiner un nouveau segment
-1. **Cliquez et maintenez** sur une zone vide du canvas
-2. **Glissez** jusqu'au point d'arrivée — une ligne jaune pointillée s'affiche en temps réel
-3. **Relâchez** — le segment est fixé, la distance s'affiche en jaune
+### Draw a new segment
+1. **Click and hold** on an empty area of the canvas
+2. **Drag** to the end point — a yellow dashed line appears in real time
+3. **Release** — the segment is fixed, the distance is displayed in yellow
 
-Plusieurs mesures peuvent être tracées simultanément.
+Multiple measurements can be drawn simultaneously.
 
-### Persistance des mesures
-- Les mesures **restent visibles** lorsque vous changez de mode (Pan/Zoom, Normal, etc.)
-- Les mesures **suivent le zoom et le pan** : elles restent proportionnelles à l'image
-- Seule l'action **Réinitialiser la vue** (touche `R`) efface les mesures
+### Measurement persistence
+- Measurements **remain visible** when you change modes (Pan/Zoom, Normal, etc.)
+- Measurements **follow zoom and pan**: they remain proportional to the image
+- Only the **Reset View** action (key `R`) clears the measurements
 
-### Sélectionner / Éditer / Supprimer
-| Action | Résultat |
+### Select / Edit / Delete
+| Action | Result |
 |---|---|
-| Cliquer **près d'un segment** | Le sélectionne (passe en orange) |
-| Cliquer-glisser **sur un endpoint** (extrémité) | Déplace uniquement cet endpoint |
-| Cliquer-glisser **au milieu d'un segment** | Déplace tout le segment |
-| `Delete` ou `BackSpace` | Supprime le segment sélectionné |
-| `Échap` | Désélectionne sans supprimer |
+| Click **near a segment** | Selects it (turns orange) |
+| Click-drag **on an endpoint** (extremity) | Moves only that endpoint |
+| Click-drag **on the middle of a segment** | Moves the entire segment |
+| `Delete` or `BackSpace` | Deletes the selected segment |
+| `Esc` | Deselects without deleting |
 
-**Affichage de la distance :**
-- Si le DICOM contient une calibration : **`X.X mm`**
-- Sinon : **`X.X px (pas de calibration)`**
+**Distance display:**
+- If the DICOM contains a calibration: **`X.X mm`**
+- Otherwise: **`X.X px (no calibration)`**
 
-> La calibration est extraite depuis `PixelSpacing`, `ImagerPixelSpacing`, ou `SequenceOfUltrasoundRegions`.
+> The calibration is extracted from `PixelSpacing`, `ImagerPixelSpacing`, or `SequenceOfUltrasoundRegions`.
 
 ---
 
-## 📜 7. Défilement de Séries (Molette Frame-par-Frame)
+## 📜 7. Series Scroll (Frame-by-Frame Wheel)
 
-**Activation :** Clic droit → **Défilement de séries** ou touche `S`
+**Activation:** Right-click → **Series Scroll** or key `S`
 
-| Action | Résultat |
+| Action | Result |
 |---|---|
-| **Molette vers le bas** | Frame suivant |
-| **Molette vers le haut** | Frame précédent |
+| **Wheel down** | Next frame |
+| **Wheel up** | Previous frame |
 
-En mode **Normal** (sans mode spécial activé), glisser verticalement au bouton gauche permet aussi de défiler frame par frame (1 frame tous les 8 pixels de déplacement).
-
----
-
-## 🎨 8. Réglages Contraste & Luminosité
-
-### Via le menu contextuel
-- Clic droit → **Contraste…** ou **Luminosité…** — ouvre une fenêtre flottante avec curseur
-- Bouton **Réinitialiser** pour revenir aux valeurs neutres (contraste 1.0, luminosité 0)
-
-### Via le clic droit maintenu
-- **Maintenir le clic droit + glisser** :
-  - Vers la droite/gauche : contraste + / −
-  - Vers le bas/haut : luminosité + / −
-- L'image se met à jour en temps réel
-
-### Via les raccourcis
-- Touche `C` : ouvre la fenêtre Contraste
-- Touche `L` : ouvre la fenêtre Luminosité
+In **Normal** mode (no special mode activated), vertical left-button drag also scrolls frame by frame (1 frame every 8 pixels of movement).
 
 ---
 
-## 🔄 9. Réinitialiser la Vue
+## 🎨 8. Contrast & Brightness Settings
 
-Touche `R` ou Clic droit → **Réinitialiser la vue** : réinitialise en une action :
-- Zoom → 1.0 (fit automatique)
-- Pan → centré
-- Contraste → 1.0
-- Luminosité → 0
+### Via the context menu
+- Right-click → **Contrast…** or **Brightness…** — opens a floating window with slider
+- **Reset** button to return to neutral values (contrast 1.0, brightness 0)
+
+### Via held right-click
+- **Hold right-click + drag**:
+  - Right/left: contrast + / −
+  - Down/up: brightness + / −
+- The image updates in real time
+
+### Via shortcuts
+- Key `C`: opens the Contrast window
+- Key `L`: opens the Brightness window
+
+---
+
+## 🔄 9. Reset View
+
+Key `R` or Right-click → **Reset View**: resets in one action:
+- Zoom → 1.0 (auto fit)
+- Pan → centered
+- Contrast → 1.0
+- Brightness → 0
 - Mode → Normal
-- Mesures → effacées
+- Measurements → cleared
 
 ---
 
-## ⚙️ 10. Pré-Traitement
+## ⚙️ 10. Preprocessing
 
-1. Chargez d'abord un fichier DICOM
-2. Dans la section **PRÉ-TRAITEMENT**, configurez :
-   - ☑ **Backscan (512×512)** — cochée : affiche la reconstruction rectangulaire (recommandé pour l'IA)
-3. Cliquez sur **⚙ Pré-Traitement**
-4. Indicateur d'état :
-   - `⟳ Traitement en cours…` — en attente
-   - `✓ Terminé` — succès
-   - `✗ Erreur` — voir la console
-5. Cochez **Afficher résultat pré-traitement** pour basculer entre l'image originale et le résultat
+1. First load a DICOM file
+2. In the **PREPROCESSING** section, configure:
+   - ☑ **Backscan (512×512)** — checked: displays the rectangular reconstruction (recommended for AI)
+3. Click **⚙ Preprocessing**
+4. Status indicator:
+   - `⟳ Processing…` — pending
+   - `✓ Done` — success
+   - `✗ Error` — see console
+5. Check **Show preprocessing result** to toggle between the original image and the result
 
 ---
 
-## 🧠 11. Analyse IA
+## 🧠 11. AI Analysis
 
-1. Chargez un DICOM et lancez le pré-traitement (optionnel)
-2. Cliquez sur **🧠 Lancer l'analyse STARHE**
-3. Section **RÉSULTATS** :
+1. Load a DICOM and run preprocessing (optional)
+2. Click **🧠 Launch STARHE Analysis**
+3. **RESULTS** section:
 
-| Champ | Description |
+| Field | Description |
 |---|---|
-| **Mode** | Surface analysée (Backscan 512×512 / Pré-traitement / Original) |
-| **Risque CHC** | Score 0–1 + label `Faible` (vert) ou `Élevé` (rouge) |
-| **Lésions** | Nb frames avec lésion(s) |
+| **Mode** | Analyzed surface (Backscan 512×512 / Preprocessing / Original) |
+| **HCC Risk** | Score 0–1 + label `Low` (green) or `High` (red) |
+| **Lesions** | Number of frames with lesion(s) |
 
-**Frames avec tumeur** : liste des numéros 1-basés cliquables — cliquer navigue vers ce frame.
+**Frames with tumor**: list of 1-based clickable numbers — clicking navigates to that frame.
 
-**Cache automatique** : si le fichier a déjà été analysé, les résultats sont restaurés **instantanément** depuis MongoDB.
+**Automatic cache**: if the file was already analyzed, results are restored **instantly** from MongoDB.
 
-**🗑 Réinitialiser l'analyse** : efface les résultats MongoDB pour ce fichier afin de forcer une nouvelle analyse.
+**🗑 Reset analysis**: deletes the MongoDB results for this file to force a new analysis.
 
 ---
 
 ## 💬 12. Console
 
-La **Console** en bas de la fenêtre affiche en temps réel :
-- Les étapes de chargement et d'anonymisation
-- La progression du pré-traitement
-- Les résultats de l'analyse IA
-- Les erreurs éventuelles (en rouge)
+The **Console** at the bottom of the window displays in real time:
+- Loading and anonymization steps
+- Preprocessing progress
+- AI analysis results
+- Any errors (in red)
 
-Elle est en lecture seule.
-
----
-
-## 🎗 13. Thème Clair / Sombre
-
-Le bouton **🌙 Thème sombre** en bas de la sidebar bascule entre thème clair et sombre.  
-La sidebar reste toujours sombre dans les deux modes.
+It is read-only.
 
 ---
 
-## ⚠️ Notes Importantes
+## 🎗 13. Light / Dark Theme
 
-- **Anonymisation** : chaque fichier chargé est anonymisé **en mémoire**. Le fichier original sur le disque **n'est pas modifié**.
-- **Plusieurs fichiers ouverts** : chaque onglet dispose de son propre état indépendant (lecture, zoom, mesures, résultats). Basculer d'onglet sauvegarde et restaure automatiquement tout l'état.
-- **Analyse en cours + changement d'onglet** : si une analyse IA ou un pré-traitement est en cours, ne pas changer d'onglet avant la fin pour éviter un mélange d'états.
-- **Calibration mm** : si `Pixel : N/A` s'affiche, la mesure sera affichée en pixels.
-- **Fichiers sans extension** : si votre fichier n'apparaît pas dans le sélecteur, changez le filtre sur **« Tous fichiers (*.*) »**.
+The **🌙 Dark theme** button at the bottom of the sidebar toggles between light and dark theme.  
+The sidebar always remains dark in both modes.
 
 ---
 
-*Pour toute question technique, consultez le [README.md](README.md) ou la [TODOLIST.md](TODOLIST.md).*
+## ⚠️ Important Notes
 
-Depuis la racine du projet :
+- **Anonymization**: each loaded file is anonymized **in memory**. The original file on disk **is not modified**.
+- **Multiple open files**: each tab has its own independent state (playback, zoom, measurements, results). Switching tabs automatically saves and restores the entire state.
+- **Analysis in progress + tab switch**: if an AI analysis or preprocessing is in progress, do not switch tabs before completion to avoid state mixing.
+- **mm calibration**: if `Pixel: N/A` is displayed, the measurement will be shown in pixels.
+- **Files without extension**: if your file does not appear in the selector, change the filter to **"All files (*.*)"**.
+
+---
+
+*For any technical questions, see the [README.md](README.md) or the [TODOLIST.md](TODOLIST.md).*
+
+From the project root:
 
 ```powershell
 # Windows (PowerShell)
@@ -292,74 +292,74 @@ Depuis la racine du projet :
 ./run_tkinter.sh
 ```
 
-La fenêtre s'ouvre avec la sidebar de contrôle à gauche et la zone de visualisation à droite.
+The window opens with the control sidebar on the left and the viewing area on the right.
 
 ---
 
-## 📂 1. Charger un Fichier DICOM
+## 📂 1. Load a DICOM File
 
-1. Dans la sidebar, section **FICHIER DICOM**, cliquez sur **📂 Charger un fichier DICOM**.
-2. La boîte de dialogue s'ouvre dans le dossier de données configuré.
-3. Sélectionnez votre fichier :
-   - Fichiers `.dcm` classiques
-   - Fichiers **sans extension** (ex. `A0000`, `IM-0001` — format Canon Aplio, Toshiba, etc.)
-   - Utilisez le filtre **"Tous fichiers"** si votre fichier n'apparaît pas
+1. In the sidebar, section **DICOM FILE**, click **📂 Load a DICOM file**.
+2. The dialog opens in the configured data directory.
+3. Select your file:
+   - Standard `.dcm` files
+   - **Files without extension** (e.g. `A0000`, `IM-0001` — Canon Aplio, Toshiba format, etc.)
+   - Use the **"All files"** filter if your file does not appear
 
-**À l'import, automatiquement :**
-- Les **métadonnées sensibles** (nom patient, ID, dates, UIDs…) sont supprimées des tags DICOM
-- Le **bandeau d'en-tête** de l'imageur (informations patient brûlées dans les pixels) est **noirci**
-- Le **pixel spacing** est extrait pour permettre les mesures en millimètres
+**On import, automatically:**
+- **Sensitive metadata** (patient name, ID, dates, UIDs…) are removed from DICOM tags
+- The imager **header banner** (patient information burned into pixels) is **blacked out**
+- **Pixel spacing** is extracted to enable millimeter measurements
 
-Les informations non-sensibles s'affichent dans la sidebar :
+Non-sensitive information is displayed in the sidebar:
 ```
-Modalité : US
-Taille   : 1280×890
+Modality : US
+Size     : 1280×890
 Frames   : 120
 Pixel    : 0.275 mm/px
 ```
 
 ---
 
-## ▶ 2. Navigation dans la Séquence
+## ▶ 2. Sequence Navigation
 
-### Boutons de navigation
-| Contrôle | Action |
+### Navigation buttons
+| Control | Action |
 |---|---|
-| **◀** | Frame précédente |
-| **▶** | Frame suivante |
-| Scrollbar horizontale | Glisser pour aller directement à une position |
-| **▶ Play** | Lance la lecture automatique |
-| **⏸ Pause** | Met la lecture en pause |
-| **⏮ Revenir au début** | Stoppe et revient au frame 0 |
+| **◀** | Previous frame |
+| **▶** | Next frame |
+| Horizontal scrollbar | Drag to go directly to a position |
+| **▶ Play** | Start automatic playback |
+| **⏸ Pause** | Pause playback |
+| **⏮ Back to start** | Stop and return to frame 0 |
 
-### Vitesse de lecture
-- Slider **×-vitesse** (0.25× à 3.0×, pas de 0.25×) dans la sidebar — glissez le curseur
-- Le label **×1.00** se met à jour dynamiquement
-- La vitesse de base est calibrée automatiquement depuis le tag `FrameTime` du DICOM
-- En dessous de ×1 : lecture ralentie (intervalle étendu) ; au-dessus : frames sautées pour accélérer
+### Playback speed
+- **×-speed** slider (0.25× to 3.0×, step 0.25×) in the sidebar — drag the cursor
+- The **×1.00** label updates dynamically
+- Base speed is automatically calibrated from the DICOM `FrameTime` tag
+- Below ×1: slowed playback (extended interval); above: frames skipped to speed up
 
-### Mode boucle
-- Cochez **Boucle** pour que la lecture recommence automatiquement à la fin de la séquence
-- Décochez pour un arrêt automatique au dernier frame
+### Loop mode
+- Check **Loop** to have playback automatically restart at the end of the sequence
+- Uncheck for automatic stop at the last frame
 
 ---
 
-## 🖱️ 3. Menu Contextuel (Clic Droit)
+## 🖱️ 3. Context Menu (Right-Click)
 
-Un **clic droit sur le canvas** ouvre un menu avec 7 options.  
-Le mode actif est marqué d'un **✓**.
+A **right-click on the canvas** opens a menu with 7 options.  
+The active mode is marked with a **✓**.
 
 ```
 ╔══════════════════════════════╗
-║ ✓ Déplacer / Zoomer          ║  ← mode courant
-║   Mesurer                    ║
+║ ✓ Move / Zoom                ║  ← current mode
+║   Measure                    ║
 ║ ─────────────────────────────║
-║   Contraste…                 ║
-║   Luminosité…                ║
+║   Contrast…                  ║
+║   Brightness…                ║
 ║ ─────────────────────────────║
 ║   Series Scroll              ║
 ║ ─────────────────────────────║
-║   Réinitialiser la vue       ║
+║   Reset View                 ║
 ╚══════════════════════════════╝
 ```
 
@@ -367,151 +367,151 @@ Le mode actif est marqué d'un **✓**.
 
 ## 🔍 4. Pan & Zoom
 
-**Activation du pan :** Clic droit → **Déplacer / Zoomer** (curseur devient une main ✋)
+**Pan activation:** Right-click → **Move / Zoom** (cursor becomes a hand ✋)
 
-| Action | Résultat |
+| Action | Result |
 |---|---|
-| **Clic-glisser** (mode Pan) | Déplace l'image dans le canvas |
-| **Boutons `−` / `+`** (en-tête de la visionneuse) | Zoom arrière / avant (×1.25) |
-| `Cmd+=` / `Ctrl+=` | Zoom avant |
-| `Cmd+-` / `Ctrl+-` | Zoom arrière |
-| `Cmd+0` / `Ctrl+0` | Réinitialiser zoom à 100 % |
+| **Click-drag** (Pan mode) | Moves the image in the canvas |
+| **`−` / `+` buttons** (viewer header) | Zoom out / in (×1.25) |
+| `Cmd+=` / `Ctrl+=` | Zoom in |
+| `Cmd+-` / `Ctrl+-` | Zoom out |
+| `Cmd+0` / `Ctrl+0` | Reset zoom to 100% |
 
-Le **pourcentage de zoom** s'affiche entre les boutons.
+The **zoom percentage** is displayed between the buttons.
 
-Pour revenir à la vue initiale : Clic droit → **Réinitialiser la vue**
-
----
-
-## 📏 5. Outil de Mesure
-
-**Activation :** Clic droit → **Mesurer** (curseur devient une croix ✛)
-
-1. **Cliquez et maintenez** le bouton gauche sur le point de départ de votre mesure
-2. **Glissez** jusqu'au point d'arrivée — une ligne jaune pointillée s'affiche en temps réel
-3. **Relâchez** pour fixer la mesure — la distance s'affiche au-dessus de la ligne
-
-Plusieurs mesures peuvent être tracées simultanément. Les mesures **persistent** lorsque vous changez de mode et **suivent le zoom/pan** de l'image.
-
-**Affichage de la distance :**
-- Si le fichier DICOM contient une calibration spatiale : **`X.X mm`**
-- Sinon : **`X.X px (pas de calibration)`**
-
-> La calibration est automatiquement extraite depuis les tags `PixelSpacing`,  
-> `ImagerPixelSpacing`, ou `SequenceOfUltrasoundRegions` (échographies).
-
-Pour effacer les mesures : cliquez sur **Réinitialiser la vue**.
+To return to the initial view: Right-click → **Reset View**
 
 ---
 
-## 📜 6. Défilement de Séries (Molette Frame-par-Frame)
+## 📏 5. Measurement Tool
 
-**Activation :** Clic droit → **Défilement de séries** (curseur devient une double flèche ↕)
+**Activation:** Right-click → **Measure** (cursor becomes a crosshair ✛)
 
-| Action | Résultat |
+1. **Click and hold** the left button on the starting point of your measurement
+2. **Drag** to the end point — a yellow dashed line appears in real time
+3. **Release** to fix the measurement — the distance is displayed above the line
+
+Multiple measurements can be drawn simultaneously. Measurements **persist** when you change modes and **follow zoom/pan** of the image.
+
+**Distance display:**
+- If the DICOM file contains spatial calibration: **`X.X mm`**
+- Otherwise: **`X.X px (no calibration)`**
+
+> The calibration is automatically extracted from the `PixelSpacing`,  
+> `ImagerPixelSpacing`, or `SequenceOfUltrasoundRegions` tags (ultrasound).
+
+To clear measurements: click **Reset View**.
+
+---
+
+## 📜 6. Series Scroll (Frame-by-Frame Wheel)
+
+**Activation:** Right-click → **Series Scroll** (cursor becomes a double arrow ↕)
+
+| Action | Result |
 |---|---|
-| **Molette vers le bas** | Frame suivant |
-| **Molette vers le haut** | Frame précédent |
+| **Wheel down** | Next frame |
+| **Wheel up** | Previous frame |
 
-Utile pour parcourir la séquence lentement sans utiliser la scrollbar.
-
----
-
-## 🎨 7. Réglages Contraste & Luminosité
-
-### Contraste
-1. Clic droit → **Contraste…**
-2. Une fenêtre flottante s'ouvre avec un curseur (0.1 — 3.0, neutre = 1.0)
-3. Déplacez le curseur — l'image se met à jour en temps réel
-4. Bouton **Réinitialiser** pour revenir à la valeur neutre (1.0)
-
-### Luminosité
-1. Clic droit → **Luminosité…**
-2. Curseur de −100 à +100 (neutre = 0)
-3. Même fonctionnement que le contraste
-
-Les deux fenêtres peuvent être ouvertes simultanément.
+Useful for browsing the sequence slowly without using the scrollbar.
 
 ---
 
-## 🔄 8. Réinitialiser la Vue
+## 🎨 7. Contrast & Brightness Settings
 
-Clic droit → **Réinitialiser la vue** — Réinitialise en une action :
-- Zoom → 1.0 (fit automatique)
-- Pan → centré
-- Contraste → 1.0
-- Luminosité → 0
-- Mesure → effacée
+### Contrast
+1. Right-click → **Contrast…**
+2. A floating window opens with a slider (0.1 — 3.0, neutral = 1.0)
+3. Move the slider — the image updates in real time
+4. **Reset** button to return to the neutral value (1.0)
 
----
+### Brightness
+1. Right-click → **Brightness…**
+2. Slider from −100 to +100 (neutral = 0)
+3. Same behavior as contrast
 
-## ⚙️ 9. Pré-Traitement
-
-Le pré-traitement utilise **prepUS** pour supprimer les annotations et l'interface graphique de l'imageur.
-
-1. Chargez d'abord un fichier DICOM
-2. Dans la section **PRÉ-TRAITEMENT**, configurez :
-   - ☑ **Backscan (512×512)** — cochée : affiche la reconstruction rectangulaire (recommandé pour l'IA)
-   - Décochez pour afficher le crop masqué (image originale sans l'interface de l'imageur)
-3. Cliquez sur **⚙ Pré-Traitement**
-4. Un indicateur d'état apparaît sous le bouton :
-   - `⟳ Traitement en cours…` — en attente
-   - `✓ Terminé` — succès
-   - `✗ Erreur` — voir la console
-
-5. Cochez **Afficher résultat pré-traitement** pour basculer entre l'image originale et le résultat
-6. La checkbox **Backscan (512×512)** peut être basculée **après** le traitement sans relancer prepUS
+Both windows can be open simultaneously.
 
 ---
 
-## 🧠 10. Analyse IA
+## 🔄 8. Reset View
 
-1. Assurez-vous d'avoir chargé un DICOM (et idéalement lancé le pré-traitement)
-2. Cliquez sur **🧠 Lancer l'analyse STARHE**
-3. Les résultats s'affichent dans la section **RÉSULTATS** :
+Right-click → **Reset View** — Resets in one action:
+- Zoom → 1.0 (auto fit)
+- Pan → centered
+- Contrast → 1.0
+- Brightness → 0
+- Measurement → cleared
 
-| Champ | Description |
+---
+
+## ⚙️ 9. Preprocessing
+
+Preprocessing uses **prepUS** to remove annotations and the imager's graphical interface.
+
+1. First load a DICOM file
+2. In the **PREPROCESSING** section, configure:
+   - ☑ **Backscan (512×512)** — checked: displays the rectangular reconstruction (recommended for AI)
+   - Uncheck to display the masked crop (original image without the imager interface)
+3. Click **⚙ Preprocessing**
+4. A status indicator appears below the button:
+   - `⟳ Processing…` — pending
+   - `✓ Done` — success
+   - `✗ Error` — see console
+
+5. Check **Show preprocessing result** to toggle between the original image and the result
+6. The **Backscan (512×512)** checkbox can be toggled **after** processing without re-running prepUS
+
+---
+
+## 🧠 10. AI Analysis
+
+1. Make sure you have loaded a DICOM file (and ideally run preprocessing)
+2. Click **🧠 Launch STARHE Analysis**
+3. Results are displayed in the **RESULTS** section:
+
+| Field | Description |
 |---|---|
-| **Risque CHC** | Score 0–1 + label `Faible` (vert) ou `Élevé` (rouge) |
-| **Lésions** | Nombre de lésions détectées + score de confiance moyen |
+| **HCC Risk** | Score 0–1 + label `Low` (green) or `High` (red) |
+| **Lesions** | Number of detected lesions + average confidence score |
 
-Les bounding boxes de détection s'affichent directement sur le canvas.
+Detection bounding boxes are displayed directly on the canvas.
 
-**Frames avec tumeur** : après l'analyse, la section **Frames avec tumeur** dans la sidebar affiche la liste des numéros de frames (1-basés) où une lésion a été détectée, en **bleu cliquable**. Cliquer sur un numéro navigue directement vers ce frame.
+**Frames with tumor**: after analysis, the **Frames with tumor** section in the sidebar displays the list of frame numbers (1-based) where a lesion was detected, in **clickable blue**. Clicking a number navigates directly to that frame.
 
-**Cache automatique** : si le fichier `.dcm` a été analysé lors d'une session précédente, les résultats sont restaurés **instantanément** depuis MongoDB sans relancer les modèles IA.
+**Automatic cache**: if the `.dcm` file was analyzed in a previous session, results are restored **instantly** from MongoDB without re-running the AI models.
 
 ---
 
 ## 💬 11. Console
 
-La **Console** en bas de la fenêtre affiche en temps réel :
-- Les étapes de chargement et d'anonymisation
-- La progression du pré-traitement
-- Les résultats de l'analyse IA
-- Les erreurs éventuelles
+The **Console** at the bottom of the window displays in real time:
+- Loading and anonymization steps
+- Preprocessing progress
+- AI analysis results
+- Any errors
 
-Elle est en lecture seule. Les messages d'erreur apparaissent en rouge.
-
----
-
-## 🌗 12. Thème Clair / Sombre
-
-Le bouton **🌙 Thème sombre** en bas de la sidebar bascule entre :
-- **Thème clair** — zone principale `#f4f6fb`, cartes blanches
-- **Thème sombre** — zone principale `#1a1a2e`, cartes `#16213e`
-
-La sidebar reste toujours sombre dans les deux modes.
+It is read-only. Error messages appear in red.
 
 ---
 
-## ⚠️ Notes Importantes
+## 🌗 12. Light / Dark Theme
 
-- **Anonymisation** : chaque fichier chargé est automatiquement anonymisé en mémoire. Le fichier original sur le disque **n'est pas modifié**.
-- **Bandeau imageur** : le bandeau d'en-tête (informations patient visibles) est noirci automatiquement. Si le bandeau n'est pas détecté, vérifiez que l'image a un fond noir autour du cône échographique.
-- **Calibration mm** : si `Pixel : N/A` s'affiche dans la sidebar, le fichier DICOM ne contient pas de calibration spatiale et la mesure sera affichée en pixels.
-- **Fichiers sans extension** : si votre fichier n'apparaît pas dans le sélecteur, changez le filtre sur **"Tous fichiers (*.*)"**.
+The **🌙 Dark theme** button at the bottom of the sidebar toggles between:
+- **Light theme** — main area `#f4f6fb`, white cards
+- **Dark theme** — main area `#1a1a2e`, cards `#16213e`
+
+The sidebar always remains dark in both modes.
 
 ---
 
-*Pour toute question technique, consultez le [README.md](README.md) ou la [TODOLIST.md](TODOLIST.md).*
+## ⚠️ Important Notes
+
+- **Anonymization**: each loaded file is automatically anonymized in memory. The original file on disk **is not modified**.
+- **Imager banner**: the header banner (visible patient information) is automatically blacked out. If the banner is not detected, check that the image has a black background around the ultrasound cone.
+- **mm calibration**: if `Pixel: N/A` is displayed in the sidebar, the DICOM file does not contain spatial calibration and the measurement will be shown in pixels.
+- **Files without extension**: if your file does not appear in the selector, change the filter to **"All files (*.*)"**.
+
+---
+
+*For any technical questions, see the [README.md](README.md) or the [TODOLIST.md](TODOLIST.md).*
