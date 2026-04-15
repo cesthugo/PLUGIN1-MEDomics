@@ -103,20 +103,57 @@ def run_pipeline(dicom_path: str,
             bs = detect_model.batch_size
             go_print("info",
                      f"DETECT : batch_size={bs}, {len(sampled)} sampled frames à analyser.")
+
+            # ── Pass 1 : inférence sur les frames samplées (seuil normal) ────
+            sampled_dets: dict[int, list] = {}
             for b_start in range(0, len(sampled), bs):
                 batch_idx    = sampled[b_start:b_start + bs]
                 batch_frames = [frames_processed[i] for i in batch_idx]
                 batch_dets   = detect_model.predict_batch(batch_frames)
-                # Propager les détections sur les frames intermédiaires
                 for idx, frame_dets in zip(batch_idx, batch_dets):
-                    for j in range(idx, min(idx + stride, n_frames)):
-                        for d in frame_dets:
-                            detections.append({**d, "frame": j})
+                    sampled_dets[idx] = frame_dets
+                    for d in frame_dets:
+                        detections.append({**d, "frame": idx})
                 done = b_start + len(batch_idx)
                 if done % 5 == 0 or done >= len(sampled):
                     go_print("info",
                              f"DETECT : {done}/{len(sampled)} sampled frames —"
                              f" {len(set(d['frame'] for d in detections))} frames avec détection(s).")
+
+            # ── Pass 2 : suivi de la bbox sur les frames intermédiaires ───────
+            # Pour chaque frame samplée avec une détection, on lance l'inférence
+            # sur les frames intermédiaires suivantes avec seuil=0 afin que la
+            # bounding box suive la tumeur.  Si le modèle ne trouve rien (faible
+            # contraste, occultation partielle), on replie sur la bbox de la
+            # frame samplée pour éviter un clignotement.
+            followup_idx: list[int] = []
+            followup_src: dict[int, int] = {}  # frame intermédiaire → frame samplée source
+            for idx in sampled:
+                if sampled_dets.get(idx):
+                    for j in range(idx + 1, min(idx + stride, n_frames)):
+                        followup_idx.append(j)
+                        followup_src[j] = idx
+
+            if followup_idx:
+                go_print("info",
+                         f"DETECT : suivi sur {len(followup_idx)} frames intermédiaires (seuil=0)…")
+                followup_results: dict[int, list] = {}
+                for b_start in range(0, len(followup_idx), bs):
+                    batch_idx    = followup_idx[b_start:b_start + bs]
+                    batch_frames = [frames_processed[i] for i in batch_idx]
+                    batch_dets   = detect_model.predict_batch(batch_frames, score_thr=0.0)
+                    for idx, frame_dets in zip(batch_idx, batch_dets):
+                        followup_results[idx] = frame_dets
+
+                for j, frame_dets in followup_results.items():
+                    if frame_dets:
+                        # Le modèle a localisé la tumeur → on utilise la vraie bbox
+                        for d in frame_dets:
+                            detections.append({**d, "frame": j})
+                    else:
+                        # Rien détecté → on propage la bbox de la frame samplée (fallback)
+                        for d in sampled_dets[followup_src[j]]:
+                            detections.append({**d, "frame": j})
     else:
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")
