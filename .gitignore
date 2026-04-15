@@ -10,8 +10,10 @@ venv/
 __pycache__/
 *.py[cod]
 
-# ── Poids des modèles IA (binaires lourds) ────────────────────────────────────
-pythonCode/modules/starhe_plugin/models/
+# ── Poids des modèles IA (binaires lourds — télécharger via download_models.py) ──
+pythonCode/modules/starhe_plugin/models/*.pth
+# Les configs mmdet (.py) sont légères et versionnées :
+!pythonCode/modules/starhe_plugin/models/*.py
 
 # ── Fichiers temporaires du pipeline ──────────────────────────────────────────
 pythonCode/modules/starhe_plugin/temp/

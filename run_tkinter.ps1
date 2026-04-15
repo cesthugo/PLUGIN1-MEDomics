@@ -113,7 +113,20 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "prepUS installe avec succes."
 }
 
-# -- 5. Lancer l interface ----------------------------------------------------
+# -- 5. Telecharger les poids IA si absents -----------------------------------
+$MODELS_DIR = "$PSScriptRoot\pythonCode\modules\starhe_plugin\models"
+$RISK_PTH   = "$MODELS_DIR\best_acc_mean_cls_f1_epoch_14.pth"
+$DET_PTH    = "$MODELS_DIR\best_coco_bbox_mAP_50_iter_2100.pth"
+if (-not (Test-Path $RISK_PTH) -or -not (Test-Path $DET_PTH)) {
+    Write-Host "Poids IA manquants - telechargement depuis GitHub Releases..."
+    & $PYTHON "$PSScriptRoot\download_models.py"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Echec du telechargement des poids IA."
+        exit 1
+    }
+}
+
+# -- 6. Lancer l interface ----------------------------------------------------
 $pythonVer = & $PYTHON --version 2>&1
 Write-Host "Lancement STARHE Tkinter ($pythonVer)..."
 Set-Location $MODULES

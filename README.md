@@ -35,6 +35,26 @@ Two AI models are used:
 | Node.js | 18+ | Required only for the MEDomics frontend |
 | CUDA (optional) | 11.8+ | GPU inference; CPU used if absent |
 
+> **AI model weights**: the `.pth` checkpoint files (~200 MB each) are **not included** in the repository. They are downloaded automatically by `run_tkinter.sh` / `run_tkinter.ps1` from the [GitHub Release STARHE_MODELS](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/STARHE_MODELS). To download them manually: `python download_models.py`.
+>
+> **Private repo — GitHub token required**: since this repository is private, downloading the weights requires a GitHub Personal Access Token.
+>
+> 1. Create a token at https://github.com/settings/tokens → *Generate new token (classic)* → scope **`repo`** → copy the generated token (`ghp_...`).
+> 2. Set the token in your terminal **without sharing it** (never paste a token in a chat or a versioned file):
+>    ```bash
+>    # macOS / Linux — add to ~/.zshrc or ~/.zprofile to make it permanent
+>    export GITHUB_TOKEN=ghp_your_token
+>    ```
+>    ```powershell
+>    # Windows PowerShell — add to $PROFILE to make it permanent
+>    $env:GITHUB_TOKEN = "ghp_your_token"
+>    ```
+> 3. Run the download:
+>    ```bash
+>    python download_models.py
+>    ```
+>    Or let `run_tkinter.sh` / `run_tkinter.ps1` handle it automatically on first launch.
+
 > **MongoDB port 54017**: MEDomics deliberately uses a non-standard port to avoid conflicts with system MongoDB instances. This port is hardcoded in `config.py` AND in `go_server/config.go`.
 
 ---
@@ -59,7 +79,7 @@ Both scripts are **self-contained**: they detect Python 3.13, create the venv if
 .\run_tkinter.ps1
 ```
 
-The script detects Python 3.13 on the system (via `py -3.13`, `python3.13`, or `python`), checks that tkinter is available, creates the venv if absent, installs dependencies, then launches the UI.
+The script detects Python 3.13 on the system (via `py -3.13`, `python3.13`, or `python`), checks that tkinter is available, creates the venv if absent, installs dependencies, downloads the AI weights if absent, then launches the UI.
 
 **macOS / Linux:**
 
@@ -70,7 +90,7 @@ brew install python@3.13 python-tk@3.13
 ./run_tkinter.sh
 ```
 
-The `run_tkinter.sh` script checks that Python 3.13 and tkinter are present, creates the venv and installs dependencies if absent, installs prepUS, then launches the UI.
+The `run_tkinter.sh` script checks that Python 3.13 and tkinter are present, creates the venv and installs dependencies if absent, installs prepUS, downloads the AI weights if absent, then launches the UI.
 
 > **macOS (Homebrew)**: Homebrew **does not include tkinter by default** — `brew install python-tk@3.13` is mandatory, otherwise the UI will fail with `ModuleNotFoundError: No module named '_tkinter'`. Verify with: `python3.13 -c "import tkinter"`.
 

@@ -65,7 +65,16 @@ if ! "$PYTHON" -c "import prepUS" 2>/dev/null; then
     echo "prepUS installé avec succès."
 fi
 
-# ── 5. Lancer l'interface ────────────────────────────────────────────────────
+# ── 5. Télécharger les poids IA si absents ───────────────────────────────────
+MODELS_DIR="$SCRIPT_DIR/pythonCode/modules/starhe_plugin/models"
+RISK_PTH="$MODELS_DIR/best_acc_mean_cls_f1_epoch_14.pth"
+DET_PTH="$MODELS_DIR/best_coco_bbox_mAP_50_iter_2100.pth"
+if [ ! -f "$RISK_PTH" ] || [ ! -f "$DET_PTH" ]; then
+    echo "Poids IA manquants — téléchargement depuis GitHub Releases..."
+    "$PYTHON" "$SCRIPT_DIR/download_models.py"
+fi
+
+# ── 6. Lancer l'interface ────────────────────────────────────────────────────
 echo "Lancement STARHE Tkinter (Python $("$PYTHON" --version 2>&1))..."
 cd "$MODULES"
 exec "$PYTHON" -m starhe_plugin.ui.prototype_tkinter
