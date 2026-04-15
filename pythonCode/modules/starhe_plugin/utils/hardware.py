@@ -30,13 +30,34 @@ def get_free_ram_mb() -> float:
         return psutil.virtual_memory().available / (1024 ** 2)
     except ImportError:
         pass
-    # Fallback for macOS / Linux without psutil
+    # Fallback for macOS / Linux without psutil (os.sysconf is Unix-only)
     try:
         pages     = os.sysconf("SC_PHYS_PAGES")
         page_size = os.sysconf("SC_PAGE_SIZE")
         # Total RAM × 0.5 as rough estimate of *available*
         return (pages * page_size) / (1024 ** 2) * 0.5
-    except (ValueError, OSError):
+    except (AttributeError, ValueError, OSError):
+        pass
+    # Windows fallback via ctypes
+    try:
+        import ctypes
+        class _MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength",                ctypes.c_ulong),
+                ("dwMemoryLoad",            ctypes.c_ulong),
+                ("ullTotalPhys",            ctypes.c_ulonglong),
+                ("ullAvailPhys",            ctypes.c_ulonglong),
+                ("ullTotalPageFile",        ctypes.c_ulonglong),
+                ("ullAvailPageFile",        ctypes.c_ulonglong),
+                ("ullTotalVirtual",         ctypes.c_ulonglong),
+                ("ullAvailVirtual",         ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+        stat = _MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(stat)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+        return stat.ullAvailPhys / (1024 ** 2)
+    except Exception:
         return 4096.0  # conservative fallback: assume 4 GB free
 
 
