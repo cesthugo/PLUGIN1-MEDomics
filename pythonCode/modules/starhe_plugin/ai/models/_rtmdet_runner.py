@@ -67,6 +67,20 @@ _inspect.getmodule = _safe_getmodule
 
 # ─── 4. Patch NMSop.forward → torchvision.ops.nms ───────────────────────────
 import torch
+
+# ── Reproductibilité cross-plateforme ─────────────────────────────────────────
+# Sur les GPU NVIDIA Ampere+ (RTX 30xx/40xx), PyTorch active TF32 par défaut :
+# TF32 n'utilisent que 10 bits de mantisse (≈ float16) pour les matmuls, vs
+# 23 bits pour float32.  Cela provoque des différences de ~0.5-2 % par score
+# par rapport à CPU/MPS et peut faire basculer des détections borderline.
+# → On désactive TF32 et on active le mode déterministe cuDNN pour que les
+#   résultats sur CUDA restent cohérents avec CPU/MPS.
+if torch.cuda.is_available():
+    torch.backends.cuda.matmul.allow_tf32 = False   # désactive TF32 matmul
+    torch.backends.cudnn.allow_tf32      = False    # désactive TF32 cuDNN
+    torch.backends.cudnn.deterministic   = True     # algos déterministes
+    torch.backends.cudnn.benchmark       = False    # pas de sélection auto
+
 import torchvision.ops as tv_ops
 import mmcv.ops.nms  # noqa: F401  — déclenche load_ext avec stub _ext
 from mmcv.ops.nms import NMSop

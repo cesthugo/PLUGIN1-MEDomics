@@ -40,6 +40,13 @@ class STARHERiskModel:
         self._load()
 
     def _load(self):
+        # Reproductibilité cross-plateforme : désactiver TF32 sur CUDA Ampere+
+        # et forcer les algorithmes déterministes cuDNN.
+        if torch.cuda.is_available():
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32      = False
+            torch.backends.cudnn.deterministic   = True
+            torch.backends.cudnn.benchmark       = False
         self._model = C3DRecognizer.from_checkpoint(
             STARHE_RISK_CHECKPOINT,
             device=self.device,
