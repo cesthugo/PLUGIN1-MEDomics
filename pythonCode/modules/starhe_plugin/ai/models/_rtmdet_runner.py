@@ -299,14 +299,28 @@ def main():
     # Mode serveur persistant
     parser.add_argument("--mode",      default="image", choices=["image", "server"],
                         help="'server' : stdin/stdout JSON, 'image' : one-shot (défaut)")
+    # Device override (INFERENCE_DEVICE in config.py)
+    parser.add_argument("--device",    default=None,
+                        help="Force le device : 'cpu', 'cuda', 'mps'. "
+                             "Par défaut : auto-détection.")
     args = parser.parse_args()
 
-    if torch.cuda.is_available():
+    if args.device and args.device != "auto":
+        device = args.device
+    elif torch.cuda.is_available():
         device = "cuda"
     elif torch.backends.mps.is_available():
         device = "mps"
     else:
         device = "cpu"
+
+    # Reproductibilité cross-plateforme sur CPU :
+    # PyTorch utilise MKL (Windows) ou Accelerate/OpenBLAS (macOS) selon la plateforme.
+    # Avec plusieurs threads, l'ordre d'accumulation flottante varie selon le thread count.
+    # 1 thread → ordre déterministe sur chaque plateforme, différence résiduelle ~1e-5 par op.
+    if device == "cpu":
+        torch.set_num_threads(1)
+
     model  = _build_model(args.config, args.ckpt, device)
 
     if args.mode == "server":

@@ -29,6 +29,7 @@ import cv2
 from starhe_plugin.config import (
     DETECT_BACKEND,
     DETECT_BATCH_SIZE,
+    INFERENCE_DEVICE,
     STARHE_DETECT_CONFIG,
     STARHE_DETECT_CHECKPOINT,
     STARHE_DINO_CONFIG,
@@ -125,6 +126,7 @@ class STARHEDetectModel:
 
     def __init__(self, device: str | None = None, backend: str = DETECT_BACKEND):
         self._backend    = backend
+        self._device     = device or INFERENCE_DEVICE  # "auto" | "cpu" | "cuda" | "mps"
         self._proc       = None          # subprocess.Popen
         self._tmp_dir    = None          # dossier temporaire (fallback one-shot)
         self.batch_size  = 1             # updated by _start_server() if auto
@@ -145,6 +147,8 @@ class STARHEDetectModel:
             "--score-thr", str(DETECT_SCORE_THRESHOLD),
             "--mode",      "server",
         ]
+        if self._device != "auto":
+            cmd += ["--device", self._device]
         go_print("info", "STARHE-DETECT : démarrage du serveur RTMDet (chargement modèle)…")
         self._proc = subprocess.Popen(
             cmd,

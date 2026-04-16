@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from starhe_plugin.config import STARHE_RISK_CHECKPOINT
+from starhe_plugin.config import STARHE_RISK_CHECKPOINT, INFERENCE_DEVICE
 from starhe_plugin.utils.go_print import go_print
 from starhe_plugin.ai.models.c3d import C3DRecognizer, preprocess_clips
 
@@ -35,7 +35,12 @@ class STARHERiskModel:
     LABELS = {0: "Risque faible", 1: "Risque élevé"}
 
     def __init__(self, device: str | None = None):
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if device:
+            self.device = device
+        elif INFERENCE_DEVICE != "auto":
+            self.device = INFERENCE_DEVICE
+        else:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self._model = None
         self._load()
 
@@ -47,6 +52,10 @@ class STARHERiskModel:
             torch.backends.cudnn.allow_tf32      = False
             torch.backends.cudnn.deterministic   = True
             torch.backends.cudnn.benchmark       = False
+        # Sur CPU : 1 thread → ordre d'accumulation déterministe sur chaque
+        # plateforme (élimine la variance multi-thread MKL/OpenBLAS).
+        if self.device == "cpu":
+            torch.set_num_threads(1)
         self._model = C3DRecognizer.from_checkpoint(
             STARHE_RISK_CHECKPOINT,
             device=self.device,

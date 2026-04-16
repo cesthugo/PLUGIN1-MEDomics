@@ -63,6 +63,16 @@ DETECT_EVERY_N = 4
 # integer = fixed batch size (e.g. 4); set to 1 to disable batching.
 DETECT_BATCH_SIZE = "auto"
 
+# Device used for all AI inference (RISK + DETECT).
+# "auto"  = GPU if available (cuda → mps → cpu) — best performance, slight
+#            cross-platform variance due to different FP32 hardware/BLAS.
+# "cpu"   = force CPU on all platforms — maximizes cross-platform
+#            reproducibility (MKL vs Accelerate still differ by ~1e-5 per op,
+#            but far less than GPU vs GPU).
+# "cuda"  = force CUDA (raises if unavailable)
+# "mps"   = force Apple Silicon GPU (raises if unavailable)
+INFERENCE_DEVICE = "auto"
+
 # ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
 CROP_BLACK_THRESHOLD   = 10
 CROP_MIN_CONTENT_RATIO = 0.01
