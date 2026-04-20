@@ -34,6 +34,7 @@ import sys
 import os
 import time
 import math
+import logging
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
@@ -352,6 +353,9 @@ class STARHEApp(tk.Tk):
         self._measure_selected      : int | None      = None # index segment sélectionné
         self._measure_edit          : dict | None     = None # édition drag
         self._measure_preview_items : list            = []   # canvas items temporaires (preview)
+        # Fenêtre live (Toplevel, instanciée à la demande)
+        self._live_win : tk.Toplevel | None = None
+
         # Système d'onglets multi-fichiers
         self._tabs          : list[dict]      = []           # un dict d'état par onglet
         self._active_tab    : int             = -1           # index de l'onglet actif (-1 = aucun)
@@ -799,6 +803,11 @@ class STARHEApp(tk.Tk):
                                     font=FONT_SMALL)
         btn_reset.pack(fill="x", padx=10, pady=(0, 6))
 
+        _make_btn(sc, "📡   Analyse en direct",
+                  self._open_live_window,
+                  bg="#0d4f8c", fg="#ffffff",
+                  font=FONT_BTN).pack(fill="x", padx=10, pady=(0, 10))
+
         # ─── RÉSULTATS ───────────────────────────────────────────────────────
         _sh("Résultats")
         mode_row = tk.Frame(sc, bg=SIDEBAR_BG)
@@ -1009,6 +1018,24 @@ class STARHEApp(tk.Tk):
         return _make_btn(parent, text, command,
                          bg="#000000", fg="#ffffff",
                          font=FONT_BTN_P, pady=8)
+
+    # ── Fenêtre live ──────────────────────────────────────────────────────────
+
+    def _open_live_window(self):
+        """Ouvre (ou focus) la fenêtre « Analyse en direct »."""
+        from starhe_plugin.ui.live_tab import LiveTab
+        if self._live_win is not None and self._live_win.winfo_exists():
+            self._live_win.lift()
+            self._live_win.focus_force()
+            return
+        win = tk.Toplevel(self)
+        win.title("STARHE — Analyse en direct")
+        win.configure(bg=MAIN_BG)
+        win.minsize(860, 560)
+        self._live_win = win
+        tab = LiveTab(win, logger=logging.getLogger(__name__))
+        tab.pack(fill="both", expand=True)
+        win.protocol("WM_DELETE_WINDOW", lambda: (tab.destroy(), win.destroy()))
 
     # ── Thème clair / sombre ──────────────────────────────────────────────────
 
