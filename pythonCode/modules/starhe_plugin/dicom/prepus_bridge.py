@@ -160,11 +160,16 @@ def preprocess_with_prepus(
             with open(info_path, encoding="utf-8") as fh:
                 info = json.load(fh)
 
-        # ── 4. Lire la/les vidéo(s) de sortie ──────────────────────────────────
-        # Quand backscan=True, prepUS produit DEUX vidéos :
-        #   - backscan_video.mp4  (conversion scan inverse 512×512)
-        #   - video.mp4           (crop seulement, taille variable)
-        # Quand backscan=False, aucune vidéo n'est produite → crop depuis info.json.
+        # ── 4. Reconstruire les frames de sortie en mémoire (sans décodage lossy) ──
+        # prepUS écrit ses résultats en MP4 (codec mp4v, lossy).
+        # Relire ce fichier via VideoCapture introduit des artefacts de décodage
+        # différents selon la plateforme (CoreVideo/macOS vs MF/Windows) → ±1-2
+        # niveaux par pixel → différences de score cross-plateforme.
+        #
+        # Solution : quand les paramètres géométriques sont dans info.json, on
+        # recalcule les frames backscan directement depuis les pixels numpy bruts
+        # (pre_dsc_image_vectorized, identique sur toutes les plateformes).
+        # Quand info.json est absent, on retombe sur la lecture vidéo en fallback.
         backscan_mp4 = os.path.join(out_dir, "backscan_video.mp4")
         video_mp4    = os.path.join(out_dir, "video.mp4")
 
@@ -179,15 +184,81 @@ def preprocess_with_prepus(
             cap.release()
             return np.stack(buf, axis=0) if buf else None
 
+        def _backscan_inmemory(frames_rgb: np.ndarray,
+                               bsc_info: dict, crop_info: dict,
+                               bsc_w: int, bsc_h: int) -> "np.ndarray":
+            """
+            Recalcule le backscan en mémoire depuis les pixels numpy bruts.
+            Équivalent exact de ce que prepUS écrit dans backscan_video.mp4,
+            mais sans passer par un codec vidéo lossy.
+            """
+            from prepUS.backscan import pre_dsc_image_vectorized
+            from prepUS.cli import vid  # noqa: F401 – sonocrop.vid.applyMask
+
+            xoffset = bsc_info["xoffset"]
+            yoffset = bsc_info["yoffset"]
+            rc      = bsc_info["rc"]
+            theta_c = bsc_info["theta_c"]
+            dc      = bsc_info["dc"]
+
+            ymin = int(crop_info["ymin"])
+            ymax = int(crop_info["ymax"])
+            xmin = int(crop_info["xmin"])
+            xmax = int(crop_info["xmax"])
+
+            # Charge le masque pre_dsc (mask.png produit par prepUS)
+            mask_path = os.path.join(out_dir, "mask.png")
+            mask_valid = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE) if os.path.exists(mask_path) else None
+
+            result: list[np.ndarray] = []
+            for frame_rgb in frames_rgb:
+                gray  = cv2.cvtColor(frame_rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+                crop  = gray[ymin:ymax, xmin:xmax]
+                if mask_valid is not None:
+                    m = (mask_valid / 255.0).astype(bool)
+                    from sonocrop import vid as _vid
+                    crop = _vid.applyMask(crop[np.newaxis], m)[0]
+                bsc = pre_dsc_image_vectorized(
+                    crop, dc, rc, theta_c, yoffset, xoffset, bsc_w, bsc_h
+                )
+                result.append(bsc.astype(np.uint8))
+            return np.stack(result, axis=0)
+
         crop_only_array: "np.ndarray | None" = None
 
-        if os.path.exists(backscan_mp4):
+        if os.path.exists(backscan_mp4) and info is not None and "backscan" in info:
+            # Recalcul en mémoire — déterministe sur toutes les plateformes
+            go_print("info", "prepus_bridge: recalcul backscan in-memory (déterministe)…")
+            try:
+                out_array = _backscan_inmemory(
+                    frames,
+                    info["backscan"],
+                    info["crop"],
+                    backscan_width,
+                    backscan_height,
+                )
+                # crop_only : frames rognées sans backscan (lecture vidéo acceptée ici
+                # car utilisées uniquement pour l'affichage, pas pour l'inférence IA)
+                if os.path.exists(video_mp4):
+                    crop_only_array = _read_video(video_mp4)
+                source = "backscan-inmemory"
+            except Exception as exc:
+                go_print("warning",
+                         f"prepus_bridge: recalcul in-memory échoué ({exc}) "
+                         "— fallback lecture vidéo.")
+                out_array = _read_video(backscan_mp4)
+                if out_array is None:
+                    raise RuntimeError("backscan_video.mp4 est vide ou illisible.")
+                if os.path.exists(video_mp4):
+                    crop_only_array = _read_video(video_mp4)
+                source = "backscan-video (fallback)"
+        elif os.path.exists(backscan_mp4):
             out_array = _read_video(backscan_mp4)
             if out_array is None:
                 raise RuntimeError("backscan_video.mp4 est vide ou illisible.")
             if os.path.exists(video_mp4):
                 crop_only_array = _read_video(video_mp4)
-            source = "backscan"
+            source = "backscan-video (info.json absent)"
 
         elif os.path.exists(video_mp4):
             out_array = _read_video(video_mp4)

@@ -153,12 +153,45 @@ t_f64b = preprocess_rtmdet(frame0_bgr, use_double=True)
 print(f"rtmdet f64 déterministe (même machine) : {torch.equal(t_f64, t_f64b)}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-sep("6. INFÉRENCE C3D (RISK) — résultat numérique complet")
+sep("6. PRÉ-TRAITEMENT prepUS (backscan 512×512) — identique au pipeline Tkinter")
+
+frames_for_ia = None   # sera défini ci-dessous
+prepus_info   = None
+
+try:
+    from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus
+
+    backscan_arr, crop_only_arr, info = preprocess_with_prepus(
+        frames_clean,
+        fps=22.0,
+        thresh=-1.0,
+        back_scan_conversion=True,
+        backscan_width=512,
+        backscan_height=512,
+    )
+    # Même logique que Tkinter : backscan gris → (T, H, W, 3)
+    frames_for_ia = np.stack([backscan_arr, backscan_arr, backscan_arr], axis=-1)
+    prepus_info   = info
+
+    print(f"backscan shape : {frames_for_ia.shape}  dtype : {frames_for_ia.dtype}")
+    print(f"backscan hash  : {h(frames_for_ia)}")
+    print(f"backscan frame[0] sum : {int(frames_for_ia[0].sum())}")
+    if info and "crop" in info:
+        c = info["crop"]
+        print(f"crop region    : y=[{c['ymin']},{c['ymax']}]  x=[{c['xmin']},{c['xmax']}]")
+except Exception as e:
+    import traceback
+    print(f"[ERR prepUS] {e} — utilisation de frames_clean (résultat différent de Tkinter)")
+    traceback.print_exc()
+    frames_for_ia = frames_clean   # fallback
+
+# ═══════════════════════════════════════════════════════════════════════════════
+sep("7. INFÉRENCE C3D (RISK) — résultat numérique complet (= valeur Tkinter)")
 
 try:
     from starhe_plugin.ai.starhe_risk import STARHERiskModel
     risk_model = STARHERiskModel()
-    result = risk_model.predict(frames_clean)
+    result = risk_model.predict(frames_for_ia)
     print(f"risk_score  : {result['risk_score']:.10f}  ({result['risk_score']*100:.4f} %)")
     print(f"risk_label  : {result['risk_label']}")
     print(f"scores raw  : {[f'{s:.10f}' for s in result['scores']]}")
@@ -166,7 +199,7 @@ except Exception as e:
     print(f"[ERR RISK] {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-sep("7. INFÉRENCE RTMDet (DETECT) — scores borderline (0.60–0.80)")
+sep("8. INFÉRENCE RTMDet (DETECT) — scores borderline (0.60–0.80) (= valeur Tkinter)")
 
 try:
     from starhe_plugin.ai.starhe_detect import STARHEDetectModel
@@ -176,7 +209,7 @@ try:
 
     with STARHEDetectModel() as det_model:
         stride = 4
-        frames_for_det = frames_clean
+        frames_for_det = frames_for_ia
         n = len(frames_for_det)
         borderline = []
         total_above_070 = 0
@@ -205,3 +238,4 @@ except Exception as e:
 
 sep("FIN — compare ces lignes entre Mac et Windows")
 print("Les premières lignes qui diffèrent indiquent l'étape source du problème.")
+print("Sections 7 et 8 reproduisent exactement les valeurs affichées dans Tkinter.")
