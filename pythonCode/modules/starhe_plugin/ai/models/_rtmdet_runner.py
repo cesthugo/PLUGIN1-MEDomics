@@ -166,21 +166,25 @@ def _replace_syncbn(d):
             _replace_syncbn(item)
 
 
-def _preprocess(frame: np.ndarray):
+def _preprocess(frame: np.ndarray, use_double: bool = False):
     orig_H, orig_W = frame.shape[:2]
     scale = min(_INPUT_SIZE / orig_H, _INPUT_SIZE / orig_W)
     new_H, new_W = int(round(orig_H * scale)), int(round(orig_W * scale))
-    # F.interpolate : noyau C++ identique x86/ARM — résultat bit-à-bit identique
-    # entre Windows et macOS, contrairement à cv2.resize (SIMD diverge AVX2/NEON)
+    np_dtype  = np.float64    if use_double else np.float32
+    tch_dtype = torch.float64 if use_double else torch.float32
+    # F.interpolate : noyau C++ identique x86/ARM.
+    # use_double=True : frame converti en float64 AVANT l'interpolation,
+    # éliminant les 1-2 ULP de différence AVX2/NEON float32 qui survivent
+    # jusqu'au score même après le cast tardi.
     t = torch.from_numpy(
-        np.ascontiguousarray(frame, dtype=np.float32)
+        np.ascontiguousarray(frame, dtype=np_dtype)
     ).permute(2, 0, 1).unsqueeze(0)                    # (1, 3, H, W)
     resized = F.interpolate(t, size=(new_H, new_W), mode='bilinear', align_corners=False)
-    resized = resized.squeeze(0).permute(1, 2, 0).numpy()  # (new_H, new_W, 3) float32
-    canvas = np.full((_INPUT_SIZE, _INPUT_SIZE, 3), _PAD_VAL, dtype=np.float32)
+    resized = resized.squeeze(0).permute(1, 2, 0).numpy()  # (new_H, new_W, 3)
+    canvas = np.full((_INPUT_SIZE, _INPUT_SIZE, 3), _PAD_VAL, dtype=np_dtype)
     canvas[:new_H, :new_W] = resized
-    tensor = torch.from_numpy(canvas.transpose(2, 0, 1))
-    tensor = (tensor - _MEAN) / _STD
+    tensor = torch.from_numpy(np.ascontiguousarray(canvas.transpose(2, 0, 1)))
+    tensor = (tensor - _MEAN.to(tch_dtype)) / _STD.to(tch_dtype)
     tensor = tensor.unsqueeze(0)
     meta = {
         "img_shape":         (_INPUT_SIZE, _INPUT_SIZE),
@@ -203,9 +207,7 @@ def _load_ckpt(model, ckpt_path, device):
 def _infer_one_frame(model, frame: np.ndarray, score_thr: float, device: str,
                      use_double: bool = False) -> list:
     """Inference on a single BGR uint8 numpy frame."""
-    tensor, meta = _preprocess(frame)
-    if use_double:
-        tensor = tensor.double()
+    tensor, meta = _preprocess(frame, use_double=use_double)  # dtype déjà correct
     tensor = tensor.to(device)
     with torch.no_grad():
         feats      = model.backbone(tensor)
@@ -242,9 +244,7 @@ def _infer_batch_frames(model, frames: list, score_thr: float, device: str,
     for i, frame in enumerate(frames):
         if frame is None:
             continue
-        tensor, meta = _preprocess(frame)
-        if use_double:
-            tensor = tensor.double()
+        tensor, meta = _preprocess(frame, use_double=use_double)  # dtype déjà correct
         tensors.append(tensor)
         metas.append(meta)
         valid_idx.append(i)

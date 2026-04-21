@@ -87,9 +87,9 @@ class STARHERiskModel:
         Inférence sur 10 clips (NUM_CLIPS), moyenne des softmax
         → identique à average_clips='prob' dans mmaction2.
         """
-        clips = preprocess_clips(frames).to(self.device)  # (10, 3, 16, 112, 112)
-        if self._use_double:
-            clips = clips.double()
+        # preprocess_clips retourne float64 quand use_double=True → plus de cast
+        # tardif depuis float32, le preprocessing entier tourne en float64.
+        clips = preprocess_clips(frames, use_double=self._use_double).to(self.device)
 
         logits = self._model(clips)              # (10, 2)
         probs  = F.softmax(logits, dim=1)        # (10, 2)

@@ -194,51 +194,60 @@ def _sample_clips(total: int) -> np.ndarray:
     return np.stack([np.arange(o, o + CLIP_LEN) for o in offsets])
 
 
-def _resize_shortest(frame: np.ndarray) -> np.ndarray:
+def _resize_shortest(frame: np.ndarray, use_double: bool = False) -> np.ndarray:
     """Redimensionne pour que le côté court soit RESIZE_SIZE px.
 
     Utilise F.interpolate (noyau C++ identique sur toutes les plateformes)
     au lieu de cv2.resize dont l'implémentation SIMD diffère entre
     x86 (AVX2, Windows) et ARM NEON (macOS Apple Silicon).
+
+    use_double=True : convertit le frame en float64 AVANT F.interpolate.
+    Les quelques ULP de différence que F.interpolate float32 introduit entre
+    x86-AVX2 et ARM-NEON disparaissent complètement en float64.
     """
     h, w = frame.shape[:2]
     if h <= w:
         nh, nw = RESIZE_SIZE, max(1, round(w * RESIZE_SIZE / h))
     else:
         nh, nw = max(1, round(h * RESIZE_SIZE / w)), RESIZE_SIZE
+    np_dtype = np.float64 if use_double else np.float32
     t = torch.from_numpy(
-        np.ascontiguousarray(frame, dtype=np.float32)
+        np.ascontiguousarray(frame, dtype=np_dtype)
     ).permute(2, 0, 1).unsqueeze(0)                    # (1, 3, H, W)
     t = F.interpolate(t, size=(nh, nw), mode='bilinear', align_corners=False)
-    return t.squeeze(0).permute(1, 2, 0).numpy()       # (nh, nw, 3) float32
+    return t.squeeze(0).permute(1, 2, 0).numpy()       # (nh, nw, 3)
 
 
-def preprocess_clips(frames: np.ndarray) -> torch.Tensor:
+def preprocess_clips(frames: np.ndarray, use_double: bool = False) -> torch.Tensor:
     """
     Prépare les tenseurs d'entrée pour C3DRecognizer.
 
     Args:
-        frames : (T, H, W, 3) uint8 RGB
+        frames     : (T, H, W, 3) uint8 RGB
+        use_double : si True, tout le pipeline (resize, mean-sub, stack) est
+                     en float64 — élimine les différences BLAS MKL↔Accelerate.
 
     Returns:
-        Tensor (NUM_CLIPS, 3, CLIP_LEN, CROP_SIZE, CROP_SIZE) float32
+        Tensor (NUM_CLIPS, 3, CLIP_LEN, CROP_SIZE, CROP_SIZE) float32 ou float64
     """
-    T           = len(frames)
-    clip_idx    = _sample_clips(T)      # (NUM_CLIPS, CLIP_LEN)
-    result      = []
+    np_dtype = np.float64 if use_double else np.float32
+    mean     = _MEAN.astype(np_dtype)   # cast mean dans le bon type
+    T        = len(frames)
+    clip_idx = _sample_clips(T)         # (NUM_CLIPS, CLIP_LEN)
+    result   = []
 
     for ci in clip_idx:
         clip = []
         for idx in ci:
-            f = _resize_shortest(frames[int(idx)])
+            f = _resize_shortest(frames[int(idx)], use_double=use_double)
             h, w = f.shape[:2]
             y = (h - CROP_SIZE) // 2
             x = (w - CROP_SIZE) // 2
             f = f[y:y + CROP_SIZE, x:x + CROP_SIZE, :]  # (112, 112, 3)
             clip.append(f)
 
-        clip_arr = np.stack(clip).astype(np.float32) - _MEAN  # (16, 112, 112, 3)
-        clip_arr = clip_arr.transpose(3, 0, 1, 2)             # (3, 16, 112, 112)
+        clip_arr = np.stack(clip).astype(np_dtype) - mean  # (16, 112, 112, 3)
+        clip_arr = clip_arr.transpose(3, 0, 1, 2)          # (3, 16, 112, 112)
         result.append(clip_arr)
 
     arr = np.stack(result)               # (NUM_CLIPS, 3, 16, 112, 112)
