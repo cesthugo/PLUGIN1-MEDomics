@@ -219,10 +219,17 @@ def _infer_one_frame(model, frame: np.ndarray, score_thr: float, device: str,
     instances = results[0]
     bboxes = instances.bboxes.cpu().numpy()
     scores = instances.scores.cpu().numpy()
+    # Arrondi à 6 décimales avant la comparaison au seuil :
+    # MKL (Windows x86) et Accelerate (macOS ARM) produisent des résultats float64
+    # qui diffèrent de ~1e-11 par couche convolutive.  Après un backbone de 50+
+    # couches, l'erreur cumulée peut atteindre ~1e-9 — suffisant pour faire passer
+    # un score de 0.6999999991 (Mac) à 0.7000000002 (Win) et changer le résultat.
+    # Tolérance 5e-7 >> 1e-9 → résultats identiques cross-plateforme.
+    # Le score stocké dans la détection garde la précision d'origine (non arrondi).
     return [
         {"bbox": [float(x) for x in bb], "score": float(sc), "label": "tumor"}
         for bb, sc in zip(bboxes, scores)
-        if sc >= score_thr
+        if round(float(sc), 6) >= score_thr
     ]
 
 
@@ -270,7 +277,7 @@ def _infer_batch_frames(model, frames: list, score_thr: float, device: str,
         results_out[orig_idx] = [
             {"bbox": [float(x) for x in bb], "score": float(sc), "label": "tumor"}
             for bb, sc in zip(bboxes, scores)
-            if sc >= score_thr
+            if round(float(sc), 6) >= score_thr
         ]
 
     return results_out
