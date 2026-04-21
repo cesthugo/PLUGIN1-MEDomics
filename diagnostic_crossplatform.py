@@ -213,23 +213,33 @@ try:
         n = len(frames_for_det)
         borderline = []
         total_above_070 = 0
+        all_scores_above060 = []  # (frame_idx, score brut 10 déc) pour comparaison précise
 
         for i in range(0, n, stride):
             frame_rgb = frames_for_det[i]   # (H, W, 3) uint8 RGB — predict attend RGB
             dets = det_model.predict(frame_rgb, score_thr=_LOW_THR)
             for d in dets:
                 sc = d["score"]
+                all_scores_above060.append((i, sc))
                 if sc >= 0.70:
                     total_above_070 += 1
                 if _LOW_THR <= sc < 0.75:
-                    borderline.append((i, round(sc, 6)))
+                    borderline.append((i, sc))
 
         print(f"Frames analysées (stride={stride})  : {len(range(0, n, stride))}/{n}")
         print(f"Détections ≥ 0.70                   : {total_above_070}")
-        print(f"Scores borderline [0.60–0.75[ :")
+        print(f"\nScores EXACTS ≥ 0.60 (10 décimales — pour comparaison cross-plateforme) :")
+        for frame_i, sc in sorted(all_scores_above060):
+            marker = ""
+            if 0.68 <= sc <= 0.72:
+                marker = " ← BASCULE POSSIBLE"
+            elif sc >= 0.70:
+                marker = " [>= seuil]"
+            print(f"  frame {frame_i:4d}  score={sc:.10f}{marker}")
+        print(f"\nScores borderline [0.60–0.75[ :")
         for frame_i, sc in sorted(borderline):
             marker = " ← BASCULE POSSIBLE" if 0.68 <= sc <= 0.72 else ""
-            print(f"  frame {frame_i:4d}  score={sc:.6f}{marker}")
+            print(f"  frame {frame_i:4d}  score={sc:.10f}{marker}")
 
 except Exception as e:
     import traceback
