@@ -179,6 +179,10 @@ try:
     if info and "crop" in info:
         c = info["crop"]
         print(f"crop region    : y=[{c['ymin']},{c['ymax']}]  x=[{c['xmin']},{c['xmax']}]")
+    if info and "backscan" in info:
+        bsc = info["backscan"]
+        print(f"backscan géom  : xoffset={bsc['xoffset']:.6f}  yoffset={bsc['yoffset']:.6f}")
+        print(f"                 rc={bsc['rc']:.6f}  theta_c={bsc['theta_c']:.6f}  dc={bsc['dc']:.6f}")
 except Exception as e:
     import traceback
     print(f"[ERR prepUS] {e} — utilisation de frames_clean (résultat différent de Tkinter)")

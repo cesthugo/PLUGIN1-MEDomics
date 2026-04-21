@@ -34,6 +34,85 @@ import numpy as np
 from starhe_plugin.utils.go_print import go_print
 
 
+# ── Calcul déterministe des paramètres géométriques backscan ─────────────────
+def _compute_lossless_backscan_params(
+    frames_rgb: np.ndarray,
+) -> "dict | None":
+    """
+    Recalcule les paramètres géométriques du backscan directement depuis les
+    frames RGB originales (sans codec vidéo lossy), garantissant des résultats
+    identiques sur macOS (ARM/Accelerate) et Windows (x86/MKL).
+
+    Reproduit l'algorithme de prepUS.removeLayoutFile :
+      1. Conversion RGB→gris
+      2. Comptage de valeurs uniques par pixel (vectorisé numpy, sans sonocrop)
+      3. Seuillage automatique + opérations morphologiques identiques
+      4. find_linear_fov (HoughLines) → (xoffset, yoffset, rc, theta_c, dc)
+
+    Retourne un dict {"backscan": {...}, "crop": {...}} ou None si échec.
+    """
+    from scipy.ndimage import binary_fill_holes
+    from prepUS.utils import keep_largest_component, sync_halves, crop_single_object
+    from prepUS.backscan import find_linear_fov
+
+    T, H, W, _ = frames_rgb.shape
+
+    # ── 1. Conversion RGB→gris (identique à sonocrop.vid.loadvideo) ──────────
+    v_gray = np.stack(
+        [cv2.cvtColor(f.astype(np.uint8), cv2.COLOR_RGB2GRAY) for f in frames_rgb],
+        axis=0,
+    )  # (T, H, W) uint8
+
+    # ── 2. Nombre de valeurs grises uniques par position spatiale ─────────────
+    # Équivalent de : u[i] = np.apply_along_axis(vid.countUniquePixels, 0, v[:, i, :])
+    # Après tri temporel, on compte les changements consécutifs → nb valeurs uniques.
+    # Entièrement vectorisé, déterministe sur ARM et x86.
+    sorted_v = np.sort(v_gray, axis=0)  # (T, H, W) uint8 — trié le long du temps
+    u = np.ones((H, W), dtype=np.uint8)
+    for t in range(1, T):
+        u += (sorted_v[t] != sorted_v[t - 1]).astype(np.uint8)
+    u_avg = u / T
+
+    # ── 3. Seuil automatique (même formule que prepUS) ────────────────────────
+    _, bin_edges = np.histogram(u_avg, bins=20)
+    thresh = float(bin_edges[3])
+
+    # ── 4. Masque binaire + opérations morphologiques ─────────────────────────
+    mask_img     = (u_avg > thresh).astype(np.uint8)
+    mask_largest = keep_largest_component(mask_img)
+    mask_mirror  = sync_halves(np.copy(mask_largest))
+    bool_mask    = binary_fill_holes((mask_mirror / 255).astype(bool))
+    bool_mask    = (bool_mask * 255).astype(np.uint8)
+    kernel       = np.ones((3, 3), np.uint8)
+    denoised     = cv2.morphologyEx(bool_mask, cv2.MORPH_OPEN, kernel)
+    denoised     = cv2.morphologyEx(denoised, cv2.MORPH_CLOSE, kernel)
+    bool_mask    = (denoised / 255).astype(bool)
+
+    cropped_mask, ymin, ymax, xmin, xmax = crop_single_object(np.copy(bool_mask))
+
+    # ── 5. Détection des bords du cône US (HoughLines) ───────────────────────
+    params = find_linear_fov((cropped_mask * 255).astype(np.uint8), threshold=100)
+    if params is None:
+        return None
+
+    xoffset, yoffset, rc, theta_c, dc = params
+    return {
+        "backscan": {
+            "xoffset": float(xoffset),
+            "yoffset": float(yoffset),
+            "rc":      float(rc),
+            "theta_c": float(theta_c),
+            "dc":      float(dc),
+        },
+        "crop": {
+            "ymin": int(ymin),
+            "ymax": int(ymax),
+            "xmin": int(xmin),
+            "xmax": int(xmax),
+        },
+    }
+
+
 # ── Chemin vers le package prepUS vendorisé (inclus dans le projet) ────────────
 # Priorité 1 : prepUS déjà installé dans le venv (pip install third_party/prepUS)
 # Priorité 2 : source vendorisée dans third_party/prepUS/ (fallback sys.path)
@@ -159,6 +238,47 @@ def preprocess_with_prepus(
         if os.path.exists(info_path):
             with open(info_path, encoding="utf-8") as fh:
                 info = json.load(fh)
+
+        # ── 3b. Surcharge déterministe de la géométrie backscan ───────────────
+        # prepUS calcule la géométrie du cône US (xoffset, yoffset, rc, theta_c,
+        # dc) depuis la vidéo MP4 compressée (codec mp4v, lossy). Le décodage
+        # mp4v diffère selon la plateforme (CoreVideo/macOS vs
+        # MediaFoundation/Windows) : ±1–2 niveaux de gris → masque statique
+        # légèrement différent → HoughLines différent → paramètres différents →
+        # backscan in-memory différent → scores IA différents.
+        #
+        # Fix : on recalcule le masque et la géométrie directement depuis les
+        # frames numpy brutes (sans codec), puis on écrase info["backscan"] et
+        # info["crop"] avec des valeurs déterministes et on régénère mask.png en
+        # cohérence.
+        if back_scan_conversion and info is not None and "backscan" in info:
+            try:
+                from prepUS.backscan import pre_dsc_image_vectorized as _pdv_geo
+                det = _compute_lossless_backscan_params(frames)
+                if det is not None:
+                    info["backscan"].update(det["backscan"])
+                    info["crop"].update(det["crop"])
+                    # Régénère mask.png cohérent avec la nouvelle géométrie
+                    bsc = det["backscan"]
+                    c   = det["crop"]
+                    first_gray = cv2.cvtColor(
+                        frames[0].astype(np.uint8), cv2.COLOR_RGB2GRAY
+                    )
+                    first_crop = first_gray[c["ymin"]:c["ymax"], c["xmin"]:c["xmax"]]
+                    mask_det   = _pdv_geo(
+                        first_crop,
+                        bsc["dc"], bsc["rc"], bsc["theta_c"],
+                        bsc["yoffset"], bsc["xoffset"],
+                        backscan_width, backscan_height,
+                        get_IUSI_FOV=True,
+                    )
+                    cv2.imwrite(os.path.join(out_dir, "mask.png"), mask_det)
+                    go_print("info",
+                             "prepus_bridge: géométrie backscan recalculée (déterministe)")
+            except Exception as exc:
+                go_print("warning",
+                         f"prepus_bridge: recalcul géométrie échoué ({exc}) "
+                         "— paramètres prepUS conservés")
 
         # ── 4. Reconstruire les frames de sortie en mémoire (sans décodage lossy) ──
         # prepUS écrit ses résultats en MP4 (codec mp4v, lossy).
