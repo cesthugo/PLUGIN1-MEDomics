@@ -3,18 +3,19 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.2.0` — Last updated: April 14, 2026*
+*Version `0.3.0` — Last updated: April 20, 2026*
 
 ---
 
 ## Overview
 
-The plug-in analyzes abdominal ultrasound DICOM cine-clips to screen for hepatocellular carcinoma (HCC). It operates in **two modes**:
+The plug-in analyzes abdominal ultrasound DICOM cine-clips to screen for hepatocellular carcinoma (HCC). It operates in **three modes**:
 
 | Mode | Description |
 |---|---|
 | **Standalone** | Standalone Go server (`go_server/`) + Tkinter prototype. Go launches `pipeline.py` as a subprocess and streams results via SSE. |
 | **MEDomics Integrated** | Integrates into the MEDomics platform as a *Standard Plugin*. An adapter (`run_starhe.py`) translates the `GO_PRINT|…` protocol to the MEDomics protocol (`progress*_*` / `response-ready*_*`). A Go blueprint (`starhe_blueprint.go`) registers routes in the MEDomics server. |
+| **Live Streaming** | Real-time frame-by-frame inference on a live ultrasound feed. The `LivePipeline` (`ai/live_pipeline.py`) processes incoming frames in a background thread. Three input sources are supported: C-STORE DICOM (pynetdicom SCP), local folder watcher, and USB HDMI capture card. UI via `ui/live_tab.py`. |
 
 Two AI models are used:
 
@@ -514,7 +515,119 @@ Defined in `ai/models/_dino_runner.py`. No server mode — each frame launches a
 
 ---
 
-## MEDomics Integration (Standard Plugin)
+## Live Streaming Pipeline (`ai/live_pipeline.py`)
+
+The live pipeline performs frame-by-frame inference on a continuous video stream. It is designed to run completely locally — no data leaves the machine.
+
+### Architecture
+
+```
+source thread  ─push_frame()─►  LiveRingBuffer (deque, maxlen=160, thread-safe)
+                                        │
+                              _run() thread (daemon)
+                                        │
+                              snapshot() → (T, H, W, 3) window
+                                        │
+                    ┌───────────────────┴───────────────────┐
+                    │                                       │
+              RTMDet detect                          C3D risk (every 16 frames)
+              (every DETECT_EVERY_N=4)               (on the ring buffer snapshot)
+                    │                                       │
+                    └────────────────► result dict ─────────┘
+```
+
+### `LiveRingBuffer`
+
+Thread-safe circular buffer wrapping `collections.deque(maxlen=160)`:
+
+```python
+buf = LiveRingBuffer(maxlen=160)
+buf.push(frame_uint8)          # (H, W, 3) numpy array
+window = buf.snapshot()        # → (T, H, W, 3) copy — thread-safe
+```
+
+`maxlen=160` covers ~5 seconds at 30 fps, enough for the C3D sliding window (16 frames).
+
+### `LivePipeline`
+
+```python
+pipe = LivePipeline(detect_model, risk_model)
+pipe.start()           # starts the background inference thread
+pipe.push_frame(arr)   # called by the source — non-blocking
+result = pipe.latest_result()  # latest result dict (polled by UI)
+pipe.stop()            # graceful shutdown
+```
+
+The `_run()` loop:
+1. Drains `_input_queue` (maxsize=`INPUT_QUEUE_MAXSIZE=8` — drops oldest if full).
+2. Every `DETECT_EVERY_N=4` frames: runs RTMDet on the current frame (512×512 after ROI crop).
+3. Every `RISK_UPDATE_INTERVAL=16` frames: takes a `snapshot()` of the ring buffer and runs C3D.
+4. Stores the latest result in `_latest_result` (thread-safe dict swap).
+
+### ROI auto-calibration
+
+`ROI_CALIBRATION_FRAMES = 30`. After 30 frames are received, `_auto_roi()` is called once to detect the ultrasound cone and compute the crop rectangle. All subsequent frames are cropped and resized to 512×512 before being sent to RTMDet.
+
+### Result dict
+
+```python
+{
+    "frame_idx"    : int,
+    "timestamp"    : float,          # time.time()
+    "detections"   : list[dict],     # [{bbox, score, label}, ...]
+    "risk_score"   : float,          # 0.0–1.0
+    "risk_label"   : str,            # "Low risk" | "High risk"
+    "roi"          : list[int],      # [x0, y0, x1, y1] — None before calibration
+    "_frame_display": np.ndarray,    # cropped+resized frame for the UI preview
+}
+```
+
+### Key constants (`config.py`)
+
+| Constant | Default | Effect |
+|---|---|---|
+| `LIVE_RING_MAXLEN` | `160` | Ring buffer depth (~5 s at 30 fps) |
+| `LIVE_DETECT_EVERY_N` | `4` | RTMDet called every N frames |
+| `LIVE_RISK_INTERVAL` | `16` | C3D updated every N frames |
+| `LIVE_INPUT_QUEUE_MAXSIZE` | `8` | Drop policy: oldest frame dropped if queue full |
+| `LIVE_ROI_CALIBRATION_FRAMES` | `30` | Frames before ROI auto-detection |
+
+---
+
+## Live Analysis Tab (`ui/live_tab.py`)
+
+`LiveTab(tk.Frame)` is opened as a `tk.Toplevel` window from the main prototype (button **📡 Analyse en direct** in the sidebar).
+
+### Input sources
+
+| Source constant | Thread class | Description |
+|---|---|---|
+| `SOURCE_CSTORE = "cstore"` | `_DicomReceiver` (pynetdicom SCP) | Listens on a configurable TCP port for C-STORE from the ultrasound machine |
+| `SOURCE_FOLDER = "folder"` | `_FolderWatcher(Thread)` | Polls a directory every 0.5 s for new `.dcm` files |
+| `SOURCE_HDMI = "hdmi"` | `_HDMIReader(Thread)` | Reads frames from a USB HDMI capture card via `cv2.VideoCapture` |
+
+### HDMI capture card
+
+`_list_capture_devices()` enumerates video devices (`CAP_AVFOUNDATION` on macOS, `CAP_MSMF` on Windows). It returns `(index, name, fps, width, height)` tuples. `_refresh_hdmi_devices()` uses a 3-pass selection:
+1. Prefer devices whose name contains known capture card keywords (`elgato`, `avermedia`, `magewell`, `capture`, `usb`, …).
+2. Exclude known cameras (e.g. `facetime`, `iphone`, `continuity`).
+3. Among remaining candidates, pick the highest-resolution device.
+
+If no recognized capture card is found, `_hdmi_capture_card_found = False` and a warning label is shown (⚠ orange). The **Start** button is hard-blocked — `_start_live()` raises an error without opening any camera.
+
+> **Hardware note**: plugging an HDMI cable directly into a Mac Thunderbolt/USB-C port is not supported — those ports are output-only. A USB HDMI capture card (e.g. Elgato HD60 S+, AVerMedia, Magewell USB Capture) is required.
+
+### Display decoupling
+
+The preview canvas is refreshed by `_preview_tick()` at 33 ms (≈30 fps) regardless of the inference rate. It reads `_latest_display_frame` (written by the source thread) and overlays bounding boxes from `pipe.latest_result()`. This ensures smooth video even when inference is slower than 30 fps.
+
+### Source sidebar frames
+
+Each source has its own sidebar frame shown/hidden by `_on_source_changed()`:
+
+- **C-STORE**: AE title + TCP port entry, pynetdicom SCP start/stop.
+- **Folder**: directory browse button, recursive toggle.
+- **HDMI**: device combobox (populated by **Scan** button), resolution selector (`Auto` / `1080p` / `720p` / `PAL` / `SD`), hardware warning label.
 
 The STARHE plugin integrates into the MEDomics platform following the "Standard Plugin" pattern (analogous to 3D Slicer extensions). The integration consists of three parts:
 
@@ -663,6 +776,8 @@ The `pixel_spacing` value (mm/px) is stored in the tab state and used by `_draw_
 
 **go_print on the UI side**: at initialization, `set_log_sink(lambda level, msg: self._append_log(msg))` redirects all messages to the interface console. The sink is reset to `None` on close.
 
+**Live analysis button**: the sidebar contains a **📡 Analyse en direct** button that calls `_open_live_window()`. This opens a singleton `tk.Toplevel` (stored in `self._live_win`) containing a `LiveTab` frame. Re-clicking the button while the window is open brings it to the foreground instead of opening a second window.
+
 **Zoom and pan**: all canvas coordinates are recalculated at each `_refresh_canvas()` by applying the affine transform `(x * zoom + pan_x, y * zoom + pan_y)`. Images are resized via `PIL.Image.resize` with `LANCZOS`.
 
 **Anonymization at import**: original values are saved in `original_sensitive` (list of tuples `(tag_name, value)`) before anonymization. They are displayed in red in the metadata panel. Anonymized values are in `kept_metadata`.
@@ -779,6 +894,7 @@ PLUGIN1-MEDomics/
         ├── ai/
         │   ├── starhe_risk.py        # C3D wrapper: loading + inference
         │   ├── starhe_detect.py      # RTMDet/DINO wrapper: subprocess server
+        │   ├── live_pipeline.py      # Live streaming: LiveRingBuffer + LivePipeline
         │   └── models/
         │       ├── c3d.py            # C3D architecture in pure PyTorch (without mmaction2)
         │       ├── _rtmdet_runner.py # RTMDet runner (image mode + server mode)
@@ -796,7 +912,8 @@ PLUGIN1-MEDomics/
         │   └── crop.py               # Custom crop algorithm (fallback if prepUS unavailable)
         │
         ├── ui/
-        │   └── prototype_tkinter.py  # Prototype interface (~2500 lines)
+        │   ├── prototype_tkinter.py  # Prototype interface (~2500 lines)
+        │   └── live_tab.py           # Live streaming tab (LiveTab Toplevel window)
         │
         └── utils/
             └── go_print.py           # Go ↔ Python stdout protocol + set_log_sink()
@@ -838,6 +955,16 @@ AI parameters:
 | `DETECT_SCORE_THRESHOLD` | `0.70` | Minimum confidence threshold, affects display and cache |
 | `DETECT_EVERY_N` | `4` | Temporal subsampling (1 = all frames) |
 | `DETECT_BATCH_SIZE` | `"auto"` | Batch size for RTMDet: `"auto"` = compute from VRAM/RAM via `utils/hardware.py`; set to an integer to force a fixed value |
+
+Live streaming parameters:
+
+| Parameter | Value | Effect |
+|---|---|---|
+| `LIVE_RING_MAXLEN` | `160` | Ring buffer depth (frames) |
+| `LIVE_DETECT_EVERY_N` | `4` | RTMDet called every N incoming frames |
+| `LIVE_RISK_INTERVAL` | `16` | C3D risk score updated every N frames |
+| `LIVE_INPUT_QUEUE_MAXSIZE` | `8` | Max frames queued for inference; oldest dropped if full |
+| `LIVE_ROI_CALIBRATION_FRAMES` | `30` | Frames received before ROI auto-detection runs |
 
 ---
 

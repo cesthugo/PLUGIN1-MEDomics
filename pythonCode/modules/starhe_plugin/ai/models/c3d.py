@@ -20,7 +20,6 @@ Référence :
 """
 
 import numpy as np
-import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -196,13 +195,22 @@ def _sample_clips(total: int) -> np.ndarray:
 
 
 def _resize_shortest(frame: np.ndarray) -> np.ndarray:
-    """Redimensionne pour que le côté court soit RESIZE_SIZE px."""
+    """Redimensionne pour que le côté court soit RESIZE_SIZE px.
+
+    Utilise F.interpolate (noyau C++ identique sur toutes les plateformes)
+    au lieu de cv2.resize dont l'implémentation SIMD diffère entre
+    x86 (AVX2, Windows) et ARM NEON (macOS Apple Silicon).
+    """
     h, w = frame.shape[:2]
     if h <= w:
         nh, nw = RESIZE_SIZE, max(1, round(w * RESIZE_SIZE / h))
     else:
         nh, nw = max(1, round(h * RESIZE_SIZE / w)), RESIZE_SIZE
-    return cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    t = torch.from_numpy(
+        np.ascontiguousarray(frame, dtype=np.float32)
+    ).permute(2, 0, 1).unsqueeze(0)                    # (1, 3, H, W)
+    t = F.interpolate(t, size=(nh, nw), mode='bilinear', align_corners=False)
+    return t.squeeze(0).permute(1, 2, 0).numpy()       # (nh, nw, 3) float32
 
 
 def preprocess_clips(frames: np.ndarray) -> torch.Tensor:

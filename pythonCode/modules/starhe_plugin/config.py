@@ -73,6 +73,22 @@ DETECT_BATCH_SIZE = "auto"
 # "mps"   = force Apple Silicon GPU (raises if unavailable)
 INFERENCE_DEVICE = "auto"
 
+# ── Reproductibilité cross-plateforme ────────────────────────────────────────
+# Lorsque True, les deux modèles (RISK et DETECT) sont forcés sur CPU en
+# float64.  Float64 réduit l'erreur d'arrondi BLAS (MKL↔Accelerate) de ~1e-4
+# (float32) à ~1e-13 (float64), rendant les scores identiques bit-à-bit entre
+# Windows et macOS pour un même fichier DICOM.
+#
+# RISK  : "30.1% mac" vs "29.9% windows" → source : BLAS MKL↔Accelerate
+#         (float32 accumulation differ by ~0.002).  Float64 → identique.
+# DETECT: "48 frames mac" vs "44 frames windows" → source PRINCIPALE :
+#         Mac utilise MPS (Apple Silicon GPU), Windows utilise CPU → arithmétique
+#         complètement différente → scores borderline basculent autour de 0.70.
+#         Float64 sur CPU → identique sur les deux plateformes.
+#
+# Coût : ~2–3× plus lent sur CPU.  Désactiver (False) pour la prod rapide.
+DETERMINISTIC_INFERENCE: bool = True
+
 # ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
 CROP_BLACK_THRESHOLD   = 10
 CROP_MIN_CONTENT_RATIO = 0.01

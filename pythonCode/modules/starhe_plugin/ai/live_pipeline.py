@@ -55,6 +55,8 @@ from typing import Callable
 
 import numpy as np
 import cv2
+import torch
+import torch.nn.functional as F
 
 from starhe_plugin.config import DETECT_EVERY_N, DETECT_SCORE_THRESHOLD
 from starhe_plugin.dicom.anonymizer import remove_pixel_burnin
@@ -341,9 +343,13 @@ class LivePipeline:
             if x1 > x0 and y1 > y0:
                 frame = frame[y0:y1, x0:x1]
 
-        # Redimensionner vers 512×512 (format attendu par le runner RTMDet)
+        # Redimensionner vers 512×512 via F.interpolate (cross-plateforme)
         if frame.shape[0] != 512 or frame.shape[1] != 512:
-            frame = cv2.resize(frame, (512, 512), interpolation=cv2.INTER_LINEAR)
+            t = torch.from_numpy(
+                np.ascontiguousarray(frame, dtype=np.float32)
+            ).permute(2, 0, 1).unsqueeze(0)
+            t = F.interpolate(t, size=(512, 512), mode='bilinear', align_corners=False)
+            frame = t.squeeze(0).permute(1, 2, 0).numpy().clip(0, 255).astype(np.uint8)
         return frame
 
     def _remap_detections(self, dets: list) -> list:

@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from starhe_plugin.config import STARHE_RISK_CHECKPOINT, INFERENCE_DEVICE
+from starhe_plugin.config import STARHE_RISK_CHECKPOINT, INFERENCE_DEVICE, DETERMINISTIC_INFERENCE
 from starhe_plugin.utils.go_print import go_print
 from starhe_plugin.ai.models.c3d import C3DRecognizer, preprocess_clips
 
@@ -37,10 +37,14 @@ class STARHERiskModel:
     def __init__(self, device: str | None = None):
         if device:
             self.device = device
+        elif DETERMINISTIC_INFERENCE:
+            # Force CPU pour reproductibilité cross-plateforme (voir config.py)
+            self.device = "cpu"
         elif INFERENCE_DEVICE != "auto":
             self.device = INFERENCE_DEVICE
         else:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._use_double = DETERMINISTIC_INFERENCE
         self._model = None
         self._load()
 
@@ -56,6 +60,8 @@ class STARHERiskModel:
         # plateforme (élimine la variance multi-thread MKL/OpenBLAS).
         if self.device == "cpu":
             torch.set_num_threads(1)
+        # Algorithmes déterministes globaux (prot. scatter/atomics MPS et CUDA)
+        torch.use_deterministic_algorithms(True, warn_only=True)
         self._model = C3DRecognizer.from_checkpoint(
             STARHE_RISK_CHECKPOINT,
             device=self.device,
@@ -63,10 +69,15 @@ class STARHERiskModel:
             dropout_ratio=0.5,
             out_dim=8192,
         )
+        if self._use_double:
+            # Float64 : erreur BLAS résiduelle ~1e-13 → résultats identiques
+            # entre MKL (Windows) et Apple Accelerate (macOS ARM).
+            self._model = self._model.double()
         self._model.to(self.device)
         self._model.eval()
+        dtype_str = "float64" if self._use_double else "float32"
         go_print("info",
-                 f"STARHE-RISK (C3D pur PyTorch) chargé sur {self.device}.")
+                 f"STARHE-RISK (C3D pur PyTorch) chargé sur {self.device} [{dtype_str}].")
 
     @torch.no_grad()
     def predict(self, frames: np.ndarray) -> dict:
@@ -77,6 +88,8 @@ class STARHERiskModel:
         → identique à average_clips='prob' dans mmaction2.
         """
         clips = preprocess_clips(frames).to(self.device)  # (10, 3, 16, 112, 112)
+        if self._use_double:
+            clips = clips.double()
 
         logits = self._model(clips)              # (10, 2)
         probs  = F.softmax(logits, dim=1)        # (10, 2)

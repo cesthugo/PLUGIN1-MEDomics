@@ -29,6 +29,7 @@ import cv2
 from starhe_plugin.config import (
     DETECT_BACKEND,
     DETECT_BATCH_SIZE,
+    DETERMINISTIC_INFERENCE,
     INFERENCE_DEVICE,
     STARHE_DETECT_CONFIG,
     STARHE_DETECT_CHECKPOINT,
@@ -149,6 +150,10 @@ class STARHEDetectModel:
         ]
         if self._device != "auto":
             cmd += ["--device", self._device]
+        if DETERMINISTIC_INFERENCE:
+            # Force CPU + float64 dans le subprocess runner pour reproductibilité
+            # cross-plateforme (élimine MPS/CUDA vs CPU et BLAS MKL↔Accelerate).
+            cmd += ["--deterministic"]
         go_print("info", "STARHE-DETECT : démarrage du serveur RTMDet (chargement modèle)…")
         self._proc = subprocess.Popen(
             cmd,

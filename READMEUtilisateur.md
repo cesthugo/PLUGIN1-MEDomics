@@ -270,6 +270,56 @@ The sidebar always remains dark in both modes.
 
 ---
 
+## 📡 14. Live Analysis (Analyse en direct)
+
+The **📡 Analyse en direct** button in the sidebar opens a dedicated window for real-time analysis of a live ultrasound feed.
+
+### Opening the window
+
+Click **📡 Analyse en direct** in the main sidebar. A new window appears.  
+Re-clicking while the window is already open brings it to the foreground.
+
+### Choosing an input source
+
+Select the source using the radio buttons at the top of the window:
+
+| Source | Description |
+|---|---|
+| **C-STORE DICOM** | Receives DICOM images sent directly by the ultrasound machine over the network (C-STORE SCP protocol). Enter the AE title and TCP port, then click **Start**. |
+| **Folder** | Watches a local directory for new `.dcm` files. New files are read and pushed into the inference pipeline automatically every 0.5 s. |
+| **HDMI Capture Card** | Captures live video from a USB HDMI capture card connected to the ultrasound machine's video output. |
+
+### HDMI source — required hardware
+
+A **USB HDMI capture card** is required (e.g. Elgato HD60 S+, AVerMedia Live Gamer, Magewell USB Capture).
+
+> ⚠ **Plugging an HDMI cable directly into a Mac Thunderbolt/USB-C port will not work** — those ports are video *output* only. A capture card converts the HDMI signal to USB video input.
+
+After selecting **HDMI**, click **🔍 Scan** to detect connected devices. The status label updates:
+- `✅ Capture card detected` — a recognized device was found, the **Start** button is enabled.
+- `⚠ Matériel requis` (orange) — no recognized capture card found. Check the USB connection and retry.
+- `🔴 Aucun périphérique` — no video devices found at all.
+
+Select a resolution in the dropdown (`Auto`, `1080p`, `720p`, `PAL`, `SD`). **Auto** lets the capture card choose its default.
+
+### Starting and stopping
+
+Click **▶ Démarrer** to start live acquisition and inference.  
+Click **⏹ Arrêter** to stop.
+
+### Live display
+
+- The central canvas shows the live video feed at ~30 fps, independent of the inference rate.
+- **Bounding boxes** (red) are drawn over each detected lesion in real time.
+- The **HCC Risk Score** and label (`Low risk` / `High risk`) update every 16 frames from the C3D model.
+- A **FPS counter** in the header shows the current capture frame rate.
+
+### ROI calibration
+
+The pipeline automatically detects the ultrasound cone after the first 30 frames and crops the image to the region of interest before sending it to the AI models. No manual action is needed.
+
+---
+
 ## ⚠️ Important Notes
 
 - **Anonymization**: each loaded file is anonymized **in memory**. The original file on disk **is not modified**.
@@ -502,6 +552,40 @@ The **🌙 Dark theme** button at the bottom of the sidebar toggles between:
 - **Dark theme** — main area `#1a1a2e`, cards `#16213e`
 
 The sidebar always remains dark in both modes.
+
+---
+
+## 📡 13. Live Analysis (Analyse en direct)
+
+The **📡 Analyse en direct** button in the sidebar opens a dedicated window for real-time analysis of a live ultrasound feed.
+
+### Opening the window
+
+Click **📡 Analyse en direct** in the main sidebar. A new window appears.  
+Re-clicking while the window is already open brings it to the foreground.
+
+### Choosing an input source
+
+| Source | Description |
+|---|---|
+| **C-STORE DICOM** | Receives DICOM images sent directly by the ultrasound machine over the network. Enter the AE title and TCP port, then click **Start**. |
+| **Folder** | Watches a local directory for new `.dcm` files and pushes them into the pipeline every 0.5 s. |
+| **HDMI Capture Card** | Captures live video from a USB HDMI capture card plugged into the ultrasound machine's HDMI output. |
+
+### HDMI source — required hardware
+
+> ⚠ **A USB HDMI capture card is required** (Elgato HD60 S+, AVerMedia, Magewell USB Capture, etc.).  
+> Plugging HDMI directly into a Mac Thunderbolt/USB-C port will **not** work — those ports are output-only.
+
+Click **🔍 Scan** to detect connected devices:
+- `✅ Capture card detected` — click **▶ Démarrer** to start.
+- `⚠ Matériel requis` (orange) — no capture card found. Check the USB connection and retry.
+
+### Live display
+
+- Video preview at ~30 fps with bounding boxes overlaid over detected lesions.
+- HCC Risk score (`Low` / `High`) updated every 16 frames.
+- ROI auto-detected after the first 30 frames (no manual action needed).
 
 ---
 

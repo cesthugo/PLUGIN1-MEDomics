@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **April 14, 2026**
+> Last updated: **April 20, 2026**
 
 ---
 
@@ -86,6 +86,19 @@
 - [x] **`go_server/main.go`** — Endpoints: GET /health, POST /starhe/analyze (SSE), GET/DELETE /starhe/results
 - [x] **`go_server/config.go`** — MongoDB port `54017`, Python venv paths configurable via env vars
 - [x] **`go_server/handlers.go`** — SSE streaming `GO_PRINT|` from Python
+
+### 📡 Live Streaming (April 20, 2026)
+- [x] **`ai/live_pipeline.py`** — `LiveRingBuffer(maxlen=160)`: thread-safe deque with `push()` / `snapshot()`. `LivePipeline`: background daemon thread, input queue (maxsize=8, drop-oldest policy), frame-by-frame RTMDet (`LIVE_DETECT_EVERY_N=4`) + sliding-window C3D (`LIVE_RISK_INTERVAL=16`)
+- [x] **ROI auto-calibration** — `_auto_roi()` called after `LIVE_ROI_CALIBRATION_FRAMES=30` frames; subsequent frames are cropped+resized to 512×512 before inference
+- [x] **`ui/live_tab.py`** — `LiveTab(tk.Frame)` with 3 sources:
+  - [x] `SOURCE_CSTORE` — pynetdicom SCP (`_DicomReceiver`), configurable AE title + TCP port
+  - [x] `SOURCE_FOLDER` — `_FolderWatcher(Thread)` polling `.dcm` files every 0.5 s
+  - [x] `SOURCE_HDMI` — `_HDMIReader(Thread)` via `cv2.VideoCapture` (CAP_AVFOUNDATION on macOS)
+- [x] **Display decoupling** — `_preview_tick()` at 33 ms (≈30 fps), independent of inference rate; bounding boxes and risk overlaid from `pipe.latest_result()`
+- [x] **HDMI device selection** — `_list_capture_devices()` returns `(idx, name, fps, w, h)` tuples; `_refresh_hdmi_devices()` 3-pass selection: name keywords → exclude known cameras → highest resolution
+- [x] **HDMI safety block** — `_hdmi_capture_card_found` bool; if `False`, `_start_live()` raises error without opening any camera; dynamic warning label: ⚠ orange / ✅ green / 🔴 red
+- [x] **`ui/prototype_tkinter.py`** — Added **📡 Analyse en direct** sidebar button calling `_open_live_window()` (singleton `tk.Toplevel`, stored in `self._live_win`)
+- [x] **Branch & merge** — `feature/live-dicom` → merged `--no-ff` into `main`, pushed (`c4c9392`)
 
 ### 🌐 Cross-Platform Compatibility
 - [x] **`config.py`** — MongoDB configurable via environment variables (`MONGO_URI`, `MONGO_DB`, `MONGO_COLL`)

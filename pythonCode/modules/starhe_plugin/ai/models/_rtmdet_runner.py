@@ -67,6 +67,7 @@ _inspect.getmodule = _safe_getmodule
 
 # ─── 4. Patch NMSop.forward → torchvision.ops.nms ───────────────────────────
 import torch
+import torch.nn.functional as F
 
 # ── Reproductibilité cross-plateforme ─────────────────────────────────────────
 # Sur les GPU NVIDIA Ampere+ (RTX 30xx/40xx), PyTorch active TF32 par défaut :
@@ -80,6 +81,8 @@ if torch.cuda.is_available():
     torch.backends.cudnn.allow_tf32      = False    # désactive TF32 cuDNN
     torch.backends.cudnn.deterministic   = True     # algos déterministes
     torch.backends.cudnn.benchmark       = False    # pas de sélection auto
+# Algorithmes déterministes globaux (protège scatter/atomics sur MPS et CUDA)
+torch.use_deterministic_algorithms(True, warn_only=True)
 
 import torchvision.ops as tv_ops
 import mmcv.ops.nms  # noqa: F401  — déclenche load_ext avec stub _ext
@@ -167,9 +170,15 @@ def _preprocess(frame: np.ndarray):
     orig_H, orig_W = frame.shape[:2]
     scale = min(_INPUT_SIZE / orig_H, _INPUT_SIZE / orig_W)
     new_H, new_W = int(round(orig_H * scale)), int(round(orig_W * scale))
-    resized = cv2.resize(frame, (new_W, new_H), interpolation=cv2.INTER_LINEAR)
+    # F.interpolate : noyau C++ identique x86/ARM — résultat bit-à-bit identique
+    # entre Windows et macOS, contrairement à cv2.resize (SIMD diverge AVX2/NEON)
+    t = torch.from_numpy(
+        np.ascontiguousarray(frame, dtype=np.float32)
+    ).permute(2, 0, 1).unsqueeze(0)                    # (1, 3, H, W)
+    resized = F.interpolate(t, size=(new_H, new_W), mode='bilinear', align_corners=False)
+    resized = resized.squeeze(0).permute(1, 2, 0).numpy()  # (new_H, new_W, 3) float32
     canvas = np.full((_INPUT_SIZE, _INPUT_SIZE, 3), _PAD_VAL, dtype=np.float32)
-    canvas[:new_H, :new_W] = resized.astype(np.float32)
+    canvas[:new_H, :new_W] = resized
     tensor = torch.from_numpy(canvas.transpose(2, 0, 1))
     tensor = (tensor - _MEAN) / _STD
     tensor = tensor.unsqueeze(0)
@@ -191,9 +200,12 @@ def _load_ckpt(model, ckpt_path, device):
     model.load_state_dict(state_dict, strict=False)
 
 
-def _infer_one_frame(model, frame: np.ndarray, score_thr: float, device: str) -> list:
+def _infer_one_frame(model, frame: np.ndarray, score_thr: float, device: str,
+                     use_double: bool = False) -> list:
     """Inference on a single BGR uint8 numpy frame."""
     tensor, meta = _preprocess(frame)
+    if use_double:
+        tensor = tensor.double()
     tensor = tensor.to(device)
     with torch.no_grad():
         feats      = model.backbone(tensor)
@@ -220,7 +232,8 @@ def _infer_one(model, image_path: str, score_thr: float, device: str) -> list:
     return _infer_one_frame(model, frame, score_thr, device)
 
 
-def _infer_batch_frames(model, frames: list, score_thr: float, device: str) -> list:
+def _infer_batch_frames(model, frames: list, score_thr: float, device: str,
+                        use_double: bool = False) -> list:
     """Batch inference on a list of BGR uint8 numpy frames."""
     tensors   = []
     metas     = []
@@ -230,6 +243,8 @@ def _infer_batch_frames(model, frames: list, score_thr: float, device: str) -> l
         if frame is None:
             continue
         tensor, meta = _preprocess(frame)
+        if use_double:
+            tensor = tensor.double()
         tensors.append(tensor)
         metas.append(meta)
         valid_idx.append(i)
@@ -243,7 +258,7 @@ def _infer_batch_frames(model, frames: list, score_thr: float, device: str) -> l
     with torch.no_grad():
         feats      = model.backbone(batch_tensor)
         neck_feats = model.neck(feats)
-        head_outs  = model.bbox_head(neck_feats)
+        head_outs  = model.bbox_head(neck_feats) 
         results    = model.bbox_head.predict_by_feat(
             *head_outs, batch_img_metas=metas, rescale=True
         )
@@ -303,9 +318,20 @@ def main():
     parser.add_argument("--device",    default=None,
                         help="Force le device : 'cpu', 'cuda', 'mps'. "
                              "Par défaut : auto-détection.")
+    # Reproductibilité cross-plateforme : CPU + float64
+    parser.add_argument("--deterministic", action="store_true",
+                        help="Force CPU + float64 pour des résultats identiques "
+                             "entre Windows (MKL) et macOS (Accelerate).")
     args = parser.parse_args()
 
-    if args.device and args.device != "auto":
+    # ── Sélection du device ──────────────────────────────────────────────────
+    if args.deterministic:
+        # DETERMINISTIC_INFERENCE : force CPU indépendamment du hardware disponible.
+        # Raison : MPS (Mac Apple Silicon GPU) vs CPU (Windows) donne des résultats
+        # float32 complètement différents (écart ~0.01 sur les scores borderline).
+        # Sur CPU, float64 réduit l'erreur BLAS MKL↔Accelerate de ~1e-4 à ~1e-13.
+        device = "cpu"
+    elif args.device and args.device != "auto":
         device = args.device
     elif torch.cuda.is_available():
         device = "cuda"
@@ -320,8 +346,16 @@ def main():
     # 1 thread → ordre déterministe sur chaque plateforme, différence résiduelle ~1e-5 par op.
     if device == "cpu":
         torch.set_num_threads(1)
+        torch.set_num_interop_threads(1)
 
-    model  = _build_model(args.config, args.ckpt, device)
+    model = _build_model(args.config, args.ckpt, device)
+
+    if args.deterministic:
+        # Convert all parameters/buffers to float64.
+        # Float64 BLAS error between MKL and Accelerate is ~1e-13 per op,
+        # vs ~1e-4 for float32 — invisible after sigmoid/threshold comparison.
+        model = model.double()
+    use_double = args.deterministic
 
     if args.mode == "server":
         # ── Mode serveur ────────────────────────────────────────────────────
@@ -363,11 +397,13 @@ def main():
                         shapes=req.get("shapes"),
                         shape=req.get("shape"),
                     )
-                    dets = _infer_batch_frames(model, frames, thr, device)
+                    dets = _infer_batch_frames(model, frames, thr, device,
+                                              use_double=use_double)
                 elif "frame_b64" in req:
                     raw   = base64.b64decode(req["frame_b64"])
                     frame = np.frombuffer(raw, dtype=np.uint8).reshape(req["shape"])
-                    dets  = _infer_one_frame(model, frame, thr, device)
+                    dets  = _infer_one_frame(model, frame, thr, device,
+                                            use_double=use_double)
                 # Legacy file-path protocol (backward compat)
                 elif "images" in req:
                     dets = _infer_batch(model, req["images"], thr, device)
@@ -381,7 +417,10 @@ def main():
         # ── Mode one-shot (legacy) ───────────────────────────────────────────
         if not args.image or not args.out:
             sys.exit("--image et --out requis en mode 'image'")
-        dets = _infer_one(model, args.image, args.score_thr, device)
+        dets = _infer_one_frame(model,
+                                cv2.imread(args.image),
+                                args.score_thr, device,
+                                use_double=use_double)
         Path(args.out).write_text(json.dumps(dets, indent=2), encoding="utf-8")
         print(f"[rtmdet_runner] {len(dets)} detection(s) saved -> {args.out}")
 
