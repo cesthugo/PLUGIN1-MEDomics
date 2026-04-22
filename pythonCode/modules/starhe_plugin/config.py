@@ -31,7 +31,6 @@ for _d in (MODELS_DIR, TEMP_DIR):
 # ── Modèles STARHE (artefacts locaux — autonomes, sans dépendance externe) ────
 
 # Classification (STARHE-RISK) — C3D PyTorch pur
-STARHE_RISK_CONFIG     = os.path.join(MODELS_DIR, "c3d_starhe.py")
 STARHE_RISK_CHECKPOINT = os.path.join(MODELS_DIR, "best_acc_mean_cls_f1_epoch_14.pth")
 
 # Détection (STARHE-DETECT) — modèle actif : "rtmdet" | "dino"
