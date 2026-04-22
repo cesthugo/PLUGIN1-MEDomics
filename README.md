@@ -265,10 +265,11 @@ Steps in order:
 
 1. **DICOM Loading** — `load_dicom()` with `pydicom force=True` (supports files without extension).
 2. **Anonymization** — mode `"hash"` (truncated SHA-256) or `"remove"`. The 16 sensitive DICOM tags are defined in `config.DICOM_SENSITIVE_TAGS`. Anonymization is reversible on the UI side (original values are saved in memory before anonymization).
-3. **Frame Extraction** — `extract_frames()` returns `(T, H, W)` or `(T, H, W, 3)` in `uint8`.
+3. **Frame Extraction** — `extract_frames()` returns `(T, H, W)` or `(T, H, W, 3)` in `uint8`.  
+   At this point, the **RTMDet subprocess is launched in a background thread** so its model loading (~4 s) overlaps with the next two steps.
 4. **prepUS Preprocessing** — see dedicated section below.
 5. **STARHE-RISK** — C3D inference on the full clip.
-6. **STARHE-DETECT** — RTMDet frame-by-frame inference (with temporal subsampling).
+6. **STARHE-DETECT** — RTMDet frame-by-frame inference (with temporal subsampling). The subprocess is already warm by the time steps 4–5 finish.
 7. **MongoDB Save** — upsert on `file_path`.
 
 ---
@@ -399,16 +400,18 @@ starhe_detect.py (main process)
 
 ### Adaptive hardware detection
 
-After loading the model, the runner reports available memory in the READY signal:
+After loading the model, the runner measures available memory **in the subprocess** (after the model is loaded) and reports it in the READY signal:
 
 ```
 # NVIDIA GPU (CUDA)
 [rtmdet_server] READY {"device": "cuda", "vram_free_mb": 5800.1, "vram_total_mb": 8192.0}
-# Apple Silicon (MPS)
-[rtmdet_server] READY {"device": "mps", "unified_mem_total_mb": 24576.0}
-# CPU only
-[rtmdet_server] READY {"device": "cpu"}
+# Apple Silicon (MPS) — free RAM measured after model load
+[rtmdet_server] READY {"device": "mps", "ram_free_mb": 14336.0}
+# CPU only — free RAM measured after model load
+[rtmdet_server] READY {"device": "cpu", "ram_free_mb": 6144.0}
 ```
+
+Measuring in the subprocess (after model load) is more accurate than measuring in the parent process — the model's ~450 MB footprint is already accounted for.
 
 Device selection in the runner:
 
@@ -428,20 +431,22 @@ else:
 _FRAME_COST_MB = 50   # estimated memory cost per 640×640 frame
 _MAX_BATCH_GPU = 32   # NVIDIA GPU cap
 _MAX_BATCH_MPS = 16   # Apple Silicon cap (GPU+CPU share the same pool)
-_MAX_BATCH_CPU = 4    # CPU cap
+_MAX_BATCH_CPU = 16   # CPU cap — RAM is the only limit
 _GPU_SAFETY    = 0.80  # fraction of free VRAM used
 _MPS_SAFETY    = 0.30  # conservative: unified memory shared between GPU and CPU
-_CPU_SAFETY    = 0.20  # only 20 % of free RAM
+_CPU_SAFETY    = 0.35  # 35 % of free RAM (eval() mode, no gradient → lower pressure)
 
-def compute_optimal_batch_size(device, vram_free_mb=None):
+def compute_optimal_batch_size(device, vram_free_mb=None, ram_free_mb=None):
+    # ram_free_mb: measured in the subprocess after model load (preferred)
     if device == "cuda":
         usable = vram_free_mb * _GPU_SAFETY       # e.g. 5800 × 0.80 = 4640 MB
         batch  = min(int(usable / _FRAME_COST_MB), _MAX_BATCH_GPU)  # → capped 32
     elif device == "mps":
-        total_ram = get_free_ram_mb() * 2         # approximate total unified memory
-        batch     = min(int(total_ram * _MPS_SAFETY / _FRAME_COST_MB), _MAX_BATCH_MPS)
+        ram_free = ram_free_mb or get_free_ram_mb()
+        batch    = min(int(ram_free * _MPS_SAFETY / _FRAME_COST_MB), _MAX_BATCH_MPS)
     else:                                          # cpu
-        batch = min(int(get_free_ram_mb() * _CPU_SAFETY / _FRAME_COST_MB), _MAX_BATCH_CPU)
+        ram_free = ram_free_mb or get_free_ram_mb()
+        batch    = min(int(ram_free * _CPU_SAFETY / _FRAME_COST_MB), _MAX_BATCH_CPU)
     return max(1, batch)
 ```
 
@@ -450,9 +455,11 @@ Typical results on common hardware:
 | Hardware | device | batch_size |
 |---|---|---|
 | NVIDIA RTX 3080 (10 GB) | `cuda` | 32 (capped) |
-| Apple M5 Pro (24 GB unified) | `mps` | ~14 |
-| Apple M5 (16 GB unified) | `mps` | ~9 |
-| CPU only (16 GB free RAM) | `cpu` | 4 (capped) |
+| Apple M5 Pro (24 GB unified) | `mps` | 16 (capped) |
+| Apple M5 (16 GB unified) | `mps` | 16 (capped) |
+| CPU only (16 GB RAM, ~14 GB free after model) | `cpu` | 16 (capped) |
+
+> The `batch_size` is computed from free memory measured **after model loading** in the subprocess, making it accurate regardless of other processes running on the machine.
 
 The result is stored in `detect_model.batch_size` and used directly by the pipeline.
 

@@ -39,7 +39,7 @@
   - [x] `--mode server` mode: stdin/stdout JSON loop, `READY` signal, `__EXIT__`
   - [x] Batch protocol: `{"images": [...]}` → `[[dets], ...]`
   - [x] Python 3.13 patches: mmcv._ext stubs, NMSop, inspect.getmodule
-- [x] **`config.py` thresholds**: `DETECT_SCORE_THRESHOLD=0.70`, `DETECT_EVERY_N=4`, `DETECT_BATCH_SIZE=4`
+- [x] **`config.py` thresholds**: `DETECT_SCORE_THRESHOLD=0.70`, `DETECT_EVERY_N=4`, `DETECT_BATCH_SIZE="auto"`
 
 ### 🗄 Database Module (`db/`)
 - [x] **`mongo_client.py`** — MongoDB CRUD: `save_result` (upsert), `find_by_file`, `get_result`, `list_results`, `delete_result`
@@ -81,6 +81,17 @@
 - [x] **MongoDB cache per mode** — Composite key `(file_path, analysis_mode)` instead of `file_path` alone; `find_by_file(path, analysis_mode=...)` filters by mode; a file can have distinct results per mode
 - [x] **Tab save/restore** — `_capture_tab_state()` / `_restore_tab_state()` include `detections_by_mode` and `results_by_mode`
 - [x] **macOS file selector compatibility** — Removed `filetypes` filter on Darwin (extensionless DICOM files invisible otherwise)
+
+### ⚡ Performance Optimization (April 22, 2026)
+- [x] **Adaptive `DETECT_BATCH_SIZE` end-to-end** — three-part fix:
+  - `_rtmdet_runner.py`: CPU and MPS now send `ram_free_mb` (free RAM measured **after** model loading in the subprocess, ~450 MB model footprint already deducted)
+  - `utils/hardware.py`: `compute_optimal_batch_size(device, vram_free_mb, ram_free_mb)` uses the subprocess-measured value; `_MAX_BATCH_CPU` raised 4→16, `_CPU_SAFETY` raised 0.20→0.35 — on a 16 GB machine with 14 GB free after load this yields batch=16 instead of 4
+  - `starhe_detect.py`: passes `ram_free_mb=hw_info.get("ram_free_mb")` to the function and logs `ram_free=X MB` in the READY message
+- [x] **RTMDet subprocess warmup in `pipeline.py`** — the subprocess is launched in a daemon thread immediately after frame extraction (step 3); it loads the model (~4 s) concurrently with prepUS + STARHE-RISK, so `detect_thread.join()` at step 6 is typically a no-op
+- [x] **MPS device missing in `starhe_risk.py`** — auto-detection now follows `cuda → mps → cpu` instead of `cuda → cpu`; Apple Silicon GPU used when `DETERMINISTIC_INFERENCE=False`
+- [x] **Resize cache in `c3d.py`** — `preprocess_clips` caches `_resize_shortest()` results per frame index; avoids ~3× redundant `F.interpolate` calls when clips overlap (typical with short clips and 10 test clips)
+- [x] **MEAN/STD precomputed in `_rtmdet_runner.py`** — `_MEAN_F32`/`_MEAN_F64` and `_STD_F32`/`_STD_F64` computed once at module load instead of `.to(dtype)` on every frame; fixed trailing whitespace in `_infer_batch_frames`
+- [x] **`predict()` delegates to `predict_batch()` in `starhe_detect.py`** — `predict(frame)` is now `predict_batch([frame])[0]`; removed the duplicate `_predict_server(frame)` method (~25 lines of dead code)
 
 ### 🔗 Go Server
 - [x] **`go_server/main.go`** — Endpoints: GET /health, POST /starhe/analyze (SSE), GET/DELETE /starhe/results
