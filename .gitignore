@@ -24,6 +24,9 @@ dist/
 build/
 .pytest_cache/
 
+# ── Build artifacts de prepUS (généré par pip install / python setup.py build) ─
+third_party/prepUS/build/
+
 # ── IDE & OS ───────────────────────────────────────────────────────────────────
 .vscode/settings.json
 .idea/
