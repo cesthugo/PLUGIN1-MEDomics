@@ -15,12 +15,13 @@ _FRAME_COST_MB = 50
 # Hard caps
 _MAX_BATCH_GPU = 32
 _MAX_BATCH_MPS = 16   # Apple Silicon: GPU shares RAM, be conservative
-_MAX_BATCH_CPU = 4
+_MAX_BATCH_CPU = 16   # CPU: RAM is the only limit, 16 is safe on ≥8 GB machines
 
 # Fraction of free memory actually used (safety margin)
 _GPU_SAFETY  = 0.80
 _MPS_SAFETY  = 0.30   # unified memory: GPU + CPU share the same pool
-_CPU_SAFETY  = 0.20   # conservative: only 20 % of free RAM
+_CPU_SAFETY  = 0.35   # 35 % of free RAM — large batches don't affect per-frame
+                       # results (model is eval(), BatchNorm uses running stats)
 
 
 def get_free_ram_mb() -> float:
@@ -64,6 +65,7 @@ def get_free_ram_mb() -> float:
 def compute_optimal_batch_size(
     device: str = "cpu",
     vram_free_mb: float | None = None,
+    ram_free_mb: float | None = None,
 ) -> int:
     """
     Compute the optimal RTMDet batch size from available memory.
@@ -75,6 +77,10 @@ def compute_optimal_batch_size(
     vram_free_mb : float | None
         Free VRAM in MB **after model loading** (CUDA only).
         If *None* and *device* is ``"cuda"``, attempts auto-detection.
+    ram_free_mb : float | None
+        Free system RAM in MB **after model loading** (MPS and CPU).
+        Measured in the subprocess so the model footprint is already accounted for.
+        If *None*, falls back to measuring locally.
 
     Returns
     -------
@@ -96,13 +102,14 @@ def compute_optimal_batch_size(
             return min(batch, _MAX_BATCH_GPU)
 
     if device == "mps":
-        total_ram = get_free_ram_mb() * 2  # get_free_ram_mb returns ~50% of total
-        usable    = total_ram * _MPS_SAFETY
-        batch     = max(1, int(usable / _FRAME_COST_MB))
+        # Use free RAM reported by the subprocess (after model load) when available.
+        ram_free = ram_free_mb if ram_free_mb is not None else get_free_ram_mb()
+        usable   = ram_free * _MPS_SAFETY
+        batch    = max(1, int(usable / _FRAME_COST_MB))
         return min(batch, _MAX_BATCH_MPS)
 
     # CPU fallback
-    ram_free = get_free_ram_mb()
+    ram_free = ram_free_mb if ram_free_mb is not None else get_free_ram_mb()
     usable   = ram_free * _CPU_SAFETY
     batch    = max(1, int(usable / _FRAME_COST_MB))
     return min(batch, _MAX_BATCH_CPU)

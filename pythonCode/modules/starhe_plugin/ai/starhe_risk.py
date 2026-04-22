@@ -42,8 +42,12 @@ class STARHERiskModel:
             self.device = "cpu"
         elif INFERENCE_DEVICE != "auto":
             self.device = INFERENCE_DEVICE
+        elif torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
         else:
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = "cpu"
         self._use_double = DETERMINISTIC_INFERENCE
         self._model = None
         self._load()

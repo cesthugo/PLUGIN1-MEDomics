@@ -187,18 +187,20 @@ class STARHEDetectModel:
             self.batch_size = compute_optimal_batch_size(
                 device=hw_info.get("device", "cpu"),
                 vram_free_mb=hw_info.get("vram_free_mb"),
+                ram_free_mb=hw_info.get("ram_free_mb"),
             )
         else:
             self.batch_size = int(DETECT_BATCH_SIZE)
 
         device_str = hw_info.get("device", "?")
-        vram_str = (
-            f", vram_free={hw_info['vram_free_mb']:.0f} MB"
-            if "vram_free_mb" in hw_info else ""
-        )
+        mem_str = ""
+        if "vram_free_mb" in hw_info:
+            mem_str = f", vram_free={hw_info['vram_free_mb']:.0f} MB"
+        elif "ram_free_mb" in hw_info:
+            mem_str = f", ram_free={hw_info['ram_free_mb']:.0f} MB"
         go_print("info",
                  f"STARHE-DETECT : serveur prêt — batch_size={self.batch_size}"
-                 f", device={device_str}{vram_str}")
+                 f", device={device_str}{mem_str}")
 
     def close(self):
         """Ferme proprement le subprocess serveur."""
@@ -236,31 +238,7 @@ class STARHEDetectModel:
         frame     : (H, W, 3) uint8 RGB
         score_thr : seuil de confiance minimum
         """
-        frame = np.ascontiguousarray(frame)
-        if self._backend == "rtmdet" and self._proc is not None:
-            return self._predict_server(frame, score_thr)
-        else:
-            return self._predict_oneshot(frame, score_thr)
-
-    def _predict_server(self, frame: np.ndarray, score_thr: float) -> list:
-        """Envoie la frame au serveur via stdin (base64) et récupère le résultat."""
-        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        b64 = base64.b64encode(bgr.tobytes()).decode("ascii")
-        req = json.dumps({"frame_b64": b64, "shape": list(bgr.shape),
-                          "score_thr": score_thr})
-        try:
-            self._proc.stdin.write(req + "\n")
-            self._proc.stdin.flush()
-            resp_line = self._proc.stdout.readline().strip()
-            if not resp_line:
-                raise RuntimeError("Le serveur RTMDet n'a pas répondu.")
-            resp = json.loads(resp_line)
-            if isinstance(resp, dict) and "error" in resp:
-                raise RuntimeError(f"Erreur runner : {resp['error']}")
-            return resp
-        except Exception as exc:
-            go_print("error", f"DETECT serveur : {exc} — fallback one-shot.")
-            return self._predict_oneshot(frame, score_thr)
+        return self.predict_batch([frame], score_thr=score_thr)[0]
 
     def predict_batch(self, frames: list[np.ndarray],
                       score_thr: float = DETECT_SCORE_THRESHOLD) -> list[list]:

@@ -13,6 +13,7 @@ Enchaîne toutes les étapes :
 Point d'entrée appelé par le blueprint Go.
 """
 
+import threading
 import numpy as np
 
 from starhe_plugin.dicom.reader        import load_dicom, extract_frames, frame_to_uint8
@@ -66,6 +67,23 @@ def run_pipeline(dicom_path: str,
     else:
         frames_rgb = frames_norm   # (T, H, W, 3)
 
+    # ── Préchauffage DETECT en arrière-plan ───────────────────────────────────
+    # Le subprocess RTMDet charge le modèle (~3-5 s). On le démarre dès maintenant
+    # pour qu'il soit prêt quand on en a besoin, pendant que prepUS + RISK tournent.
+    _detect_model_box: list = []
+    _detect_exc_box:   list = []
+
+    def _warm_detect():
+        try:
+            _detect_model_box.append(STARHEDetectModel())
+        except Exception as exc:
+            _detect_exc_box.append(exc)
+
+    detect_thread: threading.Thread | None = None
+    if run_detection:
+        detect_thread = threading.Thread(target=_warm_detect, daemon=True)
+        detect_thread.start()
+
     # ── 4. Prétraitement prepUS ───────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS,
                 "Prétraitement prepUS (removeLayout + backscan)…")
@@ -93,12 +111,19 @@ def run_pipeline(dicom_path: str,
     # ── 6. STARHE-DETECT (échantillonnage temporel) ──────────────────────────
     detections: list[dict] = []
     if run_detection:
-        n_frames  = len(frames_processed)
-        stride    = max(1, DETECT_EVERY_N)
+        n_frames   = len(frames_processed)
+        stride     = max(1, DETECT_EVERY_N)
         n_analysed = len(range(0, n_frames, stride))
         go_progress(step := step + 1, TOTAL_STEPS,
                     f"Inférence STARHE-DETECT ({n_analysed}/{n_frames} frames, stride={stride})…")
-        with STARHEDetectModel() as detect_model:
+
+        # Attendre que le subprocess soit prêt (il a démarré pendant prepUS + RISK)
+        detect_thread.join()
+        if _detect_exc_box:
+            raise _detect_exc_box[0]
+        detect_model = _detect_model_box[0]
+
+        with detect_model:
             sampled = list(range(0, n_frames, stride))
             bs = detect_model.batch_size
             go_print("info",

@@ -151,8 +151,11 @@ _InstData.__getitem__ = _mps_safe_getitem
 # ─── Constantes prétraitement ─────────────────────────────────────────────────
 _INPUT_SIZE = 640
 _PAD_VAL    = 114.0
-_MEAN = torch.tensor([103.53, 116.28, 123.675]).view(3, 1, 1)
-_STD  = torch.tensor([ 57.375,  57.12,  58.395]).view(3, 1, 1)
+# Précalcul des variants float32 / float64 pour _preprocess (évite .to() à chaque appel)
+_MEAN_F32 = torch.tensor([103.53, 116.28, 123.675]).view(3, 1, 1)          # float32
+_STD_F32  = torch.tensor([ 57.375,  57.12,  58.395]).view(3, 1, 1)          # float32
+_MEAN_F64 = _MEAN_F32.double()                                               # float64
+_STD_F64  = _STD_F32.double()                                                # float64
 
 
 def _replace_syncbn(d):
@@ -170,12 +173,13 @@ def _preprocess(frame: np.ndarray, use_double: bool = False):
     orig_H, orig_W = frame.shape[:2]
     scale = min(_INPUT_SIZE / orig_H, _INPUT_SIZE / orig_W)
     new_H, new_W = int(round(orig_H * scale)), int(round(orig_W * scale))
-    np_dtype  = np.float64    if use_double else np.float32
-    tch_dtype = torch.float64 if use_double else torch.float32
+    np_dtype = np.float64 if use_double else np.float32
+    mean      = _MEAN_F64 if use_double else _MEAN_F32
+    std       = _STD_F64  if use_double else _STD_F32
     # F.interpolate : noyau C++ identique x86/ARM.
     # use_double=True : frame converti en float64 AVANT l'interpolation,
     # éliminant les 1-2 ULP de différence AVX2/NEON float32 qui survivent
-    # jusqu'au score même après le cast tardi.
+    # jusqu'au score même après le cast tardif.
     t = torch.from_numpy(
         np.ascontiguousarray(frame, dtype=np_dtype)
     ).permute(2, 0, 1).unsqueeze(0)                    # (1, 3, H, W)
@@ -184,7 +188,7 @@ def _preprocess(frame: np.ndarray, use_double: bool = False):
     canvas = np.full((_INPUT_SIZE, _INPUT_SIZE, 3), _PAD_VAL, dtype=np_dtype)
     canvas[:new_H, :new_W] = resized
     tensor = torch.from_numpy(np.ascontiguousarray(canvas.transpose(2, 0, 1)))
-    tensor = (tensor - _MEAN.to(tch_dtype)) / _STD.to(tch_dtype)
+    tensor = (tensor - mean) / std
     tensor = tensor.unsqueeze(0)
     meta = {
         "img_shape":         (_INPUT_SIZE, _INPUT_SIZE),
@@ -265,7 +269,7 @@ def _infer_batch_frames(model, frames: list, score_thr: float, device: str,
     with torch.no_grad():
         feats      = model.backbone(batch_tensor)
         neck_feats = model.neck(feats)
-        head_outs  = model.bbox_head(neck_feats) 
+        head_outs  = model.bbox_head(neck_feats)
         results    = model.bbox_head.predict_by_feat(
             *head_outs, batch_img_metas=metas, rescale=True
         )
@@ -379,11 +383,13 @@ def main():
                 hw_info["vram_total_mb"] = round(total / (1024 ** 2), 1)
             except Exception:
                 pass
-        elif device == "mps":
+        elif device in ("mps", "cpu"):
+            # Mesure la RAM libre APRÈS chargement du modèle dans ce subprocess.
+            # Beaucoup plus précis que de mesurer dans le processus parent.
             try:
                 import psutil
-                hw_info["unified_mem_total_mb"] = round(
-                    psutil.virtual_memory().total / (1024 ** 2), 1
+                hw_info["ram_free_mb"] = round(
+                    psutil.virtual_memory().available / (1024 ** 2), 1
                 )
             except Exception:
                 pass

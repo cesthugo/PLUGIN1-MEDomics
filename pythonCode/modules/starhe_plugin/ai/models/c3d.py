@@ -231,20 +231,29 @@ def preprocess_clips(frames: np.ndarray, use_double: bool = False) -> torch.Tens
         Tensor (NUM_CLIPS, 3, CLIP_LEN, CROP_SIZE, CROP_SIZE) float32 ou float64
     """
     np_dtype = np.float64 if use_double else np.float32
-    mean     = _MEAN.astype(np_dtype)   # cast mean dans le bon type
+    mean     = _MEAN.astype(np_dtype)
     T        = len(frames)
     clip_idx = _sample_clips(T)         # (NUM_CLIPS, CLIP_LEN)
-    result   = []
 
+    # Cache des frames redimensionnées : on évite de re-calculer le même
+    # _resize_shortest pour les indices qui apparaissent dans plusieurs clips
+    # (fréquent quand la vidéo est courte et que les clips se chevauchent).
+    _resize_cache: dict[int, np.ndarray] = {}
+
+    def _get_resized(idx: int) -> np.ndarray:
+        if idx not in _resize_cache:
+            _resize_cache[idx] = _resize_shortest(frames[idx], use_double=use_double)
+        return _resize_cache[idx]
+
+    result = []
     for ci in clip_idx:
         clip = []
         for idx in ci:
-            f = _resize_shortest(frames[int(idx)], use_double=use_double)
+            f = _get_resized(int(idx))
             h, w = f.shape[:2]
             y = (h - CROP_SIZE) // 2
             x = (w - CROP_SIZE) // 2
-            f = f[y:y + CROP_SIZE, x:x + CROP_SIZE, :]  # (112, 112, 3)
-            clip.append(f)
+            clip.append(f[y:y + CROP_SIZE, x:x + CROP_SIZE, :])  # (112, 112, 3)
 
         clip_arr = np.stack(clip).astype(np_dtype) - mean  # (16, 112, 112, 3)
         clip_arr = clip_arr.transpose(3, 0, 1, 2)          # (3, 16, 112, 112)
