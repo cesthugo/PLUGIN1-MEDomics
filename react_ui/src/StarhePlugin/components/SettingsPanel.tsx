@@ -196,7 +196,22 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
 
         {/* ───────────────────────────────────────────────────── */}
         <div style={{ borderTop: '1px solid #2a3245', margin: '4px 0' }} />
+        {/* Affichage de la console */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={settings.showConsole}
+            onChange={e => onUpdate({ showConsole: e.target.checked })}
+            style={{ accentColor: '#1565C0', width: 14, height: 14, flexShrink: 0 }}
+          />
+          <div>
+            <div style={{ color: SBAR_FG, fontSize: 12, fontWeight: 700 }}>Afficher la console</div>
+            <div style={{ color: SBAR_MUTED, fontSize: 10, marginTop: 1 }}>Journal des événements en bas de l'interface</div>
+          </div>
+        </label>
 
+        {/* ───────────────────────────────────────────────────── */}
+        <div style={{ borderTop: '1px solid #2a3245', margin: '4px 0' }} />
         {/* Mode d’analyse */}
         <SettingRow label="Modèles IA lancés lors de l’analyse">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

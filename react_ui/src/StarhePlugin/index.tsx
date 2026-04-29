@@ -37,7 +37,8 @@ import { ConsolePanel }   from './components/ConsolePanel';
 import { AdjustDialog }   from './components/AdjustDialog';
 import { ContextMenu, buildCanvasContextMenu } from './components/ContextMenu';
 import { LiveModal }      from './components/LiveModal';
-import { SettingsPanel }  from './components/SettingsPanel';
+import { SettingsPanel }       from './components/SettingsPanel';
+import { DetectionGallery }    from './components/DetectionGallery';
 
 // ── ID auto-incrémenté ────────────────────────────────────────────────────────
 let _nextTabId = 1;
@@ -727,9 +728,27 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             />
           </div>
 
-          {/* Console */}
-          <ConsolePanel entries={logs} darkMode={darkMode} />
+          {/* Console (affichée seulement si activée dans les réglages) */}
+          {displaySettings.showConsole && (
+            <ConsolePanel entries={logs} darkMode={darkMode} />
+          )}
         </div>
+
+        {/* ── Panel galerie détections (droit) ──────────────────────────── */}
+        {displaySettings.analysisMode !== 'risk_only' && activeTab && (
+          <>
+            <div style={{ width: 1, background: '#0a0a14', flexShrink: 0 }} />
+            <DetectionGallery
+              framesB64={activeTab.data?.framesB64 ?? []}
+              detections={activeTab.detectionsBy.original ?? []}
+              imgW={activeTab.data?.cols ?? 512}
+              imgH={activeTab.data?.rows ?? 512}
+              onGotoFrame={onGotoFrame}
+              sidebarBg={displaySettings.sidebarBg}
+              textColor={displaySettings.textColor}
+            />
+          </>
+        )}
       </div>
 
       {/* ── Dialogues flottants ────────────────────────────────────────────── */}

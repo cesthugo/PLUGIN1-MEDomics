@@ -12,7 +12,7 @@ import type { TabState, LogLevel, Patient, ViewMode } from '../types';
 import type { AnalysisStatus } from '../hooks/usePipelineSSE';
 import {
   SIDEBAR_BG, SIDEBAR_SEC, BLUE, SBAR_FG, SBAR_MUTED,
-  WARN_FG, SUCCESS_FG, DANGER_FG, RISK_LOW_FG, RISK_HIGH_FG,
+  SUCCESS_FG, DANGER_FG, RISK_LOW_FG, RISK_HIGH_FG,
 } from '../colors';
 
 // ── Helpers de style ──────────────────────────────────────────────────────────
@@ -54,13 +54,6 @@ const S: Record<string, React.CSSProperties> = {
     padding: '4px 10px', margin: '2px 10px 4px',
     borderRadius: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
     maxHeight: 180, overflowY: 'auto',
-  },
-  monoTumor: {
-    fontFamily: "'Consolas', monospace", fontSize: 11,
-    background: '#1a0a0a', color: WARN_FG,
-    padding: '4px 10px', margin: '0 10px 12px',
-    borderRadius: 4, whiteSpace: 'pre-wrap',
-    maxHeight: 80, overflowY: 'auto',
   },
 };
 
@@ -214,8 +207,6 @@ export function Sidebar({
   // Résultats IA
   const mode        = tab ? (tab.detectionsBy.original ? 'original' : null) : null;
   const result      = mode ? tab?.resultsBy[mode] : null;
-  const detections  = mode ? (tab?.detectionsBy[mode] ?? []) : [];
-  const detFrameIds = detections.map((d, i) => ({ i, det: d })).filter(x => x.det.length > 0).map(x => x.i);
 
   // Métadonnées
   const keptMeta       = data?.keptMetadata ?? [];
@@ -384,30 +375,6 @@ export function Sidebar({
             value={result?.detText ?? (analysisStatus === 'running' ? '⏳ analyse…' : '—')}
             fg={result?.detFg ?? SBAR_MUTED}
           />
-        )}
-
-        {/* Frames avec tumeur — uniquement si DETECT est actif */}
-        {analysisMode !== 'risk_only' && (
-          <>
-            <div style={{ padding: '4px 14px 1px', fontSize: 11, color: SBAR_MUTED }}>
-              Frames avec tumeur :
-            </div>
-            <div style={S.monoTumor}>
-              {detFrameIds.length === 0
-                ? 'Aucune tumeur détectée'
-                : detFrameIds.map((idx, pos) => (
-                  <React.Fragment key={idx}>
-                    <span
-                      onClick={() => onGotoFrame(idx)}
-                      style={{ color: '#60a5fa', textDecoration: 'underline', cursor: 'pointer' }}
-                    >
-                      {idx + 1}
-                    </span>
-                    {pos < detFrameIds.length - 1 ? '  ' : ''}
-                  </React.Fragment>
-                ))}
-            </div>
-          </>
         )}
 
         {/* MÉTADONNÉES CONSERVÉES */}

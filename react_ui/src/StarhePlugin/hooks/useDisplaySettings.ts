@@ -19,6 +19,8 @@ export interface DisplaySettings {
   mainBg:     string;
   /** Modèles IA à exécuter lors du clic sur "Lancer l'analyse". */
   analysisMode: 'both' | 'risk_only' | 'detect_only';
+  /** Afficher ou masquer la console de log en bas de l'interface. */
+  showConsole: boolean;
 }
 
 // ── Valeurs par défaut (identiques au thème actuel) ───────────────────────────
@@ -30,6 +32,7 @@ export const DISPLAY_DEFAULTS: DisplaySettings = {
   sidebarBg:    '#151521',
   mainBg:       '#f4f6fb',
   analysisMode: 'both',
+  showConsole:  false,
 };
 
 // ── Helpers localStorage ──────────────────────────────────────────────────────
