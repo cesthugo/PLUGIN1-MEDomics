@@ -194,13 +194,6 @@ export function streamAnalysis(
   return () => ctrl.abort();
 }
 
-// ── Résultats MongoDB ─────────────────────────────────────────────────────────
-
-export async function listResults(limit = 50): Promise<unknown[]> {
-  const res = await fetch(`${API_BASE}/starhe/results?limit=${limit}`);
-  return res.json();
-}
-
 // ── Label d'onglet depuis la date DICOM ──────────────────────────────────────
 
 export function makeTabLabel(studyDate: string, fileName: string): string {

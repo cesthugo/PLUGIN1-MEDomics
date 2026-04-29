@@ -24,8 +24,9 @@ import type {
   TabState, Patient, LogEntry, LogLevel, ViewMode, Measure,
 } from './types';
 import {
-  SIDEBAR_BG, MAIN_BG, CARD_BG, CARD_BORDER, CARD_SHADOW,
+  SIDEBAR_BG, SIDEBAR_HOV, MAIN_BG, CARD_BG, CARD_BORDER, CARD_SHADOW,
   BLUE, BLUE_TEXT, SBAR_FG, SBAR_MUTED, BORDER, CANVAS_BG,
+  PTAB_BG, PTAB_ACT_BG, TAB_BG, TAB_ACT_BG,
 } from './colors';
 import { loadDicom, loadDicomFile, deleteCache, makeTabLabel } from './api';
 import { usePipelineSSE } from './hooks/usePipelineSSE';
@@ -84,23 +85,28 @@ export interface StarhePluginProps {
 
 export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: StarhePluginProps) {
   // ── Onglets et patients ────────────────────────────────────────────────────
-  const [tabs,            setTabs]           = useState<TabState[]>([]);
-  const [activeTabIdx,    setActiveTabIdx]   = useState<number>(-1);
-  const [patients,        setPatients]       = useState<Patient[]>([]);
-  const [activePatientIdx, setActivePatientIdx] = useState<number>(-1);
+  const [tabs,             setTabs]            = useState<TabState[]>([]);
+  const [activeTabId,      setActiveTabId]     = useState<number>(-1);
+  const [patients,         setPatients]        = useState<Patient[]>([]);
+  const [activePatientName, setActivePatientName] = useState<string>('');
 
-  const activeTab = activeTabIdx >= 0 && activeTabIdx < tabs.length
-    ? tabs[activeTabIdx] : null;
+  // Ref pour lire l'état courant dans closeTab (lecture synchrone hors updater)
+  const tabsRef     = useRef<TabState[]>(tabs);
+  tabsRef.current   = tabs;
+  const patientsRef = useRef<Patient[]>(patients);
+  patientsRef.current = patients;
+
+  // Dérivés : calculés à chaque render à partir des IDs stables
+  const activeTabIdx = tabs.findIndex(t => t.id === activeTabId);
+  const activeTab    = activeTabIdx >= 0 ? tabs[activeTabIdx] : null;
+  const activePatientIdx = patients.findIndex(p => p.name === activePatientName);
 
   // ── Lecture vidéo ──────────────────────────────────────────────────────────
   const [isPlaying, setIsPlaying] = useState(false);
 
   const handleFrameChange = useCallback((idx: number) => {
-    setTabs(prev => {
-      if (activeTabIdx < 0) return prev;
-      return prev.map((t, i) => i === activeTabIdx ? { ...t, frameIdx: idx } : t);
-    });
-  }, [activeTabIdx]);
+    setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, frameIdx: idx } : t));
+  }, [activeTabId]);
 
   const handleStop = useCallback(() => setIsPlaying(false), []);
 
@@ -125,18 +131,21 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const { status: analysisStatus, progress, startAnalysis, cancelAnalysis, lastResult }
     = usePipelineSSE(addLog);
 
-  // Quand un résultat arrive, l'injecter dans l'onglet actif
+  // Onglet pour lequel l'analyse a été lancée (ID stable, indépendant de l'onglet actif)
+  const [analysisTargetTabId, setAnalysisTargetTabId] = useState<number>(-1);
+
+  // Quand un résultat arrive, l'injecter dans l'onglet *cible* (pas nécessairement l'actif)
   useEffect(() => {
-    if (!lastResult || activeTabIdx < 0) return;
-    setTabs(prev => prev.map((t, i) => {
-      if (i !== activeTabIdx) return t;
+    if (!lastResult || analysisTargetTabId < 0) return;
+    setTabs(prev => prev.map(t => {
+      if (t.id !== analysisTargetTabId) return t;
       return {
         ...t,
         detectionsBy: { ...t.detectionsBy, original: lastResult.detectionsPerFrame },
         resultsBy:    { ...t.resultsBy,    original: lastResult.result },
       };
     }));
-  }, [lastResult, activeTabIdx]);
+  }, [lastResult, analysisTargetTabId]);
 
   // ── Réglages d'affichage (persistés dans localStorage) ────────────────────
   const { settings: displaySettings, updateSettings, resetSettings } = useDisplaySettings();
@@ -210,23 +219,20 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       dicomPath,
       data,
     };
-    setTabs(prev => {
-      const next = [...prev, newTab];
-      setActiveTabIdx(next.length - 1);
-      setPatients(pts => {
-        const existIdx = pts.findIndex(p => p.name === data.patientName);
-        if (existIdx >= 0) {
-          const updated = [...pts];
-          updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
-          setActivePatientIdx(existIdx);
-          return updated;
-        }
-        const newPt = { name: data.patientName, tabIds: [newTab.id] };
-        setActivePatientIdx(pts.length);
-        return [...pts, newPt];
-      });
-      return next;
+    // Functional updaters : chaque appel reçoit le résultat du précédent (React batchs)
+    // → sûr même si plusieurs fichiers chargent simultanément avant le prochain render
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);  // ID stable — pas d'index périmé
+    setPatients(prev => {
+      const existIdx = prev.findIndex(p => p.name === data.patientName);
+      if (existIdx >= 0) {
+        const updated = [...prev];
+        updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
+        return updated;
+      }
+      return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
     });
+    setActivePatientName(data.patientName);
     addLog(`DICOM chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
@@ -289,8 +295,8 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // ── Navigation ────────────────────────────────────────────────────────────
 
   const updateActiveTab = useCallback((updater: (t: TabState) => TabState) => {
-    setTabs(prev => prev.map((t, i) => i === activeTabIdx ? updater(t) : t));
-  }, [activeTabIdx]);
+    setTabs(prev => prev.map(t => t.id === activeTabId ? updater(t) : t));
+  }, [activeTabId]);
 
   const onPrevFrame = useCallback(() => {
     if (!activeTab?.data) return;
@@ -333,6 +339,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     if (!activeTab?.data) return;
     if (analysisStatus === 'running') return;
     const mode = displaySettings.analysisMode;
+    setAnalysisTargetTabId(activeTab.id);  // figer la cible avant le lancement
     startAnalysis({
       dicomPath:    activeTab.dicomPath,
       runRisk:      mode !== 'detect_only',
@@ -438,41 +445,35 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // ── Onglets ────────────────────────────────────────────────────────────────
 
   const switchTab = useCallback((tabId: number) => {
-    const idx = tabs.findIndex(t => t.id === tabId);
-    if (idx < 0) return;
+    if (!tabsRef.current.some(t => t.id === tabId)) return;
     if (isPlaying) setIsPlaying(false);
-    setActiveTabIdx(idx);
-    // Met à jour le patient actif
-    setPatients(pts => {
-      const pIdx = pts.findIndex(p => p.tabIds.includes(tabId));
-      if (pIdx >= 0) setActivePatientIdx(pIdx);
-      return pts;
-    });
-  }, [tabs, isPlaying]);
+    setActiveTabId(tabId);
+    const patient = patientsRef.current.find(p => p.tabIds.includes(tabId));
+    if (patient) setActivePatientName(patient.name);
+  }, [isPlaying]);
 
   const closeTab = useCallback((tabId: number) => {
-    setTabs(prev => {
-      if (prev.length === 1) {
-        setActiveTabIdx(-1);
-        setPatients([]);
-        setActivePatientIdx(-1);
-        setIsPlaying(false);
-        return [];
-      }
-      const idx = prev.findIndex(t => t.id === tabId);
-      const next = prev.filter(t => t.id !== tabId);
-      const newActiveIdx = Math.max(0, Math.min(idx, next.length - 1));
-      setActiveTabIdx(newActiveIdx);
-      setPatients(pts => {
-        const updated = pts.map(p => ({
-          ...p, tabIds: p.tabIds.filter(id => id !== tabId),
-        })).filter(p => p.tabIds.length > 0);
-        const pIdx = updated.findIndex(p => p.tabIds.includes(next[newActiveIdx]?.id));
-        if (pIdx >= 0) setActivePatientIdx(pIdx);
-        return updated;
-      });
-      return next;
-    });
+    const currentTabs = tabsRef.current;
+    // Pas de side effects dans les updaters (évite le double-appel React StrictMode)
+    if (currentTabs.length <= 1) {
+      setTabs([]);
+      setActiveTabId(-1);
+      setPatients([]);
+      setActivePatientName('');
+      setIsPlaying(false);
+      return;
+    }
+    const idx = currentTabs.findIndex(t => t.id === tabId);
+    const next = currentTabs.filter(t => t.id !== tabId);
+    const newActiveTab = next[Math.max(0, Math.min(idx, next.length - 1))];
+    setTabs(next);
+    setActiveTabId(newActiveTab?.id ?? -1);
+    const updatedPatients = patientsRef.current
+      .map(p => ({ ...p, tabIds: p.tabIds.filter(id => id !== tabId) }))
+      .filter(p => p.tabIds.length > 0);
+    setPatients(updatedPatients);
+    const newPatient = updatedPatients.find(p => p.tabIds.includes(newActiveTab?.id ?? -1));
+    if (newPatient) setActivePatientName(newPatient.name);
   }, []);
 
   // ── Raccourcis clavier ─────────────────────────────────────────────────────
@@ -563,9 +564,9 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
 
   // ── Patient actif : tabs associés ──────────────────────────────────────────
   const activePatient = activePatientIdx >= 0 ? patients[activePatientIdx] : null;
-  const patientTabs   = activePatient
-    ? activePatient.tabIds.map(id => tabs.find(t => t.id === id)).filter(Boolean) as TabState[]
-    : [];
+  // patientTabs : onglets fichiers du patient actif, dans l'ordre des tabs (pas tabIds)
+  const activePatientTabIds = new Set(activePatient?.tabIds ?? []);
+  const patientTabs = tabs.filter(t => activePatientTabIds.has(t.id));
 
   // ── Rendu ─────────────────────────────────────────────────────────────────
 
@@ -606,7 +607,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             onClick={() => setShowSettings(v => !v)}
             title="Réglages d'affichage"
             style={{
-              background: showSettings ? '#252438' : 'none',
+              background: showSettings ? SIDEBAR_HOV : 'none',
               border: '1px solid ' + (showSettings ? '#3a4860' : 'transparent'),
               borderRadius: 5,
               cursor: 'pointer',
@@ -651,9 +652,6 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           onOpenLive={() => setShowLive(true)}
           onGotoFrame={onGotoFrame}
           onToggleTheme={() => setDarkMode(d => !d)}
-          onOpenContrast={() => setShowContrast(v => !v)}
-          onOpenBrightness={() => setShowBrightness(v => !v)}
-          onToggleViewMode={onToggleViewMode}
         />
 
         {/* Séparateur 1 px */}
@@ -713,9 +711,9 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               patients={patients}
               activePatientIdx={activePatientIdx}
               onSwitchPatient={patIdx => {
-                setActivePatientIdx(patIdx);
                 const firstTabId = patients[patIdx]?.tabIds[0];
-                if (firstTabId) switchTab(firstTabId);
+                if (firstTabId !== undefined) switchTab(firstTabId);
+                else setActivePatientName(patients[patIdx]?.name ?? '');
               }}
             />
 
@@ -779,7 +777,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         <AdjustDialog
           title="Luminosité"
           initial={activeTab?.brightness ?? 0}
-          min={-100} max={100} neutral={0}
+          min={-50} max={100} neutral={0}
           onClose={() => setShowBrightness(false)}
           onChange={v => updateActiveTab(t => ({ ...t, brightness: v }))}
         />
@@ -839,7 +837,7 @@ function PatientTabBar({
   return (
     <div
       style={{
-        background: '#10141e', height: 30, minHeight: 30,
+        background: PTAB_BG, height: 30, minHeight: 30,
         display: 'flex', alignItems: 'stretch', overflowX: 'auto',
         flexShrink: 0,
       }}
@@ -865,7 +863,7 @@ function PatientTab({ name, active, onClick }: { name: string; active: boolean; 
       onClick={onClick}
       style={{
         cursor: 'pointer',
-        background: active ? '#1a2238' : '#10141e',
+        background: active ? PTAB_ACT_BG : PTAB_BG,
         color: active ? '#e5e7eb' : '#6b7280',
         fontSize: 11, fontWeight: 700,
         padding: '0 12px',
@@ -897,7 +895,7 @@ function FileTabBar({
   return (
     <div
       style={{
-        background: '#0c1018', height: 32, minHeight: 32,
+        background: TAB_BG, height: 32, minHeight: 32,
         display: 'flex', alignItems: 'stretch',
         borderTop: '1px solid #0a0a14',
         overflowX: 'auto', flexShrink: 0,
@@ -938,7 +936,7 @@ function FileTab({
     <div
       style={{
         cursor: 'pointer',
-        background: active ? '#131c2e' : '#0c1018',
+        background: active ? TAB_ACT_BG : TAB_BG,
         color: active ? '#e5e7eb' : '#6b7280',
         fontSize: 11,
         display: 'flex', alignItems: 'center', gap: 2,

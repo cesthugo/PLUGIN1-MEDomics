@@ -14,11 +14,8 @@ import type { Detection, LogLevel } from '../types';
 import {
   SIDEBAR_BG, MAIN_BG, CANVAS_BG, BLUE, BLUE_TEXT,
   SBAR_FG, SBAR_MUTED, CARD_BG, CARD_BORDER, CARD_SHADOW,
-  RISK_LOW_FG, RISK_HIGH_FG, RISK_MED_FG, WARN_FG, SUCCESS_FG, DANGER_FG,
+  RISK_LOW_FG, RISK_HIGH_FG, WARN_FG, SUCCESS_FG, DANGER_FG,
 } from '../colors';
-
-// Colors that live_tab.py defines but colors.ts doesn't yet
-const RISK_MED = '#fbbf24';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

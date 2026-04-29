@@ -3,19 +3,20 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.3.0` — Last updated: April 20, 2026*
+*Version `0.4.0` — Last updated: April 29, 2026*
 
 ---
 
 ## Overview
 
-The plug-in analyzes abdominal ultrasound DICOM cine-clips to screen for hepatocellular carcinoma (HCC). It operates in **three modes**:
+The plug-in analyzes abdominal ultrasound DICOM cine-clips to screen for hepatocellular carcinoma (HCC). It operates in **four modes**:
 
 | Mode | Description |
 |---|---|
-| **Standalone** | Standalone Go server (`go_server/`) + Tkinter prototype. Go launches `pipeline.py` as a subprocess and streams results via SSE. |
+| **React UI (standalone)** | React 18 / TypeScript frontend (`react_ui/`) built with Vite, served by a standalone Go server (`go_server/`). Full DICOM viewer, AI pipeline, multi-tab, live analysis. **Current primary UI.** |
+| **Tkinter prototype** | Legacy Tkinter UI (`ui/prototype_tkinter.py`). Used for early validation before porting to React. Launched via `run_tkinter.sh`. |
 | **MEDomics Integrated** | Integrates into the MEDomics platform as a *Standard Plugin*. An adapter (`run_starhe.py`) translates the `GO_PRINT|…` protocol to the MEDomics protocol (`progress*_*` / `response-ready*_*`). A Go blueprint (`starhe_blueprint.go`) registers routes in the MEDomics server. |
-| **Live Streaming** | Real-time frame-by-frame inference on a live ultrasound feed. The `LivePipeline` (`ai/live_pipeline.py`) processes incoming frames in a background thread. Three input sources are supported: C-STORE DICOM (pynetdicom SCP), local folder watcher, and USB HDMI capture card. UI via `ui/live_tab.py`. |
+| **Live Streaming** | Real-time frame-by-frame inference on a live ultrasound feed. The `LivePipeline` (`ai/live_pipeline.py`) processes incoming frames in a background thread. Three input sources: C-STORE DICOM (pynetdicom SCP), local folder watcher, USB HDMI capture card. Live modal available in the React UI. |
 
 Two AI models are used:
 
@@ -32,8 +33,8 @@ Two AI models are used:
 |---|---|---|
 | Python | 3.13 | tkinter included; 3.14 incompatible (tkinter broken). On macOS Homebrew: `brew install python@3.13 python-tk@3.13` |
 | MongoDB | 4.x+ | Local service on port **54017** (non-standard) |
-| Go | 1.21+ | Required only for the REST server |
-| Node.js | 18+ | Required only for the MEDomics frontend |
+| Go | 1.21+ | Required for the REST/SSE server |
+| Node.js | 18+ | Required for the React UI (`react_ui/`) |
 | CUDA (optional) | 11.8+ | GPU inference; CPU used if absent |
 
 > **AI model weights**: the `.pth` checkpoint files (~200 MB each) are **not included** in the repository. They are downloaded automatically by `run_tkinter.sh` / `run_tkinter.ps1` from the [GitHub Release STARHE_MODELS](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/STARHE_MODELS). To download them manually: `python download_models.py`.
@@ -64,7 +65,27 @@ Two AI models are used:
 
 > **All commands below assume you are in the project root directory** (`PLUGIN1-MEDomics/`).
 
-### 1. Launch the Tkinter prototype (development)
+### 1. Launch the React UI (primary interface)
+
+```bash
+# 1. Start the Go server (builds the binary, uses absolute paths from os.Executable)
+cd go_server
+go build -o go_server . && ./go_server
+# Listening on http://localhost:8080
+
+# 2. In a separate terminal: start the Vite dev server
+cd react_ui
+npm install   # first time only
+npm run dev
+# Open http://localhost:5173
+```
+
+> **Production build**: `cd react_ui && npm run build` — outputs to `react_ui/dist/`.  
+> The `dist/` folder can be served statically by any HTTP server or embedded in an Electron shell.
+
+The React UI auto-proxies all `/starhe/*` calls to `http://localhost:8080` (configured in `vite.config.ts`). In production or Electron, set `window.__STARHE_API_BASE__ = 'http://localhost:8080'`.
+
+### 2. Launch the Tkinter prototype (legacy development)
 
 Both scripts are **self-contained**: they detect Python 3.13, create the venv if absent, install all dependencies and prepUS, then launch the interface. Only Python 3.13 needs to be installed on the system.
 
@@ -147,7 +168,7 @@ cd pythonCode/modules
 
 </details>
 
-### 2. Launch the Go server (MEDomics integration)
+### 3. Launch the Go server (MEDomics integration)
 
 > From the project root (`PLUGIN1-MEDomics/`):
 
@@ -171,7 +192,7 @@ Go server environment variables:
 | `MONGO_DB` | `medomics` | Database name |
 | `MONGO_COLL` | `starhe_results` | Collection name |
 
-### 3. Deploy in MEDomics (integrated mode)
+### 4. Deploy in MEDomics (integrated mode)
 
 > This mode is described in detail in the **MEDomics Integration** section below.  
 > The plugin is deployed in the MEDomics repository via symlinks and a Go blueprint.
@@ -180,20 +201,40 @@ Go server environment variables:
 
 ## Architecture
 
-### Standalone mode (standalone Go server)
+### React UI + standalone Go server (primary mode)
 
 ```
-MEDomics Frontend (React) / Tkinter UI
-        │ HTTP / SSE
+react_ui/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
+  src/StarhePlugin/
+    index.tsx                 → root component (StarhePlugin), full state management
+    api.ts                    → fetch / SSE calls to the Go server
+    types.ts                  → shared types (DicomData, Detection, TabState, Measure…)
+    colors.ts                 → MEDomics color palette
+    hooks/
+      useDisplaySettings.ts   → persistent display settings (localStorage)
+      usePipelineSSE.ts       → SSE streaming consumer (analysis progress + results)
+      usePlayback.ts          → frame playback (speed, loop, FPS from DICOM FrameTime)
+      useCanvasInteractions.ts → pan / zoom / measure / series scroll (canvas events)
+    components/
+      Sidebar.tsx             → left sidebar 270 px: DICOM controls, nav, AI, results, metadata
+      DicomCanvas.tsx         → main DICOM canvas (frames, bboxes, measures, brightness/contrast)
+      DetectionGallery.tsx    → right panel 190 px: detected frames with thumbnails + SVG bboxes
+      ConsolePanel.tsx        → collapsible log console at the bottom
+      AdjustDialog.tsx        → floating contrast / brightness slider dialogs
+      ContextMenu.tsx         → right-click context menu
+      SettingsPanel.tsx       → settings overlay (font, colors, analysis mode, console toggle)
+      LiveModal.tsx           → live analysis modal (C-STORE / folder / HDMI)
+        │ HTTP + SSE (proxied by Vite dev server → port 8080 in dev)
         ▼
   Go Server (port 8080)
-  go_server/main.go      → HTTP routing
-  go_server/handlers.go  → logic, Python subprocess, SSE streaming
-  go_server/config.go    → environment variables
+  go_server/main.go           → HTTP routing + CORS middleware
+  go_server/handlers.go       → /starhe/analyze SSE, /starhe/results CRUD
+  go_server/handlers_dicom.go → /starhe/dicom/load (path), /starhe/dicom/upload (file), /starhe/dicom/delete
+  go_server/config.go         → absolute paths via os.Executable(), env var overrides
         │ subprocess os/exec  (stdout pipe, line by line)
         ▼
   Python Engine
-  starhe_plugin/pipeline.py  → main orchestrator
+  starhe_plugin/pipeline.py   → main orchestrator (run_risk / run_detection flags)
         │
         ├── dicom/reader.py        → DICOM reading (pydicom)
         ├── dicom/anonymizer.py    → tag anonymization
@@ -203,6 +244,13 @@ MEDomics Frontend (React) / Tkinter UI
         │       └── ai/models/_rtmdet_runner.py  (secondary subprocess)
         ├── db/mongo_client.py     → MongoDB persistence (pymongo)
         └── utils/go_print.py      → stdout protocol to Go
+```
+
+```
+Tkinter UI
+        │ Python callbacks (set_log_sink)
+        ▼
+  starhe_plugin/pipeline.py (same engine, run in a thread)
 ```
 
 ### MEDomics integrated mode
@@ -252,6 +300,85 @@ data: [DONE]
 ```
 
 In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log_sink()` (see `utils/go_print.py`) — lines do not reach stdout.
+
+---
+
+## React UI (`react_ui/`)
+
+### Stack
+
+| Layer | Technology | Version |
+|---|---|---|
+| Framework | React | 18.3 |
+| Language | TypeScript | 5.6 |
+| Bundler | Vite | 5.4 |
+| Styling | Inline styles + CSS (no external UI lib) | — |
+
+### Features
+
+| Feature | Description |
+|---|---|
+| **Multi-tab / multi-file** | Load N DICOM files; each tab stores its own full state (frames, zoom, measures, contrast, results…) |
+| **DICOM loading** | Via absolute path (Electron / MEDomics) or file upload drag-and-drop (browser) |
+| **Frame viewer** | Hardware-accelerated canvas, `letter-box` fit, smooth scroll / keyboard navigation |
+| **Playback** | Variable-speed loop (0.25×→3.0×) calibrated from DICOM `FrameTime` |
+| **Pan / Zoom** | Mouse wheel zoom, middle-click drag, Ctrl+0/+/- shortcuts |
+| **Measure tool** | Multi-segment mm measurements; draggable endpoints + whole segment; label auto-placed perpendicularly with draggable position; dashed leader line |
+| **Contrast / Brightness** | Pixel-level ImageData manipulation (`c×pixel + b`); independent sliders; no CSS filter artifacts |
+| **Right-click context menu** | 7 actions: Pan, Zoom, Measure, Series scroll, Contrast, Brightness, Reset view |
+| **Analysis modes** | `RISK + DETECT` / `RISK only` / `DETECT only` — configurable from Settings |
+| **SSE progress** | Real-time step-by-step progress from the pipeline streamed to the console and status label |
+| **DetectionGallery** | Right panel (190 px): scrollable list of detected frames with thumbnail + SVG bbox overlay; click to navigate |
+| **Console panel** | Collapsible log console; toggled from Settings or keyboard shortcut |
+| **Settings panel** | Font scale, font family, text/sidebar/bg colors, analysis mode, console toggle — persisted to `localStorage` |
+| **Live analysis modal** | Full port of `live_tab.py`: 3 sources (C-STORE, folder, HDMI), real-time RTMDet overlay, risk score |
+| **MongoDB cache** | Cached results restored instantly on re-open; "Réinitialiser l'analyse" clears the server cache |
+| **Theme** | Dark theme by default; sidebar and background colors fully configurable from Settings |
+| **Keyboard shortcuts** | Space (play/pause), ←/→ (±1 frame), Shift+←/→ (±10), Home/End, P/M/S/R/C/L, ±speed, B (loop), Ctrl+Tab / Ctrl+W |
+
+### Development workflow
+
+```bash
+# Start the Go server (rebuild required after any Go file change)
+lsof -ti :8080 | xargs kill -9 2>/dev/null
+cd go_server && go build -o go_server . && ./go_server &
+
+# Start the Vite dev server (HMR — no rebuild needed for React/TS changes)
+cd react_ui && npm run dev
+
+# Type-check + production build
+cd react_ui && npm run build
+```
+
+### API surface (Go server → React)
+
+| Method | Route | Description |
+|---|---|---|
+| `POST` | `/starhe/dicom/load` | Load DICOM by absolute path → frames base64 + metadata |
+| `POST` | `/starhe/dicom/upload` | Upload DICOM file (multipart) → same response |
+| `DELETE` | `/starhe/dicom/delete` | Release server-side upload reference (does **not** delete the file) |
+| `POST` | `/starhe/analyze` | Launch pipeline → SSE stream of `progress` / `result` / `error` events |
+| `GET` | `/starhe/results` | List MongoDB results (`?limit=N`) |
+| `GET` | `/starhe/results/{id}` | One result by ObjectId |
+| `DELETE` | `/starhe/results/{id}` | Delete cached result (reset) |
+| `GET` | `/health` | Healthcheck |
+
+### `POST /starhe/analyze` request body
+
+```json
+{
+  "dicom_path"           : "/absolute/path/file.dcm",
+  "anon_mode"            : "hash",
+  "run_risk"             : true,
+  "run_detection"        : true,
+  "back_scan_conversion" : true,
+  "backscan_width"       : 512,
+  "backscan_height"      : 512
+}
+```
+
+`run_risk: false` → pipeline skips STARHE-RISK (adds `--no_risk` arg to Python).  
+`run_detection: false` → pipeline skips STARHE-DETECT (adds `--no_detection` arg).
 
 ---
 
@@ -728,35 +855,28 @@ delete_result(file_path)  # → bool
 
 ## Go Server (`go_server/`)
 
-### Endpoints
+> The full API surface is documented in the **React UI** section above.
 
-| Method | Route | Description |
-|---|---|---|
-| `GET` | `/health` | Healthcheck |
-| `POST` | `/starhe/analyze` | Launches pipeline.py and streams via SSE |
-| `GET` | `/starhe/results` | Lists results (parameter `?limit=N`) |
-| `GET` | `/starhe/results/{id}` | One result by ObjectId |
-| `DELETE` | `/starhe/results/{id}` | Deletes a result |
+### Files
 
-### `POST /starhe/analyze`
-
-JSON body:
-```json
-{
-  "dicom_path"           : "/absolute/path/file.dcm",
-  "anon_mode"            : "hash",
-  "run_detection"        : true,
-  "back_scan_conversion" : true,
-  "backscan_width"       : 512,
-  "backscan_height"      : 512
-}
-```
-
-The handler launches `python -m starhe_plugin.pipeline` as a subprocess, reads each `GO_PRINT|...` line and relays it as SSE. The stream ends with `data: [DONE]`.
+| File | Role |
+|---|---|
+| `main.go` | HTTP routing, CORS middleware (`withCORS`), server startup |
+| `handlers.go` | `POST /starhe/analyze` — launches `pipeline.py`, SSE streaming of `GO_PRINT|…` lines |
+| `handlers_dicom.go` | DICOM load (path), upload (multipart), delete cache reference |
+| `config.go` | Absolute paths via `os.Executable()`, env var overrides (`STARHE_PYTHON_EXE`, `STARHE_PYTHON_PATH`, etc.) |
 
 ### CORS
 
-The `withCORS` middleware in `main.go` adds `Access-Control-Allow-*` headers for all endpoints — required for the React frontend (Electron) to call the API.
+The `withCORS` middleware in `main.go` adds `Access-Control-Allow-*` headers for all endpoints — required for the React frontend (Electron / Vite dev server) to call the API.
+
+### Absolute paths
+
+`config.go` uses `os.Executable()` to resolve Python paths relative to the **binary location**, not the working directory. This means the server can be launched from any directory without `STARHE_PYTHON_EXE` / `STARHE_PYTHON_PATH` environment variables.
+
+---
+
+## Tkinter Prototype Interface (`ui/prototype_tkinter.py`)
 
 ---
 

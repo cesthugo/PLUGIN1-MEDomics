@@ -372,7 +372,7 @@ export function useCanvasInteractions(
       const r  = rclickRef.current;
       const dx = mx - r.startX, dy = my - r.startY;
       const newC = Math.max(0.1, Math.min(3.0,   r.contrast0 + dx * 0.008));
-      const newB = Math.max(-100, Math.min(100, r.bright0  + dy * 0.5));
+      const newB = Math.max(-50, Math.min(100, r.bright0  + dy * 0.5));
       cbs.onContrastBright(newC, newB);
     }
   }, [getState, getTransform, cbs]);

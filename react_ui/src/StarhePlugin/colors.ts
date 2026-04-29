@@ -1,7 +1,6 @@
 // colors.ts — Palette MEDomics STARHE (identique à prototype_tkinter.py)
 
 export const SIDEBAR_BG  = '#151521';   // fond barre latérale (très sombre)
-export const SIDEBAR_SEC = '#1e1d2f';   // sections / séparateurs sidebar
 export const SIDEBAR_HOV = '#252438';   // hover sidebar
 
 export const MAIN_BG    = '#f4f6fb';   // fond zone principale
@@ -15,7 +14,6 @@ export const BLUE_TEXT = '#1565C0';
 
 export const SBAR_FG    = '#e2e8f0';   // texte clair sur fond sombre
 export const SBAR_MUTED = '#7c8899';   // texte secondaire sidebar
-export const MAIN_FG    = '#1a202c';   // texte principal zone claire
 export const BORDER     = '#cbd5e0';
 
 export const SUCCESS_FG = '#4ade80';
@@ -26,7 +24,6 @@ export const CARD_BORDER = '#e2e8f0';
 export const CARD_SHADOW = '#d4d9e4';
 
 export const RISK_LOW_FG  = '#4ade80';
-export const RISK_MED_FG  = '#fbbf24';
 export const RISK_HIGH_FG = '#f87171';
 
 // Onglets patients

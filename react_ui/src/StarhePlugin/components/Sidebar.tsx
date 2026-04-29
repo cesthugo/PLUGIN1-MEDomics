@@ -8,10 +8,10 @@
 //   - MÉTADONNÉES   : conservées + tags anonymisés
 
 import React, { useRef, useState } from 'react';
-import type { TabState, LogLevel, Patient, ViewMode } from '../types';
+import type { TabState, LogLevel, Patient } from '../types';
 import type { AnalysisStatus } from '../hooks/usePipelineSSE';
 import {
-  SIDEBAR_BG, SIDEBAR_SEC, BLUE, SBAR_FG, SBAR_MUTED,
+  SIDEBAR_BG, BLUE, SBAR_FG, SBAR_MUTED,
   SUCCESS_FG, DANGER_FG, RISK_LOW_FG, RISK_HIGH_FG,
 } from '../colors';
 
@@ -163,9 +163,6 @@ export interface SidebarProps {
   onOpenLive:       () => void;
   onGotoFrame:      (idx: number) => void;
   onToggleTheme:    () => void;
-  onOpenContrast:   () => void;
-  onOpenBrightness: () => void;
-  onToggleViewMode: (mode: ViewMode) => void;
 }
 
 export function Sidebar({

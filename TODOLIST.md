@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **April 20, 2026**
+> Last updated: **April 29, 2026**
 
 ---
 
@@ -125,6 +125,37 @@
 - [x] **Deployment in the MEDomics repository** — Blueprint copied, `starhe/` and `starhe_plugin/` symlinks created, `main.go` patched (import + `AddHandleFunc()`)
 - [x] **Go build verified** — `go build .` in `MEDomics/go_server/` → exit code 0
 
+### 🌐 React UI — Full port of the Tkinter prototype (April 29, 2026)
+- [x] **Project scaffold** — React 18 / TypeScript / Vite in `react_ui/`, `vite.config.ts` proxy `/starhe → :8080`
+- [x] **`StarhePlugin` root component** (`index.tsx`) — full state management: tabs, patients, logs, playback, SSE, settings
+- [x] **`api.ts`** — `loadDicom` (path), `loadDicomFile` (multipart upload), `deleteCache`, `streamAnalysis` (SSE)
+- [x] **`types.ts`** — `DicomData`, `Detection`, `AnalysisResult`, `Measure` (with `labelOffset`), `TabState`, `ViewMode`, `LogEntry`
+- [x] **`Sidebar` component** — DICOM file section, navigation, playback controls (speed, loop), AI analysis buttons, results panel, metadata
+- [x] **`DicomCanvas` component** — letterbox canvas, frame rendering, bbox overlay, multi-measure overlay, brightness/contrast via ImageData
+- [x] **`ConsolePanel` component** — real-time SSE log console, color-coded levels, toggleable from Settings
+- [x] **`AdjustDialog` component** — floating slider for contrast (0.1–3.0) and brightness (−100 / +100), with reset button
+- [x] **`ContextMenu` component** — right-click 7-action menu (Pan, Zoom, Measure, Series, Contrast, Brightness, Reset)
+- [x] **`SettingsPanel` component** — font scale/family, text/sidebar/bg colors, analysis mode selector, console toggle; persisted to `localStorage`
+- [x] **`DetectionGallery` component** — right panel (190 px): scrollable detected-frame list with thumbnails, SVG bbox overlay, frame-count badge, click-to-navigate
+- [x] **`LiveModal` component** — full port of `live_tab.py`: C-STORE / folder / HDMI sources, RTMDet overlay, risk score, SSE progress
+- [x] **`useDisplaySettings` hook** — `DisplaySettings` interface (fontScale, fontFamily, textColor, sidebarBg, mainBg, analysisMode, showConsole); `localStorage` persistence with forward-compatible merge
+- [x] **`usePipelineSSE` hook** — SSE consumer for `/starhe/analyze`; filters `risk` / `detections_per_frame` events by analysis mode; `commitResult()` for final state
+- [x] **`usePlayback` hook** — rAF-based frame ticker, speed multiplier, loop flag, DICOM `baseFps`
+- [x] **`useCanvasInteractions` hook** — pan/zoom/measure/series interactions; `Transform` type exported; `getMeasureLabelScreenPos`, `getDefaultLabelOffset`, `labelHit` helpers; `onMeasureLabelMove` callback
+
+### 🔧 Go Server — additional endpoints and fixes (April 29, 2026)
+- [x] **`handlers_dicom.go`** — `POST /starhe/dicom/load` (path), `POST /starhe/dicom/upload` (multipart), `DELETE /starhe/dicom/delete` (release reference; does NOT delete temp file so re-analysis after reset works)
+- [x] **`handlers.go`** — `RunRisk bool` field in `analyzeRequest`; passes `--no_risk` / `--no_detection` to Python when false
+- [x] **`config.go`** — `serverDir()` uses `os.Executable()` → absolute Python/module paths regardless of launch CWD
+
+### 🤖 AI / Backend fixes (April 29, 2026)
+- [x] **`pipeline.py`** — `run_risk: bool = True` parameter; step 5 conditional; `--no_risk` argparse flag
+- [x] **`mongo_client.py`** — `save_result(risk: dict | None)` — skips `risk` field in document when `None`
+
+### 🎨 UX improvements (April 29, 2026)
+- [x] **Measure label** — perpendicular auto-placement; draggable (stored as `labelOffset` in `Measure`); dashed leader line from midpoint to label
+- [x] **Brightness/Contrast** — replaced CSS filter with pixel-level ImageData formula `c × pixel + b`; independent, artifact-free, adapted to dark ultrasound images
+
 ---
 
 ## 🚧 In-Progress Tasks
@@ -135,10 +166,9 @@
 
 ### 🖼 Tkinter Prototype
 - [ ] **Full workflow validation with Canon Aplio i700** — Load `A0000` → banner removal + mm calibration → prepUS → AI inference → results display + MongoDB cache
-- [ ] **User feedback collection** — Identify UX adjustments before porting to React
 
 ### 🔌 MEDomics Integration
-- [ ] **MEDomics frontend** — No React page exists yet to drive STARHE from the MEDomics interface
+- [ ] **MEDomics frontend** — Wire the React UI into the MEDomics navigation system (replace standalone `localhost:5173` with integrated plugin tab)
 - [ ] **MEDDataObject** — Results are not yet encapsulated in a `MEDDataObject` (MEDomics standard format for patient data/results)
 - [ ] **Cross-platform symlinks** — Unix symlinks do not work natively on Windows (require developer mode or admin rights). Consider an installation script with copy as fallback.
 
@@ -155,30 +185,30 @@
   - `mongo_client.py`: round-trip test save/find/delete
   - *Approach: create `pythonCode/modules/starhe_plugin/tests/` with `pytest`*
 
-- [ ] **Phase 2 Optimization: GPU**
+- [ ] **GPU optimization**
   - Configure the RTMDet runner to use CUDA if available (`--device cuda`)
   - Estimated gain: ×10–20 on the detection part (RTX 30/40: ~15–30ms/frame)
 
-### 🔀 Phase 2: Go Server Integration (Medium term) — ✅ Partially completed
+### 🔀 Phase 2: Go Server (Medium term) — ✅ Mostly completed
 
 - [x] **Go blueprint for MEDomics** — `starhe_blueprint.go` with `AddHandleFunc()`, `analyze/` and `progress/` routes
 - [x] **GoExecutionScript adapter** — `run_starhe.py` translates the GO_PRINT → MEDomics protocol
-
-- [ ] **Real-time progress manager**
-  - Wire `go_progress()` events from Python to the frontend via SSE
+- [x] **SSE progress** — `go_progress()` events streamed live to the React UI
 
 - [ ] **Error handling and timeouts**
   - Configurable timeout for AI inference
   - Semantic HTTP error codes with structured JSON messages
 
-### ⚙ Phase 3: React UI Port (Long term)
+### ⚙ Phase 3: React UI Port — ✅ Completed (April 29, 2026)
 
-- [ ] **`<DicomLoader />` component** — Upload and validation of a `.dcm` file
-- [ ] **`<FrameViewer />` component** — Frame visualization, navigation, crop/backscan toggle
-- [ ] **`<InferenceResults />` component** — STARHE-RISK score, bboxes, clickable detected frame list
-- [ ] **`<AnalysisConsole />` component** — Real-time logs (SSE)
-- [ ] **Integration into the MEDomics navigation system**
-- [ ] **MEDDataObject encapsulation** — Produce and consume MEDDataObjects to integrate into existing MEDomics workflows
+- [x] **`<DicomLoader />`** — Upload (drag-and-drop) and path loading
+- [x] **`<DicomCanvas />`** — Frame visualization, pan/zoom/measure, contrast/brightness, bbox overlay
+- [x] **`<DetectionGallery />`** — Detected frames with thumbnails + SVG bboxes
+- [x] **`<ConsolePanel />`** — Real-time SSE logs
+- [x] **`<SettingsPanel />`** — Font, colors, analysis mode, console toggle
+- [x] **`<LiveModal />`** — Live analysis (C-STORE, folder, HDMI)
+- [ ] **Integration into the MEDomics navigation system** — Pending MEDomics platform wiring
+- [ ] **MEDDataObject encapsulation** — Produce and consume MEDDataObjects
 
 ### 🧪 Phase 4: Testing & Deployment (Long term)
 
@@ -190,6 +220,19 @@
 ---
 
 ## 📝 Key Technical Procedures
+
+### 🌐 React UI development cycle
+> ```bash
+> # Rebuild and restart Go server (after any .go file change)
+> lsof -ti :8080 | xargs kill -9 2>/dev/null
+> cd go_server && go build -o go_server . && ./go_server &
+>
+> # Start Vite dev server with HMR (no rebuild needed for React/TS changes)
+> cd react_ui && npm run dev
+>
+> # Production build (type-check + bundle)
+> cd react_ui && npm run build
+> ```
 
 ### 🧹 prepUS Preprocessing
 > `preprocess_with_prepus(frames, fps, thresh, back_scan_conversion, backscan_width, backscan_height)`
@@ -213,8 +256,12 @@
 
 ### 🔗 Go ↔ Python Communication
 > Launch Python as subprocess from Go: `os/exec.Command("python", "-m", "starhe_plugin.pipeline", args...)`
-> Each Python stdout line is prefixed with `GO_PRINT:` followed by JSON.
-> Parse on the Go side with `bufio.Scanner` + `json.Unmarshal` — relay via SSE.
+> Each Python stdout line follows the format `GO_PRINT|<level>|<JSON>`.
+> Parsed on the Go side with `bufio.Scanner` + `json.Unmarshal` — relayed via SSE.
+>
+> Key flags:
+> - `--no_risk` → skip STARHE-RISK (C3D)
+> - `--no_detection` → skip STARHE-DETECT (RTMDet)
 
 ---
 

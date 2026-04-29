@@ -139,7 +139,11 @@ export function DicomCanvas({
 }: DicomCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef   = useRef<HTMLDivElement>(null);
-  const imgCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const imgCacheRef  = useRef<Map<string, HTMLImageElement>>(new Map());
+  // Compteur de génération : chaque invocation de l'effet draw incrémente ce compteur.
+  // Les callbacks img.onload vérifient qu'ils correspondent à la génération courante avant
+  // de dessiner, évitant qu'un chargement différé écrase le canvas d'un autre onglet.
+  const drawGenRef = useRef(0);
 
   // Preview segment en cours de dessin
   const [measurePreview, setMeasurePreview] = useState<
@@ -236,7 +240,10 @@ export function DicomCanvas({
     const frames = data.framesB64;
     if (!frames?.length) return;
     const b64 = frames[Math.min(frameIdx, frames.length - 1)];
-    const cacheKey = `${frameIdx}-${b64.slice(0, 20)}`;
+    // Clé namespaced par tab.id : empêche la collision entre fichiers ayant le même
+    // header JPEG identique (tous commencent par /9j/4AAQSkZJRgABAQAA en base64).
+    const cacheKey = `${tab.id}-${frameIdx}`;
+    const gen = ++drawGenRef.current;
 
     const drawFrame = (img: HTMLImageElement) => {
       // Utilise TOUJOURS les dimensions DICOM originales comme espace de coordonnées.
@@ -300,12 +307,13 @@ export function DicomCanvas({
       const img = new Image();
       img.onload = () => {
         imgCacheRef.current.set(cacheKey, img);
-        // Évite de surcharger la mémoire — garde les 200 dernières
         if (imgCacheRef.current.size > 200) {
           const firstKey = imgCacheRef.current.keys().next().value;
           if (firstKey !== undefined) imgCacheRef.current.delete(firstKey);
         }
-        drawFrame(img);
+        // Dessine seulement si l'effet n'a pas été re-déclenché entretemps
+        // (changement d'onglet ou de frame pendant le chargement de l'image)
+        if (drawGenRef.current === gen) drawFrame(img);
       };
       img.src = `data:image/jpeg;base64,${b64}`;
     }
