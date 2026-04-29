@@ -502,9 +502,13 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           }));
           break;
         case '+': case '=':
-          updateActiveTab(t => ({ ...t, speedMult: Math.min(3, t.speedMult * 1.25) })); break;
+          if (!e.metaKey && !e.ctrlKey)
+            updateActiveTab(t => ({ ...t, speedMult: Math.min(3, t.speedMult * 1.25) }));
+          break;
         case '-':
-          updateActiveTab(t => ({ ...t, speedMult: Math.max(0.25, t.speedMult * 0.8) })); break;
+          if (!e.metaKey && !e.ctrlKey)
+            updateActiveTab(t => ({ ...t, speedMult: Math.max(0.25, t.speedMult * 0.8) }));
+          break;
         case 'b': case 'B':
           updateActiveTab(t => ({ ...t, loop: !t.loop })); break;
       }
