@@ -396,9 +396,22 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         if (newPts[0][0] === -1) {
           segs.splice(segIdx, 1);
         } else {
-          segs[segIdx] = { pts: newPts };
+          segs[segIdx] = { ...segs[segIdx], pts: newPts }; // préserve labelOffset
         }
         frames[frameIdx] = segs;
+        return { ...t, measuresByFrame: frames };
+      });
+    }, [updateActiveTab]);
+
+  const onMeasureLabelMove = useCallback(
+    (frameIdx: number, segIdx: number, labelOffset: [number, number]) => {
+      updateActiveTab(t => {
+        const frames = { ...t.measuresByFrame };
+        const segs   = [...(frames[frameIdx] ?? [])];
+        if (segs[segIdx]) {
+          segs[segIdx] = { ...segs[segIdx], labelOffset };
+          frames[frameIdx] = segs;
+        }
         return { ...t, measuresByFrame: frames };
       });
     }, [updateActiveTab]);
@@ -714,6 +727,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               onFrameChange={onCanvasFrameChange}
               onMeasureAdd={onMeasureAdd}
               onMeasureMove={onMeasureMove}
+              onMeasureLabelMove={onMeasureLabelMove}
               onMeasureSelect={onMeasureSelect}
               onContextMenu={(x, y) => setCtxMenu({ x, y })}
             />

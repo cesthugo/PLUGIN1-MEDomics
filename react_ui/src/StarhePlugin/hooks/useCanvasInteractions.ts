@@ -8,7 +8,7 @@ import type { ViewMode, Measure } from '../types';
 
 // ── Types internes ────────────────────────────────────────────────────────────
 
-interface Transform {
+export interface Transform {
   scale: number;
   offX:  number;
   offY:  number;
@@ -33,13 +33,14 @@ interface InteractState {
 }
 
 export interface InteractCallbacks {
-  onZoomPan:       (zoom: number, panX: number, panY: number) => void;
-  onContrastBright:(contrast: number, brightness: number) => void;
-  onFrameChange:   (idx: number) => void;
-  onMeasureAdd:    (frameIdx: number, measure: Measure) => void;
-  onMeasureMove:   (frameIdx: number, segIdx: number, newPts: [[number, number],[number, number]]) => void;
-  onMeasureSelect: (frameIdx: number, segIdx: number | null) => void;
-  onContextMenu:   (x: number, y: number) => void;
+  onZoomPan:          (zoom: number, panX: number, panY: number) => void;
+  onContrastBright:   (contrast: number, brightness: number) => void;
+  onFrameChange:      (idx: number) => void;
+  onMeasureAdd:       (frameIdx: number, measure: Measure) => void;
+  onMeasureMove:      (frameIdx: number, segIdx: number, newPts: [[number, number],[number, number]]) => void;
+  onMeasureSelect:    (frameIdx: number, segIdx: number | null) => void;
+  onMeasureLabelMove: (frameIdx: number, segIdx: number, labelOffset: [number, number]) => void;
+  onContextMenu:      (x: number, y: number) => void;
 }
 
 // ── Calcul de la transformation image → écran ─────────────────────────────────
@@ -75,6 +76,58 @@ export function imgToScreen(
   return [ix * t.scale + t.offX, iy * t.scale + t.offY];
 }
 
+// ── Label de mesure : position écran ─────────────────────────────────────────────────
+
+/**
+ * Calcule la position écran du label d'une mesure.
+ * Si `labelOffset` est défini (vecteur en coords image depuis le milieu du segment),
+ * l'utilise directement. Sinon place le label à OFFSET px perpendiculairement
+ * au segment (être côté « haut écran »). Retourne de côté si hors-canvas.
+ */
+export function getMeasureLabelScreenPos(
+  p1: [number, number],
+  p2: [number, number],
+  labelOffset: [number, number] | undefined,
+  t: Transform,
+  canvasW: number = 9999,
+  canvasH: number = 9999,
+): [number, number] {
+  const mx = ((p1[0] + p2[0]) / 2) * t.scale + t.offX;
+  const my = ((p1[1] + p2[1]) / 2) * t.scale + t.offY;
+
+  if (labelOffset !== undefined) {
+    return [mx + labelOffset[0] * t.scale, my + labelOffset[1] * t.scale];
+  }
+
+  // Direction perp. normalisée (identique en espace image et écran après normalisation)
+  const dxI = p2[0] - p1[0], dyI = p2[1] - p1[1];
+  const len  = Math.hypot(dxI, dyI) || 1;
+  let px = -dyI / len, py = dxI / len;
+  if (py > 0) { px = -px; py = -py; } // préfère le côté "haut"
+  const OFFSET = 30;
+  let lx = mx + px * OFFSET, ly = my + py * OFFSET;
+  // Retourne de côté si hors-canvas
+  if (lx < 12 || lx > canvasW - 12 || ly < 12 || ly > canvasH - 12) {
+    lx = mx - px * OFFSET;
+    ly = my - py * OFFSET;
+  }
+  return [lx, ly];
+}
+
+/** Convertit la position par défaut du label en offset image (pour initier un drag). */
+function getDefaultLabelOffset(
+  p1: [number, number],
+  p2: [number, number],
+  t: Transform,
+  canvasW: number,
+  canvasH: number,
+): [number, number] {
+  const mx = ((p1[0] + p2[0]) / 2) * t.scale + t.offX;
+  const my = ((p1[1] + p2[1]) / 2) * t.scale + t.offY;
+  const [lx, ly] = getMeasureLabelScreenPos(p1, p2, undefined, t, canvasW, canvasH);
+  return [(lx - mx) / t.scale, (ly - my) / t.scale];
+}
+
 // ── Distance d'un point à un segment ──────────────────────────────────────────
 
 function distToSegment(
@@ -106,7 +159,22 @@ function measureHit(
   }
   return null;
 }
-
+/** Hit-test sur le label d'une mesure (zone élargie pour facilité de clic). */
+function labelHit(
+  x: number, y: number,
+  measures: Measure[],
+  t: Transform,
+  canvasW: number,
+  canvasH: number,
+): number | null {
+  const EP = 40;
+  for (let i = 0; i < measures.length; i++) {
+    const m = measures[i];
+    const [lx, ly] = getMeasureLabelScreenPos(m.pts[0], m.pts[1], m.labelOffset, t, canvasW, canvasH);
+    if (Math.hypot(x - lx, y - ly) <= EP) return i;
+  }
+  return null;
+}
 // ── Hook principal ────────────────────────────────────────────────────────────
 
 export function useCanvasInteractions(
@@ -128,10 +196,11 @@ export function useCanvasInteractions(
 
   // Édition d'une mesure existante
   const editRef = useRef<{
-    segIdx:    number;
-    part:      'p1' | 'p2' | 'seg';
-    startImg:  [number, number];
-    origPts:   [[number, number], [number, number]];
+    segIdx:          number;
+    part:            'p1' | 'p2' | 'seg' | 'label';
+    startImg:        [number, number];
+    origPts:         [[number, number], [number, number]];
+    origLabelOffset?: [number, number];
   } | null>(null);
 
   // Glissement droit (contraste/luminosité)
@@ -202,6 +271,24 @@ export function useCanvasInteractions(
 
     if (s.viewMode === 'measure') {
       const measures = s.measuresByFrame[s.frameIdx] ?? [];
+
+      // Vérifie d'abord un hit sur le label (priorité plus haute que le segment)
+      const li = labelHit(mx, my, measures, t, s.canvasW, s.canvasH);
+      if (li !== null) {
+        cbs.onMeasureSelect(s.frameIdx, li);
+        const seg = measures[li];
+        editRef.current = {
+          segIdx:          li,
+          part:            'label',
+          startImg:        screenToImg(mx, my, t),
+          origPts:         [seg.pts[0], seg.pts[1]],
+          origLabelOffset: seg.labelOffset ?? getDefaultLabelOffset(seg.pts[0], seg.pts[1], t, s.canvasW, s.canvasH),
+        };
+        drawingRef.current = null;
+        _previewSetter.current?.(null);
+        return;
+      }
+
       const hit = measureHit(mx, my, measures, t);
 
       if (hit) {
@@ -254,17 +341,26 @@ export function useCanvasInteractions(
     if (s.viewMode === 'measure') {
       const t = getTransform();
       if (editRef.current) {
-        const ed       = editRef.current;
-        const curImg   = screenToImg(mx, my, t);
-        const dix      = curImg[0] - ed.startImg[0];
-        const diy      = curImg[1] - ed.startImg[1];
-        const [ox1, oy1] = ed.origPts[0];
-        const [ox2, oy2] = ed.origPts[1];
-        let newPts: [[number,number],[number,number]];
-        if      (ed.part === 'p1')  newPts = [[ox1 + dix, oy1 + diy], [ox2, oy2]];
-        else if (ed.part === 'p2')  newPts = [[ox1, oy1], [ox2 + dix, oy2 + diy]];
-        else                        newPts = [[ox1 + dix, oy1 + diy], [ox2 + dix, oy2 + diy]];
-        cbs.onMeasureMove(s.frameIdx, ed.segIdx, newPts);
+        const ed     = editRef.current;
+        const curImg = screenToImg(mx, my, t);
+        const dix    = curImg[0] - ed.startImg[0];
+        const diy    = curImg[1] - ed.startImg[1];
+
+        if (ed.part === 'label') {
+          // Déplacement du label : on met à jour l'offset depuis le milieu du segment
+          cbs.onMeasureLabelMove(s.frameIdx, ed.segIdx, [
+            ed.origLabelOffset![0] + dix,
+            ed.origLabelOffset![1] + diy,
+          ]);
+        } else {
+          const [ox1, oy1] = ed.origPts[0];
+          const [ox2, oy2] = ed.origPts[1];
+          let newPts: [[number,number],[number,number]];
+          if      (ed.part === 'p1')  newPts = [[ox1 + dix, oy1 + diy], [ox2, oy2]];
+          else if (ed.part === 'p2')  newPts = [[ox1, oy1], [ox2 + dix, oy2 + diy]];
+          else                        newPts = [[ox1 + dix, oy1 + diy], [ox2 + dix, oy2 + diy]];
+          cbs.onMeasureMove(s.frameIdx, ed.segIdx, newPts);
+        }
       } else if (drawingRef.current) {
         const cur = screenToImg(mx, my, t);
         _previewSetter.current?.([drawingRef.current, cur]);

@@ -16,8 +16,10 @@ import React, {
 
 import {
   computeTransform, imgToScreen, screenToImg,
+  getMeasureLabelScreenPos,
   useCanvasInteractions,
 } from '../hooks/useCanvasInteractions';
+import type { Transform } from '../hooks/useCanvasInteractions';
 import type { TabState, ViewMode, Measure, Detection } from '../types';
 import { BLUE, CANVAS_BG, SBAR_MUTED } from '../colors';
 
@@ -50,20 +52,20 @@ function drawMeasureSegment(
   ctx:          CanvasRenderingContext2D,
   p1:           [number, number],
   p2:           [number, number],
-  scale:        number,
-  offX:         number,
-  offY:         number,
+  t:            Transform,
+  canvasW:      number,
+  canvasH:      number,
   selected:     boolean,
   pixelSpacing: [number, number] | null,
+  labelOffset?: [number, number],
 ): void {
-  const [ix1, iy1] = p1, [ix2, iy2] = p2;
-  const sx1 = ix1 * scale + offX, sy1 = iy1 * scale + offY;
-  const sx2 = ix2 * scale + offX, sy2 = iy2 * scale + offY;
+  const sx1 = p1[0] * t.scale + t.offX, sy1 = p1[1] * t.scale + t.offY;
+  const sx2 = p2[0] * t.scale + t.offX, sy2 = p2[1] * t.scale + t.offY;
 
   const color = selected ? '#ff9900' : '#ffff00';
   const r     = 3;
 
-  // Trait en pointillés
+  // Segment principal
   ctx.setLineDash([5, 3]);
   ctx.strokeStyle = color;
   ctx.lineWidth   = 2;
@@ -79,7 +81,7 @@ function drawMeasureSegment(
   ctx.beginPath(); ctx.arc(sx2, sy2, r, 0, Math.PI * 2); ctx.fill();
 
   // Label distance
-  const dxImg  = Math.abs(ix2 - ix1), dyImg = Math.abs(iy2 - iy1);
+  const dxImg = Math.abs(p2[0] - p1[0]), dyImg = Math.abs(p2[1] - p1[1]);
   let distLabel: string;
   if (pixelSpacing) {
     const mm = Math.hypot(dxImg * pixelSpacing[1], dyImg * pixelSpacing[0]);
@@ -88,16 +90,22 @@ function drawMeasureSegment(
     distLabel = `${Math.hypot(dxImg, dyImg).toFixed(1)} px (pas calibration)`;
   }
 
-  // Position du label perpendiculaire au segment
+  // Position du label (perpendiculaire par defaut, ou personnalisee si labelOffset)
   const mx = (sx1 + sx2) / 2, my = (sy1 + sy2) / 2;
-  const dxS   = sx2 - sx1, dyS = sy2 - sy1;
-  const segLen = Math.hypot(dxS, dyS) || 1;
-  let perpX = -dyS / segLen, perpY = dxS / segLen;
-  if (perpY > 0) { perpX = -perpX; perpY = -perpY; }
-  const OFFSET = 18;
-  const lx = mx + perpX * OFFSET, ly = my + perpY * OFFSET;
+  const [lx, ly] = getMeasureLabelScreenPos(p1, p2, labelOffset, t, canvasW, canvasH);
 
-  ctx.font      = 'bold 14px "Segoe UI", sans-serif';
+  // Ligne de liaison en pointilles (milieu segment -> label)
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = color + '99';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  ctx.moveTo(mx, my);
+  ctx.lineTo(lx, ly);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Label
+  ctx.font      = 'bold 13px "Segoe UI", sans-serif';
   ctx.fillStyle = '#1a1a2e';
   ctx.fillText(distLabel, lx + 1, ly + 1);
   ctx.fillStyle = color;
@@ -107,14 +115,15 @@ function drawMeasureSegment(
 // ── Composant ─────────────────────────────────────────────────────────────────
 
 export interface DicomCanvasProps {
-  tab:             TabState | null;
-  onZoomPan:       (zoom: number, panX: number, panY: number) => void;
-  onContrastBright:(contrast: number, brightness: number) => void;
-  onFrameChange:   (idx: number) => void;
-  onMeasureAdd:    (frameIdx: number, measure: Measure) => void;
-  onMeasureMove:   (frameIdx: number, segIdx: number, newPts: [[number, number], [number, number]]) => void;
-  onMeasureSelect: (frameIdx: number, segIdx: number | null) => void;
-  onContextMenu:   (x: number, y: number) => void;
+  tab:              TabState | null;
+  onZoomPan:        (zoom: number, panX: number, panY: number) => void;
+  onContrastBright: (contrast: number, brightness: number) => void;
+  onFrameChange:    (idx: number) => void;
+  onMeasureAdd:     (frameIdx: number, measure: Measure) => void;
+  onMeasureMove:    (frameIdx: number, segIdx: number, newPts: [[number, number], [number, number]]) => void;
+  onMeasureSelect:  (frameIdx: number, segIdx: number | null) => void;
+  onMeasureLabelMove: (frameIdx: number, segIdx: number, labelOffset: [number, number]) => void;
+  onContextMenu:    (x: number, y: number) => void;
 }
 
 export function DicomCanvas({
@@ -125,6 +134,7 @@ export function DicomCanvas({
   onMeasureAdd,
   onMeasureMove,
   onMeasureSelect,
+  onMeasureLabelMove,
   onContextMenu,
 }: DicomCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -178,6 +188,7 @@ export function DicomCanvas({
     onMeasureAdd,
     onMeasureMove,
     onMeasureSelect,
+    onMeasureLabelMove,
     onContextMenu,
   });
 
@@ -235,12 +246,33 @@ export function DicomCanvas({
       const ih = data.rows;
       const t  = computeTransform(iw, ih, canvasSize.w, canvasSize.h, zoom, panX, panY);
 
-      // Contraste / luminosité via CSS filter (version la plus fidèle à Tkinter)
-      const cVal = contrast;
-      const bVal = 1 + brightness / 100;
-      ctx.filter = `contrast(${cVal}) brightness(${bVal})`;
+      // Contraste / luminosité via manipulation pixel (formule linéaire standard)
+      // formula: out = contrast × (pixel − 128) + 128 + brightness
+      // → contrast et brightness sont indépendants et intuitifs.
       ctx.drawImage(img, t.offX, t.offY, iw * t.scale, ih * t.scale);
-      ctx.filter = 'none';
+
+      if (contrast !== 1 || brightness !== 0) {
+        // On travaille uniquement sur la région visible de l'image (coords canvas clampées)
+        const rx = Math.max(0, Math.round(t.offX));
+        const ry = Math.max(0, Math.round(t.offY));
+        const rw = Math.min(canvasSize.w, Math.round(t.offX + iw * t.scale)) - rx;
+        const rh = Math.min(canvasSize.h, Math.round(t.offY + ih * t.scale)) - ry;
+        if (rw > 0 && rh > 0) {
+          const imgData = ctx.getImageData(rx, ry, rw, rh);
+          const d = imgData.data;
+          const c = contrast;
+          const b = brightness; // −100 … +100
+          // Pivot à 0 (adapté aux images sombres comme l'échographie) :
+          // output = c * pixel + b
+          // → contrast=3 triple la dynamique sans écraser les darks vers 0
+          for (let i = 0; i < d.length; i += 4) {
+            d[i]   = Math.max(0, Math.min(255, c * d[i]   + b));
+            d[i+1] = Math.max(0, Math.min(255, c * d[i+1] + b));
+            d[i+2] = Math.max(0, Math.min(255, c * d[i+2] + b));
+          }
+          ctx.putImageData(imgData, rx, ry);
+        }
+      }
 
       // Détections
       const dets = (detectionsBy.original ?? [])[frameIdx] ?? [];
@@ -250,13 +282,13 @@ export function DicomCanvas({
       const measures = measuresByFrame[frameIdx] ?? [];
       for (let i = 0; i < measures.length; i++) {
         drawMeasureSegment(ctx, measures[i].pts[0], measures[i].pts[1],
-          t.scale, t.offX, t.offY, i === selectedMeasure, data.pixelSpacing);
+          t, canvasSize.w, canvasSize.h, i === selectedMeasure, data.pixelSpacing, measures[i].labelOffset);
       }
 
       // Mesure en cours de dessin
       if (measurePreview) {
         drawMeasureSegment(ctx, measurePreview[0], measurePreview[1],
-          t.scale, t.offX, t.offY, false, data.pixelSpacing);
+          t, canvasSize.w, canvasSize.h, false, data.pixelSpacing);
       }
     };
 

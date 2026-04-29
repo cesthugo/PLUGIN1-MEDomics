@@ -55,8 +55,11 @@ export interface AnalysisResult {
 // ── Mesures ───────────────────────────────────────────────────────────────────
 export interface Measure {
   /** Deux points en coordonnées image */
-  pts: [[number, number], [number, number]];
-}
+  pts: [[number, number], [number, number]];  /**
+   * Décalage du label depuis le milieu du segment, en coordonnées image.
+   * `undefined` = position perp. automatique calculée à l’affichaçage.
+   */
+  labelOffset?: [number, number];}
 
 // ── Mode d'interaction canvas ─────────────────────────────────────────────────
 export type ViewMode = 'normal' | 'pan' | 'measure' | 'series';
