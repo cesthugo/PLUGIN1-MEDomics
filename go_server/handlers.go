@@ -27,6 +27,7 @@ import (
 type analyzeRequest struct {
 	DicomPath          string `json:"dicom_path"`
 	AnonMode           string `json:"anon_mode"`
+	RunRisk            bool   `json:"run_risk"`
 	RunDetection       bool   `json:"run_detection"`
 	BackScanConversion bool   `json:"back_scan_conversion"`
 	BackscanWidth      int    `json:"backscan_width"`
@@ -66,6 +67,7 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 	// Valeurs par défaut + décodage JSON
 	req := analyzeRequest{
 		AnonMode:           "hash",
+		RunRisk:            true,
 		RunDetection:       true,
 		BackScanConversion: true,
 		BackscanWidth:      512,
@@ -111,6 +113,9 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		"--backscan_width", strconv.Itoa(req.BackscanWidth),
 		"--backscan_height", strconv.Itoa(req.BackscanHeight),
 	}
+	if !req.RunRisk {
+		args = append(args, "--no_risk")
+	}
 	if !req.RunDetection {
 		args = append(args, "--no_detection")
 	}
@@ -141,7 +146,10 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 	go func() { io.Copy(log.Writer(), stderr) }() //nolint:errcheck
 
 	// Lit stdout ligne par ligne et forward chaque GO_PRINT en SSE
+	// Le résultat final (go_result) peut dépasser 64 KB (beaucoup de détections) :
+	// on alloue un buffer de 10 MB pour éviter le deadlock pipe.
 	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "GO_PRINT|") {
@@ -167,6 +175,14 @@ func sseError(w http.ResponseWriter, f http.Flusher, msg string) {
 	payload, _ := json.Marshal(map[string]string{"level": "error", "message": msg})
 	writeSSE(w, f, string(payload))
 	writeSSE(w, f, "[DONE]")
+}
+
+// ── POST /starhe/live ──────────────────────────────────────────────────────
+// Stub — analyse en direct non implémentée dans cette version.
+func liveNotImplementedHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	w.Write([]byte(`{"error":"Analyse en direct non disponible dans cette version du serveur."}`)) //nolint:errcheck
 }
 
 // ── GET /starhe/results ────────────────────────────────────────────────────

@@ -1,11 +1,13 @@
 // main.go — Point d'entrée du serveur Go STARHE
 //
-// Expose 4 endpoints REST :
+// Expose 6 endpoints REST :
 //
 //	POST   /starhe/analyze        → Lance pipeline.py (SSE streaming)
 //	GET    /starhe/results        → Liste les résultats MongoDB
 //	GET    /starhe/results/{id}   → Récupère un résultat par ID
 //	DELETE /starhe/results/{id}   → Supprime un résultat
+//	POST   /starhe/dicom/load     → Charge un DICOM et retourne les frames en JPEG base64
+//	DELETE /starhe/cache          → Supprime le cache MongoDB d'un fichier (?path=…)
 //	GET    /health                → Healthcheck
 package main
 
@@ -33,9 +35,12 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("POST /starhe/analyze", analyzeHandler)
+	mux.HandleFunc("POST /starhe/live", liveNotImplementedHandler)
 	mux.HandleFunc("GET /starhe/results", listResultsHandler)
 	mux.HandleFunc("GET /starhe/results/{id}", getResultHandler)
 	mux.HandleFunc("DELETE /starhe/results/{id}", deleteResultHandler)
+	mux.HandleFunc("POST /starhe/dicom/load", dicomLoadHandler)
+	mux.HandleFunc("DELETE /starhe/cache", deleteCacheHandler)
 
 	addr := ":" + cfg.Port
 	log.Printf("STARHE Go server → http://localhost%s", addr)

@@ -50,7 +50,7 @@ def _get_collection() -> Collection:
 def save_result(file_path: str,
                 num_frames: int,
                 roi: list[int],
-                risk: dict,
+                risk: dict | None,
                 detections_per_frame: list[list[dict]],
                 anon_mode: str = "none",
                 analysis_mode: str = "original") -> str | None:
@@ -69,11 +69,12 @@ def save_result(file_path: str,
             "processed_at"         : datetime.datetime.utcnow().isoformat() + "Z",
             "num_frames"           : num_frames,
             "roi"                  : roi,
-            "risk"                 : risk,
             "detections_per_frame" : detections_per_frame,
             "anon_mode"            : anon_mode,
             "analysis_mode"        : analysis_mode,
         }
+        if risk is not None:
+            doc["risk"] = risk
         result = col.replace_one(
             {"file_path": file_path, "analysis_mode": analysis_mode},
             doc, upsert=True)

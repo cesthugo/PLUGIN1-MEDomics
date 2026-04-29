@@ -23,6 +23,7 @@ Retourne :
 """
 
 import json
+import math
 import os
 import shutil
 import sys
@@ -32,6 +33,105 @@ import cv2
 import numpy as np
 
 from starhe_plugin.utils.go_print import go_print
+
+
+# ── Remappage bboxes backscan → DICOM original ────────────────────────────────
+
+def _map_bbox_backscan_to_original(bbox: list, prepus_info: dict,
+                                   bsc_w: int = 512, bsc_h: int = 512) -> list:
+    """
+    Convertit une bbox de l'espace backscan vers l'espace image DICOM original
+    en inversant la transformation polaire de prepUS (scan inverse).
+
+    bbox        : [x0, y0, x1, y1] en pixels backscan
+    prepus_info : dict avec clés "backscan" et "crop"
+    bsc_w/bsc_h : dimensions de sortie du backscan (défaut 512×512)
+    Retourne      [x0, y0, x1, y1] en pixels de l'image DICOM originale.
+    """
+    bsc  = prepus_info["backscan"]
+    crop = prepus_info["crop"]
+
+    rc      = bsc["rc"]
+    dc      = bsc["dc"]
+    theta_c = bsc["theta_c"]
+    xoff    = bsc["xoffset"]
+    yoff    = bsc["yoffset"]
+    h       = bsc.get("height", bsc_h)
+    w       = bsc.get("width",  bsc_w)
+
+    delta_r     = dc / h
+    delta_theta = theta_c / w
+
+    x0, y0, x1, y1 = bbox
+
+    # Échantillonner N points sur les 4 bords (transformation non-linéaire)
+    N = 12
+    bj_vals = [x0 + (x1 - x0) * i / (N - 1) for i in range(N)]
+    bi_vals = [y0 + (y1 - y0) * i / (N - 1) for i in range(N)]
+    sample_points = (
+        [(bj, y0) for bj in bj_vals] +   # bord haut
+        [(bj, y1) for bj in bj_vals] +   # bord bas
+        [(x0, bi) for bi in bi_vals] +   # bord gauche
+        [(x1, bi) for bi in bi_vals]     # bord droit
+    )
+
+    orig_cols: list[float] = []
+    orig_rows: list[float] = []
+    for bj, bi in sample_points:
+        r     = rc + bi * delta_r
+        angle = -theta_c / 2 + bj * delta_theta
+        crop_row = r * math.cos(angle) - yoff
+        crop_col = r * math.sin(angle) + xoff
+        orig_rows.append(crop_row + crop["ymin"])
+        orig_cols.append(crop_col + crop["xmin"])
+
+    ox0 = max(min(orig_cols), crop["xmin"])
+    oy0 = max(min(orig_rows), crop["ymin"])
+    ox1 = min(max(orig_cols), crop["xmax"])
+    oy1 = min(max(orig_rows), crop["ymax"])
+    if ox1 <= ox0 or oy1 <= oy0:
+        return bbox  # hors zone de crop → retourner tel quel
+    return [ox0, oy0, ox1, oy1]
+
+
+def map_detections_to_dicom_coords(
+    detections_per_frame: list,
+    prepus_info: "dict | None",
+    bsc_w: int = 512,
+    bsc_h: int = 512,
+) -> list:
+    """
+    Remappe toutes les détections de l'espace backscan (ou crop) vers
+    l'espace image DICOM original.
+
+    - Si prepus_info contient "backscan" : transformation polaire inverse
+    - Si prepus_info contient seulement "crop" : décalage (xmin, ymin)
+    - Si prepus_info est None : aucune transformation
+    """
+    if prepus_info is None:
+        return detections_per_frame
+
+    has_backscan = "backscan" in prepus_info and "crop" in prepus_info
+    has_crop_only = not has_backscan and "crop" in prepus_info
+    crop = prepus_info.get("crop", {})
+
+    mapped: list = []
+    for frame_dets in detections_per_frame:
+        mapped_dets: list = []
+        for det in frame_dets:
+            new_det = dict(det)
+            if has_backscan:
+                new_det["bbox"] = _map_bbox_backscan_to_original(
+                    det["bbox"], prepus_info, bsc_w, bsc_h
+                )
+            elif has_crop_only:
+                x0, y0, x1, y1 = det["bbox"]
+                xmin = crop.get("xmin", 0)
+                ymin = crop.get("ymin", 0)
+                new_det["bbox"] = [x0 + xmin, y0 + ymin, x1 + xmin, y1 + ymin]
+            mapped_dets.append(new_det)
+        mapped.append(mapped_dets)
+    return mapped
 
 
 # ── Calcul déterministe des paramètres géométriques backscan ─────────────────

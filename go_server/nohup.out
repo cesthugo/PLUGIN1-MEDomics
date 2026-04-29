@@ -1,0 +1,3 @@
+2026/04/23 13:23:12 MongoDB: connecté (mongodb://localhost:54017/ / medomics)
+2026/04/23 13:23:12 STARHE Go server → http://localhost:8080
+2026/04/23 13:23:12 listen tcp :8080: bind: address already in use

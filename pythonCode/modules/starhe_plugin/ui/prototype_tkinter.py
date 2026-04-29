@@ -2227,7 +2227,16 @@ class STARHEApp(tk.Tk):
         dx_img = abs(ix2 - ix1)
         dy_img = abs(iy2 - iy1)
 
-        if self._pixel_spacing is not None:
+        # En mode backscan, les coordonnées sont dans l'espace 512×512 backscan,
+        # pas dans l'espace DICOM original — appliquer pixel_spacing serait
+        # physiquement incorrect (la transformation polaire est non-linéaire).
+        in_backscan = (self._crop_toggle.get()
+                       and self._frames_cropped is not None)
+
+        if in_backscan:
+            dist_img_px = math.hypot(dx_img, dy_img)
+            dist_label = f"{dist_img_px:.1f} px (espace backscan)"
+        elif self._pixel_spacing is not None:
             dist_mm = math.hypot(dx_img * self._pixel_spacing[1],
                                   dy_img * self._pixel_spacing[0])
             dist_label = f"{dist_mm:.1f} mm"

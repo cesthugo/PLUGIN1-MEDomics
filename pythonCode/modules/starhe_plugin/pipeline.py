@@ -17,7 +17,7 @@ import threading
 import numpy as np
 
 from starhe_plugin.dicom.reader        import load_dicom, extract_frames, frame_to_uint8
-from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus
+from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus, map_detections_to_dicom_coords
 from starhe_plugin.dicom.anonymizer    import anonymize
 from starhe_plugin.ai.starhe_risk      import STARHERiskModel
 from starhe_plugin.ai.starhe_detect    import STARHEDetectModel
@@ -28,6 +28,7 @@ from starhe_plugin.config              import DETECT_EVERY_N
 
 def run_pipeline(dicom_path: str,
                  anon_mode: str = "hash",
+                 run_risk: bool = True,
                  run_detection: bool = True,
                  back_scan_conversion: bool = True,
                  backscan_width: int = 512,
@@ -38,6 +39,7 @@ def run_pipeline(dicom_path: str,
     Paramètres :
       dicom_path           : chemin absolu du fichier .dcm
       anon_mode            : "hash" | "remove" | "none"
+      run_risk             : si False, saute STARHE-RISK (plus rapide, detection seule)
       run_detection        : si False, saute STARHE-DETECT (plus rapide)
       back_scan_conversion : active la conversion scan inverse prepUS (recommandé)
       backscan_width/height: dimensions de sortie du backscan (défaut 512×512)
@@ -104,18 +106,30 @@ def run_pipeline(dicom_path: str,
         roi = (c["xmin"], c["ymin"], c["xmax"], c["ymax"])
 
     # ── 5. STARHE-RISK ────────────────────────────────────────────────────────
-    go_progress(step := step + 1, TOTAL_STEPS, "Inférence STARHE-RISK (C3D)…")
-    risk_model  = STARHERiskModel()
-    risk_result = risk_model.predict(frames_processed)
+    risk_result: dict | None = None
+    if run_risk:
+        go_progress(step := step + 1, TOTAL_STEPS, "Inférence STARHE-RISK (C3D)…")
+        risk_model  = STARHERiskModel()
+        risk_result = risk_model.predict(frames_processed)
+    else:
+        step += 1
+        go_progress(step, TOTAL_STEPS, "STARHE-RISK ignoré (run_risk=False).")
 
-    # ── 6. STARHE-DETECT (échantillonnage temporel) ──────────────────────────
-    detections: list[dict] = []
+    # ── 6. STARHE-DETECT (échantillonnage temporel + propagation) ────────────
+    # Identique à l'implémentation de référence (prototype_tkinter.py) :
+    #   - inférence sur les frames samplées (stride=DETECT_EVERY_N)
+    #   - propagation directe des détections aux frames intermédiaires
+    #     [i, i+1, ..., i+stride-1] (pas de deuxième passe d'inférence)
+    # predict_batch utilise déjà DETECT_SCORE_THRESHOLD en interne.
+    n_frames_total = len(frames_processed)
+    detections_per_frame: list[list[dict]] = [[] for _ in range(n_frames_total)]
+
     if run_detection:
-        n_frames   = len(frames_processed)
         stride     = max(1, DETECT_EVERY_N)
-        n_analysed = len(range(0, n_frames, stride))
+        sampled    = list(range(0, n_frames_total, stride))
+        n_analysed = len(sampled)
         go_progress(step := step + 1, TOTAL_STEPS,
-                    f"Inférence STARHE-DETECT ({n_analysed}/{n_frames} frames, stride={stride})…")
+                    f"Inférence STARHE-DETECT ({n_analysed}/{n_frames_total} frames, stride={stride})…")
 
         # Attendre que le subprocess soit prêt (il a démarré pendant prepUS + RISK)
         detect_thread.join()
@@ -124,82 +138,66 @@ def run_pipeline(dicom_path: str,
         detect_model = _detect_model_box[0]
 
         with detect_model:
-            sampled = list(range(0, n_frames, stride))
             bs = detect_model.batch_size
             go_print("info",
-                     f"DETECT : batch_size={bs}, {len(sampled)} sampled frames à analyser.")
+                     f"DETECT : batch_size={bs}, {n_analysed} sampled frames à analyser.")
 
-            # ── Pass 1 : inférence sur les frames samplées (seuil normal) ────
-            sampled_dets: dict[int, list] = {}
-            for b_start in range(0, len(sampled), bs):
+            for b_start in range(0, n_analysed, bs):
                 batch_idx    = sampled[b_start:b_start + bs]
                 batch_frames = [frames_processed[i] for i in batch_idx]
                 batch_dets   = detect_model.predict_batch(batch_frames)
+
                 for idx, frame_dets in zip(batch_idx, batch_dets):
-                    sampled_dets[idx] = frame_dets
-                    for d in frame_dets:
-                        detections.append({**d, "frame": idx})
-                done = b_start + len(batch_idx)
-                if done % 5 == 0 or done >= len(sampled):
+                    # Propagation temporelle identique à Tkinter :
+                    # copier les détections sur toutes les frames [idx, idx+stride).
+                    for j in range(idx, min(idx + stride, n_frames_total)):
+                        detections_per_frame[j] = frame_dets
+
+                done  = b_start + len(batch_idx)
+                n_det = sum(1 for d in detections_per_frame if d)
+                if done % 5 == 0 or done >= n_analysed:
                     go_print("info",
-                             f"DETECT : {done}/{len(sampled)} sampled frames —"
-                             f" {len(set(d['frame'] for d in detections))} frames avec détection(s).")
+                             f"DETECT : {done}/{n_analysed} sampled frames —"
+                             f" {n_det} frames avec détection(s).")
 
-            # ── Pass 2 : suivi de la bbox sur les frames intermédiaires ───────
-            # Pour chaque frame samplée avec une détection, on lance l'inférence
-            # sur les frames intermédiaires suivantes avec seuil=0 afin que la
-            # bounding box suive la tumeur.  Si le modèle ne trouve rien (faible
-            # contraste, occultation partielle), on replie sur la bbox de la
-            # frame samplée pour éviter un clignotement.
-            followup_idx: list[int] = []
-            followup_src: dict[int, int] = {}  # frame intermédiaire → frame samplée source
-            for idx in sampled:
-                if sampled_dets.get(idx):
-                    for j in range(idx + 1, min(idx + stride, n_frames)):
-                        followup_idx.append(j)
-                        followup_src[j] = idx
-
-            if followup_idx:
-                go_print("info",
-                         f"DETECT : suivi sur {len(followup_idx)} frames intermédiaires (seuil=0)…")
-                followup_results: dict[int, list] = {}
-                for b_start in range(0, len(followup_idx), bs):
-                    batch_idx    = followup_idx[b_start:b_start + bs]
-                    batch_frames = [frames_processed[i] for i in batch_idx]
-                    batch_dets   = detect_model.predict_batch(batch_frames, score_thr=0.0)
-                    for idx, frame_dets in zip(batch_idx, batch_dets):
-                        followup_results[idx] = frame_dets
-
-                for j, frame_dets in followup_results.items():
-                    if frame_dets:
-                        # Le modèle a localisé la tumeur → on utilise la vraie bbox
-                        for d in frame_dets:
-                            detections.append({**d, "frame": j})
-                    else:
-                        # Rien détecté → on propage la bbox de la frame samplée (fallback)
-                        for d in sampled_dets[followup_src[j]]:
-                            detections.append({**d, "frame": j})
+            n_det_final = sum(1 for d in detections_per_frame if d)
+            go_print("success",
+                     f"DETECT terminé : {n_det_final}/{n_frames_total} frames avec lésion(s).")
     else:
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")
 
-    # ── 7. Sauvegarde MongoDB ─────────────────────────────────────────────────
+    # ── 7. Remappage backscan → espace DICOM original ─────────────────────────
+    # RTMDet reçoit les frames backscan (512×512) : ses bboxes sont dans cet
+    # espace. Il faut inverser la transformation polaire + l'offset de crop
+    # pour obtenir des coordonnées dans l'image DICOM originale affichée.
+    detections_per_frame = map_detections_to_dicom_coords(
+        detections_per_frame,
+        info,
+        bsc_w=backscan_width,
+        bsc_h=backscan_height,
+    )
+    if any(d for d in detections_per_frame):
+        go_print("info", "Détections remappées vers l'espace original.")
+
+    # ── 8. Sauvegarde MongoDB ─────────────────────────────────────────────────
     doc_id = save_result(
-        file_path  = dicom_path,
-        num_frames = len(frames_processed),
-        roi        = list(roi) if roi else [],
-        risk       = risk_result,
-        detections = detections,
-        anon_mode  = anon_mode,
+        file_path            = dicom_path,
+        num_frames           = n_frames_total,
+        roi                  = list(roi) if roi else [],
+        risk                 = risk_result,
+        detections_per_frame = detections_per_frame,
+        anon_mode            = anon_mode,
     )
 
     output = {
-        "doc_id"     : doc_id,
-        "num_frames" : len(frames_processed),
-        "roi"        : list(roi) if roi else [],
-        "risk"       : risk_result,
-        "detections" : detections,
+        "doc_id"              : doc_id,
+        "num_frames"          : n_frames_total,
+        "roi"                 : list(roi) if roi else [],
+        "detections_per_frame": detections_per_frame,
     }
+    if risk_result is not None:
+        output["risk"] = risk_result
     go_result(output)
     return output
 
@@ -217,6 +215,8 @@ if __name__ == "__main__":
     parser.add_argument("--anon_mode", default="hash",
                         choices=["hash", "remove", "none"],
                         help="Mode d'anonymisation DICOM (défaut : hash)")
+    parser.add_argument("--no_risk", action="store_true",
+                        help="Désactiver STARHE-RISK (classification C3D)")
     parser.add_argument("--no_detection", action="store_true",
                         help="Désactiver STARHE-DETECT (plus rapide)")
     parser.add_argument("--no_backscan", action="store_true",
@@ -231,6 +231,7 @@ if __name__ == "__main__":
         run_pipeline(
             dicom_path          = args.dicom_path,
             anon_mode           = args.anon_mode,
+            run_risk            = not args.no_risk,
             run_detection       = not args.no_detection,
             back_scan_conversion= not args.no_backscan,
             backscan_width      = args.backscan_width,

@@ -27,10 +27,20 @@ type appConfig struct {
 	MongoCollection string
 }
 
-// defaultPythonExe renvoie le chemin par défaut de l'exécutable Python du venv,
-// relatif au dossier go_server/ (../pythonCode/modules/starhe_plugin/.venv/…).
+// serverDir renvoie le répertoire absolu de l'exécutable Go (go_server/).
+// Utilisé pour calculer les chemins relatifs au projet indépendamment du CWD.
+func serverDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	return filepath.Dir(exe)
+}
+
+// defaultPythonExe renvoie le chemin absolu vers l'exécutable Python du venv,
+// calculé depuis le dossier de l'exécutable (go_server/).
 func defaultPythonExe() string {
-	base := filepath.Join("..", "pythonCode", "modules", "starhe_plugin", ".venv")
+	base := filepath.Join(serverDir(), "..", "pythonCode", "modules", "starhe_plugin", ".venv")
 	if runtime.GOOS == "windows" {
 		return filepath.Join(base, "Scripts", "python.exe")
 	}
@@ -41,7 +51,7 @@ var cfg = appConfig{
 	Port: envOr("PORT", "8080"),
 
 	PythonExe:     envOr("STARHE_PYTHON_EXE", defaultPythonExe()),
-	PythonModPath: envOr("STARHE_PYTHON_PATH", filepath.Join("..", "pythonCode", "modules")),
+	PythonModPath: envOr("STARHE_PYTHON_PATH", filepath.Join(serverDir(), "..", "pythonCode", "modules")),
 
 	MongoURI:        envOr("MONGO_URI", "mongodb://localhost:54017/"),
 	MongoDatabase:   envOr("MONGO_DB", "medomics"),

@@ -1,6 +1,10 @@
 # ── Données médicales (fichiers .dcm potentiellement lourds / sensibles) ──────
 data/
 
+# ── Scripts de diagnostic locaux (hors dépôt, à usage ponctuel) ───────────────
+diagnostic_crossplatform.py
+diagnostic_*.py
+
 # ── Binaires compilés ─────────────────────────────────────────────────────────
 *.exe
 

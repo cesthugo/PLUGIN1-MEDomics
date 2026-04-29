@@ -1,0 +1,82 @@
+/* StarhePlugin.css — Styles globaux du plugin STARHE
+   Scrollbars, transitions, utilitaires */
+
+/* Scrollbar webkit */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #10141e;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3245;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a4860;
+}
+
+/* Reset box-model */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Assure que le root React occupe la totalité de la fenêtre */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Canvas : pas de contour au focus */
+canvas:focus {
+  outline: none;
+}
+
+/* Transitions légères pour les thèmes */
+.starhe-card {
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+/* Animation clignotante pour le indicateur d'analyse */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+.starhe-blink {
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+/* Barre de progression colorée */
+.starhe-progress {
+  height: 3px;
+  background: #1565C0;
+  transition: width 0.3s ease;
+}
+
+/* Tooltip simple */
+[data-tip] {
+  position: relative;
+}
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a2238;
+  color: #cbd5e1;
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+[data-tip]:hover::after {
+  opacity: 1;
+}

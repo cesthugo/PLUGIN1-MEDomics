@@ -1,0 +1,371 @@
+// components/DicomCanvas.tsx — Visionneuse DICOM avec canvas HTML5
+//
+// Fonctionnalités portées depuis prototype_tkinter.py :
+//  - Affichage des frames JPEG avec pan / zoom centré sur curseur
+//  - Superposition des bboxes de détection (dessin canvas)
+//  - Outil de mesure en mm (dessin canvas, overlay SVG pour les terminaisons)
+//  - Mode série (drag vertical = scroll frames)
+//  - Clic droit maintenu = contraste (X) / luminosité (Y)
+//  - Molette = zoom centré sur le curseur
+//  - Barre de mode ("ORIGINAL" / "ANALYSE STARHE")
+//  - Prévisualisation mesure en cours de dessin
+
+import React, {
+  useCallback, useEffect, useLayoutEffect, useRef, useState,
+} from 'react';
+
+import {
+  computeTransform, imgToScreen, screenToImg,
+  useCanvasInteractions,
+} from '../hooks/useCanvasInteractions';
+import type { TabState, ViewMode, Measure, Detection } from '../types';
+import { BLUE, CANVAS_BG, SBAR_MUTED } from '../colors';
+
+// ── Dessine les bboxes de détection ──────────────────────────────────────────
+
+function drawDetections(
+  ctx:        CanvasRenderingContext2D,
+  detections: Detection[],
+  scale:      number,
+  offX:       number,
+  offY:       number,
+): void {
+  for (const det of detections) {
+    const [ix0, iy0, ix1, iy1] = det.bbox;
+    const sx0 = ix0 * scale + offX, sy0 = iy0 * scale + offY;
+    const sx1 = ix1 * scale + offX, sy1 = iy1 * scale + offY;
+    const isTumor = det.label.includes('tumor');
+    ctx.strokeStyle = isTumor ? 'rgb(255,80,80)' : 'rgb(80,200,80)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx0, sy0, sx1 - sx0, sy1 - sy0);
+    ctx.font = '13px "Segoe UI", sans-serif';
+    ctx.fillStyle = isTumor ? 'rgb(255,80,80)' : 'rgb(80,200,80)';
+    ctx.fillText(`${det.label} ${det.score.toFixed(2)}`, sx0, Math.max(sy0 - 4, 12));
+  }
+}
+
+// ── Dessine un segment de mesure ──────────────────────────────────────────────
+
+function drawMeasureSegment(
+  ctx:          CanvasRenderingContext2D,
+  p1:           [number, number],
+  p2:           [number, number],
+  scale:        number,
+  offX:         number,
+  offY:         number,
+  selected:     boolean,
+  pixelSpacing: [number, number] | null,
+): void {
+  const [ix1, iy1] = p1, [ix2, iy2] = p2;
+  const sx1 = ix1 * scale + offX, sy1 = iy1 * scale + offY;
+  const sx2 = ix2 * scale + offX, sy2 = iy2 * scale + offY;
+
+  const color = selected ? '#ff9900' : '#ffff00';
+  const r     = 3;
+
+  // Trait en pointillés
+  ctx.setLineDash([5, 3]);
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.moveTo(sx1, sy1);
+  ctx.lineTo(sx2, sy2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Points terminaux
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(sx1, sy1, r, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(sx2, sy2, r, 0, Math.PI * 2); ctx.fill();
+
+  // Label distance
+  const dxImg  = Math.abs(ix2 - ix1), dyImg = Math.abs(iy2 - iy1);
+  let distLabel: string;
+  if (pixelSpacing) {
+    const mm = Math.hypot(dxImg * pixelSpacing[1], dyImg * pixelSpacing[0]);
+    distLabel = `${mm.toFixed(1)} mm`;
+  } else {
+    distLabel = `${Math.hypot(dxImg, dyImg).toFixed(1)} px (pas calibration)`;
+  }
+
+  // Position du label perpendiculaire au segment
+  const mx = (sx1 + sx2) / 2, my = (sy1 + sy2) / 2;
+  const dxS   = sx2 - sx1, dyS = sy2 - sy1;
+  const segLen = Math.hypot(dxS, dyS) || 1;
+  let perpX = -dyS / segLen, perpY = dxS / segLen;
+  if (perpY > 0) { perpX = -perpX; perpY = -perpY; }
+  const OFFSET = 18;
+  const lx = mx + perpX * OFFSET, ly = my + perpY * OFFSET;
+
+  ctx.font      = 'bold 14px "Segoe UI", sans-serif';
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillText(distLabel, lx + 1, ly + 1);
+  ctx.fillStyle = color;
+  ctx.fillText(distLabel, lx, ly);
+}
+
+// ── Composant ─────────────────────────────────────────────────────────────────
+
+export interface DicomCanvasProps {
+  tab:             TabState | null;
+  onZoomPan:       (zoom: number, panX: number, panY: number) => void;
+  onContrastBright:(contrast: number, brightness: number) => void;
+  onFrameChange:   (idx: number) => void;
+  onMeasureAdd:    (frameIdx: number, measure: Measure) => void;
+  onMeasureMove:   (frameIdx: number, segIdx: number, newPts: [[number, number], [number, number]]) => void;
+  onMeasureSelect: (frameIdx: number, segIdx: number | null) => void;
+  onContextMenu:   (x: number, y: number) => void;
+}
+
+export function DicomCanvas({
+  tab,
+  onZoomPan,
+  onContrastBright,
+  onFrameChange,
+  onMeasureAdd,
+  onMeasureMove,
+  onMeasureSelect,
+  onContextMenu,
+}: DicomCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef   = useRef<HTMLDivElement>(null);
+  const imgCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+
+  // Preview segment en cours de dessin
+  const [measurePreview, setMeasurePreview] = useState<
+    [[number, number], [number, number]] | null
+  >(null);
+
+  // Taille courante du canvas (px)
+  const [canvasSize, setCanvasSize] = useState({ w: 640, h: 480 });
+
+  // Observer de taille
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        setCanvasSize({ w: e.contentRect.width, h: e.contentRect.height });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // État pour le hook d'interactions
+  const getState = useCallback(() => ({
+    viewMode:        tab?.viewMode          ?? 'normal',
+    zoom:            tab?.zoom              ?? 1,
+    panX:            tab?.panX              ?? 0,
+    panY:            tab?.panY              ?? 0,
+    contrast:        tab?.contrast          ?? 1,
+    brightness:      tab?.brightness        ?? 0,
+    frameIdx:        tab?.frameIdx         ?? 0,
+    frameCount:      tab?.data?.frameCount ?? 0,
+    imgW:            tab?.data?.cols       ?? 0,
+    imgH:            tab?.data?.rows       ?? 0,
+    canvasW:         canvasSize.w,
+    canvasH:         canvasSize.h,
+    measuresByFrame: tab?.measuresByFrame  ?? {},
+    selectedMeasure: tab?.selectedMeasure  ?? null,
+    pixelSpacing:    tab?.data?.pixelSpacing ?? null,
+  }), [tab, canvasSize]);
+
+  const interactions = useCanvasInteractions(getState, {
+    onZoomPan,
+    onContrastBright,
+    onFrameChange,
+    onMeasureAdd,
+    onMeasureMove,
+    onMeasureSelect,
+    onContextMenu,
+  });
+
+  // Branche le setter de preview
+  useEffect(() => {
+    interactions.setMeasurePreview(setMeasurePreview);
+  }, [interactions]);
+
+  // Écoute Delete / Backspace sur le canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.addEventListener('keydown', interactions.onKeyDown);
+    return () => canvas.removeEventListener('keydown', interactions.onKeyDown);
+  }, [interactions.onKeyDown]);
+
+  // ── Rendu canvas ───────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvasSize.w, canvasSize.h);
+    ctx.fillStyle = CANVAS_BG;
+    ctx.fillRect(0, 0, canvasSize.w, canvasSize.h);
+
+    if (!tab?.data) {
+      // Texte d'accueil
+      ctx.fillStyle = '#2a2a3e';
+      ctx.font = '14px "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        'Aucun DICOM chargé — utilisez « Charger un fichier DICOM » dans le panneau latéral',
+        canvasSize.w / 2, canvasSize.h / 2,
+      );
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    const { frameIdx, data, zoom, panX, panY, contrast, brightness,
+            measuresByFrame, selectedMeasure, detectionsBy } = tab;
+    const frames = data.framesB64;
+    if (!frames?.length) return;
+    const b64 = frames[Math.min(frameIdx, frames.length - 1)];
+    const cacheKey = `${frameIdx}-${b64.slice(0, 20)}`;
+
+    const drawFrame = (img: HTMLImageElement) => {
+      // Utilise TOUJOURS les dimensions DICOM originales comme espace de coordonnées.
+      // Les hooks d'interaction (useCanvasInteractions) utilisent aussi data.cols/data.rows
+      // via getState() → les deux transforms sont identiques → pas de décalage de mesure.
+      const iw = data.cols;
+      const ih = data.rows;
+      const t  = computeTransform(iw, ih, canvasSize.w, canvasSize.h, zoom, panX, panY);
+
+      // Contraste / luminosité via CSS filter (version la plus fidèle à Tkinter)
+      const cVal = contrast;
+      const bVal = 1 + brightness / 100;
+      ctx.filter = `contrast(${cVal}) brightness(${bVal})`;
+      ctx.drawImage(img, t.offX, t.offY, iw * t.scale, ih * t.scale);
+      ctx.filter = 'none';
+
+      // Détections
+      const dets = (detectionsBy.original ?? [])[frameIdx] ?? [];
+      if (dets.length) drawDetections(ctx, dets, t.scale, t.offX, t.offY);
+
+      // Mesures finalisées
+      const measures = measuresByFrame[frameIdx] ?? [];
+      for (let i = 0; i < measures.length; i++) {
+        drawMeasureSegment(ctx, measures[i].pts[0], measures[i].pts[1],
+          t.scale, t.offX, t.offY, i === selectedMeasure, data.pixelSpacing);
+      }
+
+      // Mesure en cours de dessin
+      if (measurePreview) {
+        drawMeasureSegment(ctx, measurePreview[0], measurePreview[1],
+          t.scale, t.offX, t.offY, false, data.pixelSpacing);
+      }
+    };
+
+    // Lookup / charge l'image depuis le cache
+    const cached = imgCacheRef.current.get(cacheKey);
+    if (cached) {
+      drawFrame(cached);
+    } else {
+      const img = new Image();
+      img.onload = () => {
+        imgCacheRef.current.set(cacheKey, img);
+        // Évite de surcharger la mémoire — garde les 200 dernières
+        if (imgCacheRef.current.size > 200) {
+          const firstKey = imgCacheRef.current.keys().next().value;
+          if (firstKey !== undefined) imgCacheRef.current.delete(firstKey);
+        }
+        drawFrame(img);
+      };
+      img.src = `data:image/jpeg;base64,${b64}`;
+    }
+  }, [
+    tab, canvasSize, measurePreview,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    tab?.frameIdx, tab?.zoom, tab?.panX, tab?.panY,
+    tab?.contrast, tab?.brightness, tab?.selectedMeasure,
+    tab?.measuresByFrame, tab?.detectionsBy,
+  ]);
+
+  // Vue courante et badge
+  const hasAnalysis = !!(tab?.detectionsBy.original?.some(d => d.length > 0));
+  const modeBadgeTxt = hasAnalysis ? 'ANALYSE STARHE' : 'ORIGINAL';
+  const zoomPct = tab ? Math.round(tab.zoom * 100) : 100;
+  const viewMode = tab?.viewMode ?? 'normal';
+
+  const cursorMap: Record<ViewMode, string> = {
+    normal:  'default',
+    pan:     'grab',
+    measure: 'crosshair',
+    series:  'ns-resize',
+  };
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{
+        flex: 1, position: 'relative', background: CANVAS_BG, overflow: 'hidden',
+        display: 'flex', flexDirection: 'column',
+      }}
+    >
+      {/* Badge mode + zoom */}
+      <div
+        style={{
+          position: 'absolute', top: 8, left: 8,
+          display: 'flex', gap: 6, zIndex: 10, pointerEvents: 'none',
+        }}
+      >
+        <span
+          style={{
+            background: hasAnalysis ? '#1e3a5f' : '#dbeafe',
+            color:      hasAnalysis ? '#90caf9' : '#1d4ed8',
+            fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+          }}
+        >
+          {modeBadgeTxt}
+        </span>
+        <span
+          style={{
+            background: '#1a1a2e', color: SBAR_MUTED,
+            fontSize: 10, padding: '2px 6px', borderRadius: 4,
+          }}
+        >
+          {zoomPct} %
+        </span>
+        {viewMode !== 'normal' && (
+          <span
+            style={{
+              background: BLUE, color: '#fff',
+              fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+            }}
+          >
+            {viewMode === 'pan' ? '✋ Pan' : viewMode === 'measure' ? '📏 Mesure' : '↕ Série'}
+          </span>
+        )}
+      </div>
+
+      <canvas
+        ref={canvasRef}
+        width={canvasSize.w}
+        height={canvasSize.h}
+        tabIndex={0}
+        style={{
+          outline: 'none',
+          cursor: cursorMap[viewMode],
+          display: 'block',
+          width: '100%',
+          height: '100%',
+        }}
+        onWheel={interactions.onWheel}
+        onMouseDown={e => {
+          interactions.onMouseDown(e);
+          interactions.onContextMenuDown(e);
+        }}
+        onMouseMove={interactions.onMouseMove}
+        onMouseUp={e => {
+          interactions.onMouseUp(e);
+          interactions.onContextMenuUp(e);
+        }}
+        onContextMenu={e => e.preventDefault()}
+      />
+    </div>
+  );
+}
