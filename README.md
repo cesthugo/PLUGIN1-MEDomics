@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.4.0` — Last updated: April 29, 2026*
+*Version `0.4.1` — Last updated: April 29, 2026*
 
 ---
 
@@ -318,13 +318,13 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 
 | Feature | Description |
 |---|---|
-| **Multi-tab / multi-file** | Load N DICOM files; each tab stores its own full state (frames, zoom, measures, contrast, results…) |
+| **Multi-tab / multi-file** | Load N DICOM files concurrently; each tab stores its own independent state (frames, zoom, measures, contrast, analysis results…); analysis results are injected into the tab that launched the analysis, regardless of which tab is active when results arrive |
 | **DICOM loading** | Via absolute path (Electron / MEDomics) or file upload drag-and-drop (browser) |
 | **Frame viewer** | Hardware-accelerated canvas, `letter-box` fit, smooth scroll / keyboard navigation |
 | **Playback** | Variable-speed loop (0.25×→3.0×) calibrated from DICOM `FrameTime` |
 | **Pan / Zoom** | Mouse wheel zoom, middle-click drag, Ctrl+0/+/- shortcuts |
 | **Measure tool** | Multi-segment mm measurements; draggable endpoints + whole segment; label auto-placed perpendicularly with draggable position; dashed leader line |
-| **Contrast / Brightness** | Pixel-level ImageData manipulation (`c×pixel + b`); independent sliders; no CSS filter artifacts |
+| **Contrast / Brightness** | Pixel-level ImageData manipulation (`c×pixel + b`, pivot at 0 — adapted for dark ultrasound images); contrast 0.1–3.0, brightness −50–+100; independent sliders; no CSS filter artifacts |
 | **Right-click context menu** | 7 actions: Pan, Zoom, Measure, Series scroll, Contrast, Brightness, Reset view |
 | **Analysis modes** | `RISK + DETECT` / `RISK only` / `DETECT only` — configurable from Settings |
 | **SSE progress** | Real-time step-by-step progress from the pipeline streamed to the console and status label |
@@ -334,7 +334,7 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 | **Live analysis modal** | Full port of `live_tab.py`: 3 sources (C-STORE, folder, HDMI), real-time RTMDet overlay, risk score |
 | **MongoDB cache** | Cached results restored instantly on re-open; "Réinitialiser l'analyse" clears the server cache |
 | **Theme** | Dark theme by default; sidebar and background colors fully configurable from Settings |
-| **Keyboard shortcuts** | Space (play/pause), ←/→ (±1 frame), Shift+←/→ (±10), Home/End, P/M/S/R/C/L, ±speed, B (loop), Ctrl+Tab / Ctrl+W |
+| **Keyboard shortcuts** | Space (play/pause), ←/→ (±1 frame), Shift+←/→ (±10), Home, P/M/S/R/C/L, `+`/`-` (±speed without modifier), `Cmd+`/`Cmd-`/`Cmd+0` (zoom only), B (loop), Ctrl+Tab / Ctrl+W |
 
 ### Development workflow
 

@@ -105,6 +105,8 @@ The **tab bar** is located at the bottom of the viewer, like a web browser.
 | `-` | Playback speed ×0.80 |
 | `B` | Toggle **Loop** |
 
+> **Note:** `Cmd+=` / `Ctrl+=` and `Cmd+-` / `Ctrl+-` only control zoom (see below), not playback speed.
+
 ### Zoom
 | Key | Action |
 |---|---|
@@ -477,7 +479,7 @@ Useful for browsing the sequence slowly without using the scrollbar.
 
 ### Brightness
 1. Right-click → **Brightness…**
-2. Slider from −100 to +100 (neutral = 0)
+2. Slider from −50 to +100 (neutral = 0)
 3. Same behavior as contrast
 
 Both windows can be open simultaneously.
