@@ -189,9 +189,9 @@ export function Sidebar({
   onToggleTheme,
 }: SidebarProps) {
   const [pathInput, setPathInput] = useState('');
-  // Détection Electron : window.process.type === 'renderer' ou userAgent contient 'Electron'
+  // Détection Electron : via l'API preload (méthode fiable avec contextIsolation)
   const isElectron = typeof window !== 'undefined' &&
-    ((window as any).process?.type === 'renderer' ||
+    (window.electronAPI !== undefined ||
      navigator.userAgent.includes('Electron'));
   const data      = tab?.data ?? null;
   const frameIdx  = tab?.frameIdx ?? 0;

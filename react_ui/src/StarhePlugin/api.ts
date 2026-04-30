@@ -1,13 +1,16 @@
 // api.ts — Appels vers le serveur Go STARHE
 
+
 import type { DicomData, Detection, AnalysisResult, SSEPayload } from './types';
 
-// Base URL configurable :
-//   - Electron / MEDomics : injecter window.__STARHE_API_BASE__ = 'http://localhost:8080'
-//   - Dev Vite (npm run dev) : laisser vide → les requêtes sont relatives et passent
-//     par le proxy Vite (vite.config.ts : /starhe → http://localhost:8080)
+// Base URL configurable (ordre de priorité) :
+//   1. window.electronAPI.apiBase  → injecté par electron/preload.ts
+//   2. window.__STARHE_API_BASE__  → injection manuelle (intégration MEDomics)
+//   3. ''                          → chemin relatif → proxy Vite en dev
 export const API_BASE: string =
-  (window as any).__STARHE_API_BASE__ ?? '';
+  window.electronAPI?.apiBase ??
+  window.__STARHE_API_BASE__ ??
+  '';
 
 // ── Chargement DICOM ──────────────────────────────────────────────────────────
 

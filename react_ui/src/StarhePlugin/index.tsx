@@ -200,9 +200,10 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // ── Chargement DICOM ───────────────────────────────────────────────────────
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
 
-  // Détection Electron (file.path disponible uniquement dans ce contexte)
+  // Détection Electron : via l'API preload (méthode fiable avec contextIsolation)
+  // ou via le userAgent (fallback si preload absent)
   const isElectron = typeof window !== 'undefined' &&
-    ((window as any).process?.type === 'renderer' ||
+    (window.electronAPI !== undefined ||
      navigator.userAgent.includes('Electron'));
 
   // ── Injection d'un onglet après chargement réussi ─────────────────────────
@@ -267,23 +268,26 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   }, [addLog, addTab, loadingPaths]);
 
   // Chargement via explorateur de fichiers
-  const onLoadDicom = useCallback(() => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = true;
-    input.onchange = async () => {
-      for (const file of Array.from(input.files ?? [])) {
-        if (isElectron) {
-          // Electron expose le chemin absolu réel
-          const path = (file as File & { path?: string }).path ?? file.name;
-          await doLoadPath(path, file.name);
-        } else {
-          // Navigateur standard : upload des octets
+  const onLoadDicom = useCallback(async () => {
+    if (isElectron && window.electronAPI?.openDicomFiles) {
+      // Mode Electron : dialogue natif système → chemins absolus réels
+      const paths = await window.electronAPI.openDicomFiles();
+      for (const p of paths) {
+        const name = p.split(/[\\/]/).pop() ?? p;
+        await doLoadPath(p, name);
+      }
+    } else {
+      // Mode navigateur standard : upload des octets via <input type="file">
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.multiple = true;
+      input.onchange = async () => {
+        for (const file of Array.from(input.files ?? [])) {
           await doLoadFile(file);
         }
-      }
-    };
-    input.click();
+      };
+      input.click();
+    }
   }, [isElectron, doLoadPath, doLoadFile]);
 
   // Chargement par chemin absolu tapé manuellement (mode dev / Electron avancé)

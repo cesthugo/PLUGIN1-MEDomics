@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // base './' : les assets utilisent des chemins relatifs, compatibles
+  // avec le chargement en file:// par Electron (dist/index.html).
+  base: './',
   server: {
     port: 5173,
     proxy: {
