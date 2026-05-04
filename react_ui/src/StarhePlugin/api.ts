@@ -5,12 +5,14 @@ import type { DicomData, Detection, AnalysisResult, SSEPayload } from './types';
 
 // Base URL configurable (ordre de priorité) :
 //   1. window.electronAPI.apiBase  → injecté par electron/preload.ts
-//   2. window.__STARHE_API_BASE__  → injection manuelle (intégration MEDomics)
+//   2. window.__STARHE_API_BASE__  → injection manuelle (iframe MEDomics via postMessage)
 //   3. ''                          → chemin relatif → proxy Vite en dev
-export const API_BASE: string =
-  window.electronAPI?.apiBase ??
-  window.__STARHE_API_BASE__ ??
-  '';
+//
+// Fonction (non const) pour relire la valeur à chaque appel,
+// notamment après l'injection tardive de window.__STARHE_API_BASE__.
+export function getApiBase(): string {
+  return window.electronAPI?.apiBase ?? (window as any).__STARHE_API_BASE__ ?? '';
+}
 
 // ── Chargement DICOM ──────────────────────────────────────────────────────────
 
@@ -37,11 +39,16 @@ export async function loadDicom(
   quality  = 70,
   maxDim   = 640,
 ): Promise<DicomData> {
-  const res = await fetch(`${API_BASE}/starhe/dicom/load`, {
+  const res = await fetch(`${getApiBase()}/starhe/dicom/load`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ dicom_path: dicomPath, quality, max_dim: maxDim }),
   });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(txt || `HTTP ${res.status}`);
+  }
 
   const json: DicomLoadResponse = await res.json();
   if (json.error) throw new Error(json.error);
@@ -64,7 +71,7 @@ export async function loadDicomFile(
   form.append('quality', String(quality));
   form.append('max_dim', String(maxDim));
 
-  const res = await fetch(`${API_BASE}/starhe/dicom/load`, {
+  const res = await fetch(`${getApiBase()}/starhe/dicom/load`, {
     method: 'POST',
     body:   form,
     // Ne pas définir Content-Type manuellement — le navigateur ajoute le
@@ -104,7 +111,7 @@ function mapDicomResponse(json: DicomLoadResponse): DicomData {
 
 export async function deleteCache(dicomPath: string): Promise<{ deleted: number }> {
   const res = await fetch(
-    `${API_BASE}/starhe/cache?path=${encodeURIComponent(dicomPath)}`,
+    `${getApiBase()}/starhe/cache?path=${encodeURIComponent(dicomPath)}`,
     { method: 'DELETE' },
   );
   if (!res.ok) {
@@ -144,7 +151,7 @@ export function streamAnalysis(
 
   (async () => {
     try {
-      const res = await fetch(`${API_BASE}/starhe/analyze`, {
+      const res = await fetch(`${getApiBase()}/starhe/analyze`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({

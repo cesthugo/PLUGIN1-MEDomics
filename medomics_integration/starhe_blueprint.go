@@ -1,72 +1,88 @@
 // starhe_blueprint.go — Blueprint MEDomics pour le plugin STARHE
 //
-// Ce fichier est destiné à être intégré dans le serveur Go de MEDomics :
-//   MEDomics/go_server/blueprints/starhe/starhe.go
+// Architecture : reverse proxy
+// ─────────────────────────────────────────────────────────────────────────────
+// Toutes les requêtes vers /starhe/* dans le serveur Go MEDomics sont
+// transmises (proxifiées) au serveur Go STARHE standalone qui tourne sur
+// STARHE_SERVER_PORT (défaut : 8082).
 //
-// Ajoutez ensuite dans MEDomics/go_server/main.go :
-//   import Starhe "go_module/blueprints/starhe"
-//   Starhe.AddHandleFunc()
+// Cela évite tout conflit de protocole :
+//   - Notre React app (iframe) parle directement au serveur MEDomics (port
+//     injecté via postMessage depuis starhe.jsx).
+//   - Le serveur MEDomics redirige /starhe/* vers notre serveur standalone.
+//   - Notre serveur standalone gère DICOM, SSE, cache MongoDB, etc.
 //
-// Le blueprint enregistre les routes suivantes :
-//   POST  starhe/analyze/   → lance le pipeline STARHE via run_starhe.py
-//   POST  starhe/progress/  → récupère la progression d'un job STARHE
+// ── Installation dans MEDomics ──────────────────────────────────────────────
+//
+//  1. Copier ce fichier dans :
+//       MEDomics/go_server/blueprints/starhe/starhe.go
+//
+//  2. Dans MEDomics/go_server/main.go, ajouter :
+//       import Starhe "go_module/blueprints/starhe"
+//       // Dans la fonction d'initialisation :
+//       Starhe.AddHandleFunc()
+//
+//  3. S'assurer que le serveur Go STARHE standalone est démarré avant
+//     l'ouverture du plugin (voir starhe_server_launcher.js).
+//
+// ── Variables d'environnement ────────────────────────────────────────────────
+//   STARHE_SERVER_PORT  Port du serveur STARHE standalone (défaut : 8082)
 package starhe
 
 import (
 	"log"
-
-	Utils "go_module/src"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"time"
 )
 
-var prePath = "starhe"
+// starheServerURL est l'adresse du serveur Go STARHE standalone.
+func starheServerURL() string {
+	port := os.Getenv("STARHE_SERVER_PORT")
+	if port == "" {
+		port = "8082"
+	}
+	return "http://localhost:" + port
+}
 
-// AddHandleFunc enregistre les routes STARHE dans le serveur HTTP MEDomics.
+// AddHandleFunc enregistre un reverse proxy /starhe/* → serveur STARHE standalone.
 func AddHandleFunc() {
-	Utils.CreateHandleFunc(prePath+"/analyze/", handleAnalyze)
-	Utils.CreateHandleFunc(prePath+"/progress/", handleProgress)
-}
-
-// handleAnalyze lance le pipeline STARHE complet sur un fichier DICOM.
-//
-// json_param attendu (envoyé depuis le frontend MEDomics) :
-//
-//	{
-//	    "dicom_path":           "/chemin/vers/fichier.dcm",
-//	    "anon_mode":            "hash",
-//	    "run_detection":        true,
-//	    "back_scan_conversion": true,
-//	    "backscan_width":       512,
-//	    "backscan_height":      512,
-//	    "patient_id":           "optionnel"
-//	}
-//
-// Le script Python run_starhe.py :
-//   1. Localise le venv STARHE (starhe_plugin/.venv/)
-//   2. Lance pipeline.py en subprocess
-//   3. Traduit le protocole GO_PRINT → MEDomics (progress/response)
-func handleAnalyze(jsonConfig string, id string) (string, error) {
-	log.Println("STARHE: lancement de l'analyse...", id)
-	response, err := Utils.StartPythonScripts(
-		jsonConfig,
-		"../pythonCode/modules/starhe/run_starhe.py",
-		id,
-	)
-	Utils.RemoveIdFromScripts(id)
+	target, err := url.Parse(starheServerURL())
 	if err != nil {
-		log.Println("STARHE: erreur pipeline —", err.Error())
-		return "", err
+		log.Fatalf("STARHE: URL invalide — %v", err)
 	}
-	return response, nil
-}
 
-// handleProgress retourne la progression courante du job STARHE.
-// Utilisé par le frontend MEDomics pour interroger l'état via polling.
-func handleProgress(jsonConfig string, id string) (string, error) {
-	Utils.Mu.Lock()
-	script, ok := Utils.Scripts[id]
-	Utils.Mu.Unlock()
-	if !ok {
-		return "{\"now\":0,\"currentLabel\":\"Job introuvable\"}", nil
+	proxy := &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = target.Scheme
+			req.URL.Host = target.Host
+			req.Host = target.Host
+			// Supprimer les en-têtes qui posent problème derrière un proxy
+			req.Header.Del("X-Forwarded-For")
+		},
+		// FlushInterval court pour que le SSE (stream d'analyse) fonctionne
+		// sans mise en tampon côté proxy.
+		FlushInterval: 50 * time.Millisecond,
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("STARHE proxy error: %v", err)
+			http.Error(w, `{"error":"STARHE server unavailable"}`, http.StatusBadGateway)
+		},
 	}
-	return script.Progress, nil
+
+	http.HandleFunc("/starhe/", func(w http.ResponseWriter, r *http.Request) {
+		// CORS — nécessaire si le frontend est chargé depuis file:// ou un
+		// domaine différent (iframe en mode prod).
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
+
+	log.Printf("STARHE: proxy /starhe/* → %s", starheServerURL())
 }

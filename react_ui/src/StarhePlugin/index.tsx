@@ -246,7 +246,11 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       const data = await loadDicom(path);
       addTab(displayName, path, data);
     } catch (err: unknown) {
-      addLog(`ERREUR chargement ${displayName} : ${(err as Error).message}`, 'error');
+      const msg = err instanceof Error
+        ? (err.message || err.name || 'Erreur inconnue')
+        : String(err);
+      const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
+      addLog(`ERREUR chargement ${displayName} : ${msg}${hint}`, 'error');
     } finally {
       setLoadingPaths(prev => { const next = new Set(prev); next.delete(path); return next; });
     }
@@ -261,7 +265,11 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       const data = await loadDicomFile(file);
       addTab(file.name, data.serverPath || file.name, data);
     } catch (err: unknown) {
-      addLog(`ERREUR chargement ${file.name} : ${(err as Error).message}`, 'error');
+      const msg = err instanceof Error
+        ? (err.message || err.name || 'Erreur inconnue')
+        : String(err);
+      const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
+      addLog(`ERREUR chargement ${file.name} : ${msg}${hint}`, 'error');
     } finally {
       setLoadingPaths(prev => { const next = new Set(prev); next.delete(file.name); return next; });
     }

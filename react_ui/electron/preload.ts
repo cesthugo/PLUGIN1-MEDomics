@@ -26,5 +26,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * Base URL du serveur Go local.
    * Utilisée par api.ts pour construire les endpoints (API_BASE).
    */
-  apiBase: 'http://localhost:8080' as const,
+  apiBase: 'http://localhost:8082' as const,
 });

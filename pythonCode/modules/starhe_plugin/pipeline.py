@@ -32,7 +32,8 @@ def run_pipeline(dicom_path: str,
                  run_detection: bool = True,
                  back_scan_conversion: bool = True,
                  backscan_width: int = 512,
-                 backscan_height: int = 512) -> dict:
+                 backscan_height: int = 512,
+                 analysis_mode: str | None = None) -> dict:
     """
     Exécute le pipeline complet STARHE sur un fichier DICOM.
 
@@ -181,6 +182,13 @@ def run_pipeline(dicom_path: str,
         go_print("info", "Détections remappées vers l'espace original.")
 
     # ── 8. Sauvegarde MongoDB ─────────────────────────────────────────────────
+    # Calcule analysis_mode depuis les options si non fourni explicitement
+    if analysis_mode is None:
+        r = "1" if run_risk else "0"
+        d = "1" if run_detection else "0"
+        b = "1" if back_scan_conversion else "0"
+        analysis_mode = f"risk={r},detect={d},backscan={b},anon={anon_mode}"
+
     doc_id = save_result(
         file_path            = dicom_path,
         num_frames           = n_frames_total,
@@ -188,6 +196,7 @@ def run_pipeline(dicom_path: str,
         risk                 = risk_result,
         detections_per_frame = detections_per_frame,
         anon_mode            = anon_mode,
+        analysis_mode        = analysis_mode,
     )
 
     output = {
@@ -225,6 +234,8 @@ if __name__ == "__main__":
                         help="Largeur de sortie backscan (défaut : 512)")
     parser.add_argument("--backscan_height", type=int, default=512,
                         help="Hauteur de sortie backscan (défaut : 512)")
+    parser.add_argument("--analysis_mode", default=None,
+                        help="Clé de cache MongoDB (calculée automatiquement si absente)")
 
     args = parser.parse_args()
     try:
@@ -236,6 +247,7 @@ if __name__ == "__main__":
             back_scan_conversion= not args.no_backscan,
             backscan_width      = args.backscan_width,
             backscan_height     = args.backscan_height,
+            analysis_mode       = args.analysis_mode,
         )
     except Exception as exc:
         go_print("error", f"Pipeline échoué : {exc}")

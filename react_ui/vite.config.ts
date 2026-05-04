@@ -12,11 +12,11 @@ export default defineConfig({
     proxy: {
       // Proxie les appels API vers le serveur Go (port 8080)
       '/starhe': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:8082',
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:8082',
         changeOrigin: true,
       },
     },

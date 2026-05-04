@@ -9,13 +9,16 @@
 // Le serveur Go lance live_pipeline.py dans un subprocess avec la source choisie.
 
 import React, { useCallback, useRef, useState } from 'react';
-import { API_BASE } from '../api';
+import { getApiBase } from '../api';
 import type { Detection, LogLevel } from '../types';
 import {
   SIDEBAR_BG, MAIN_BG, CANVAS_BG, BLUE, BLUE_TEXT,
   SBAR_FG, SBAR_MUTED, CARD_BG, CARD_BORDER, CARD_SHADOW,
   RISK_LOW_FG, RISK_HIGH_FG, WARN_FG, SUCCESS_FG, DANGER_FG,
 } from '../colors';
+
+// Colors that live_tab.py defines but colors.ts doesn't yet
+const RISK_MED = '#fbbf24';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -131,7 +134,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
     addLog('Démarrage de l\'analyse en direct…', 'info');
 
     try {
-      const res = await fetch(`${API_BASE}/starhe/live`, {
+      const res = await fetch(`${getApiBase()}/starhe/live`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(body),

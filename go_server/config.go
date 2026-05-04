@@ -48,7 +48,7 @@ func defaultPythonExe() string {
 }
 
 var cfg = appConfig{
-	Port: envOr("PORT", "8080"),
+	Port: envOr("PORT", "8082"),
 
 	PythonExe:     envOr("STARHE_PYTHON_EXE", defaultPythonExe()),
 	PythonModPath: envOr("STARHE_PYTHON_PATH", filepath.Join(serverDir(), "..", "pythonCode", "modules")),

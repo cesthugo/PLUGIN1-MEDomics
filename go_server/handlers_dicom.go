@@ -10,11 +10,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -62,27 +65,32 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer f.Close()
 
-		// Écriture dans un fichier temporaire (suffixe .dcm pour que pydicom l'accepte)
-		tmp, err := os.CreateTemp("", "starhe_upload_*.dcm")
+		// Lit le contenu en mémoire pour calculer le hash SHA-256
+		fileBytes, err := io.ReadAll(f)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
-				"error": "impossible de créer le fichier temporaire : " + err.Error(),
+				"error": "erreur lecture fichier uploadé : " + err.Error(),
 			})
 			return
 		}
-		tmpToDelete = tmp.Name()
 
-		if _, err := io.Copy(tmp, f); err != nil {
-			tmp.Close()
-			os.Remove(tmpToDelete)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
-				"error": "erreur écriture fichier temporaire : " + err.Error(),
-			})
-			return
+		// Nom déterministe basé sur le contenu : même fichier → même chemin → cache hit
+		hash := sha256.Sum256(fileBytes)
+		hashStr := hex.EncodeToString(hash[:])[:24]
+		tmpPath := filepath.Join(os.TempDir(), "starhe_upload_"+hashStr+".dcm")
+		tmpToDelete = tmpPath
+
+		// N'écrit que si le fichier n'existe pas encore (même contenu déjà présent)
+		if _, statErr := os.Stat(tmpPath); os.IsNotExist(statErr) {
+			if err := os.WriteFile(tmpPath, fileBytes, 0600); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": "erreur écriture fichier temporaire : " + err.Error(),
+				})
+				return
+			}
 		}
-		tmp.Close()
 
-		dicomPath = tmp.Name()
+		dicomPath = tmpPath
 		_ = header // nom original disponible si besoin
 
 		// Paramètres optionnels depuis le formulaire

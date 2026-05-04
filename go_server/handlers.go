@@ -49,6 +49,83 @@ func writeSSE(w http.ResponseWriter, f http.Flusher, payload string) {
 	f.Flush()
 }
 
+// computeAnalysisMode calcule la clé de cache analysis_mode depuis la requête.
+// Doit correspondre exactement à la valeur calculée par pipeline.py.
+func computeAnalysisMode(req analyzeRequest) string {
+	r := "0"
+	if req.RunRisk {
+		r = "1"
+	}
+	d := "0"
+	if req.RunDetection {
+		d = "1"
+	}
+	b := "0"
+	if req.BackScanConversion {
+		b = "1"
+	}
+	return fmt.Sprintf("risk=%s,detect=%s,backscan=%s,anon=%s", r, d, b, req.AnonMode)
+}
+
+// findCachedResult cherche un résultat en cache dans MongoDB.
+// Retourne nil, nil si aucun document trouvé.
+func findCachedResult(ctx context.Context, filePath, analysisMode string) (bson.M, error) {
+	if mongoClient == nil {
+		return nil, nil
+	}
+	ctx2, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var doc bson.M
+	err := collection().FindOne(ctx2, bson.M{
+		"file_path":     filePath,
+		"analysis_mode": analysisMode,
+	}).Decode(&doc)
+	if err == mongo.ErrNoDocuments {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// streamCachedResult rejoue un résultat mis en cache comme événements SSE.
+func streamCachedResult(w http.ResponseWriter, f http.Flusher, doc bson.M) {
+	// Événement progress pour informer le client
+	progress, _ := json.Marshal(map[string]any{
+		"level":   "progress",
+		"message": "Résultats chargés depuis le cache MongoDB",
+		"data":    map[string]any{"step": 1, "total": 1, "percent": 100},
+	})
+	writeSSE(w, f, string(progress))
+
+	// Reconstruit le payload résultat identique à celui émis par pipeline.py
+	resultData := map[string]any{}
+	if oid, ok := doc["_id"].(primitive.ObjectID); ok {
+		resultData["doc_id"] = oid.Hex()
+	}
+	if v, ok := doc["num_frames"]; ok {
+		resultData["num_frames"] = v
+	}
+	if v, ok := doc["roi"]; ok {
+		resultData["roi"] = v
+	}
+	if v, ok := doc["detections_per_frame"]; ok {
+		resultData["detections_per_frame"] = v
+	}
+	if v, ok := doc["risk"]; ok {
+		resultData["risk"] = v
+	}
+
+	resultEvt, _ := json.Marshal(map[string]any{
+		"level":   "result",
+		"message": "Traitement terminé",
+		"data":    resultData,
+	})
+	writeSSE(w, f, string(resultEvt))
+	writeSSE(w, f, "[DONE]")
+}
+
 // collection retourne la collection MongoDB des résultats STARHE.
 func collection() *mongo.Collection {
 	return mongoClient.Database(cfg.MongoDatabase).Collection(cfg.MongoCollection)
@@ -105,6 +182,16 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Vérification du cache MongoDB avant de lancer Python
+	analysisMode := computeAnalysisMode(req)
+	if cached, err := findCachedResult(r.Context(), req.DicomPath, analysisMode); err != nil {
+		log.Printf("avertissement cache MongoDB: %v", err)
+	} else if cached != nil {
+		log.Printf("cache hit: %s [%s]", req.DicomPath, analysisMode)
+		streamCachedResult(w, flusher, cached)
+		return
+	}
+
 	// Construction des arguments subprocess
 	args := []string{
 		"-m", "starhe_plugin.pipeline",
@@ -122,6 +209,7 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 	if !req.BackScanConversion {
 		args = append(args, "--no_backscan")
 	}
+	args = append(args, "--analysis_mode", analysisMode)
 
 	cmd := exec.CommandContext(r.Context(), cfg.PythonExe, args...)
 	cmd.Dir = cfg.PythonModPath
