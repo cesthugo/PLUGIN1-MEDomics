@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **April 29, 2026**
+> Last updated: **7 mai 2026**
 
 ---
 
@@ -156,6 +156,17 @@
 - [x] **Measure label** — perpendicular auto-placement; draggable (stored as `labelOffset` in `Measure`); dashed leader line from midpoint to label
 - [x] **Brightness/Contrast** — replaced CSS filter with pixel-level ImageData formula `c × pixel + b`; independent, artifact-free, adapted to dark ultrasound images
 
+### 🖼 React UI — Multi-panel & UX (7 mai 2026)
+- [x] **Multi-panel split view** — `PanelGrid` + `ViewPanel` components; drag a tab or thumbnail → adds a panel in the grid; click a panel → focus (blue outline) + sidebar/gallery target that file; `×` removes a panel; CSS grid auto-cols (1/2/3/4); empty state shows a hint; patient isolation: `switchTab` filters `visiblePanelIds` to tabs belonging to the newly active patient
+- [x] **Folder loading** — "📁 Charger un dossier DICOM" button in sidebar; `webkitdirectory` picker; auto-detects `.dcm`, `.dicom`, and extension-less files; loads all files sequentially
+- [x] **Patient isolation in multi-panel** — `switchTab` filters `visiblePanelIds` to tabs belonging to the newly active patient; prevents cross-patient panel contamination
+
+### 🔌 MEDomics Integration fixes (7 mai 2026)
+- [x] **Extension description corrected** — `ExtensionManager.jsx`: subtitle "Échographie hépatique", description mentions HCC/foie, tag "Hépatologie" (was "Cardiologie" / "cardiaque")
+- [x] **Go server connection fixed** — `starhe.jsx`: `STARHE_API_BASE = 'http://localhost:8082'` hardcoded; removed dependency on `WorkspaceContext.port` which was often `null` at iframe load time, causing "Failed to fetch" errors on port 8082
+- [x] **MEDomics Next.js renderer rebuilt** — `npx next build` after all fixes
+- [x] **Go binary rebuilt** — `go build -o go_server .` in `go_server/`; server confirmed on port 8082 via `/health`
+
 ---
 
 ## 🚧 In-Progress Tasks
@@ -168,7 +179,7 @@
 - [ ] **Full workflow validation with Canon Aplio i700** — Load `A0000` → banner removal + mm calibration → prepUS → AI inference → results display + MongoDB cache
 
 ### 🔌 MEDomics Integration
-- [ ] **MEDomics frontend** — Wire the React UI into the MEDomics navigation system (replace standalone `localhost:5173` with integrated plugin tab)
+- [x] **MEDomics frontend** — React UI wired into MEDomics as an iframe via `starhe.jsx`; `STARHE_INIT` postMessage protocol sets `window.__STARHE_API_BASE__`; Go server runs on port 8082 independently of MEDomics
 - [ ] **MEDDataObject** — Results are not yet encapsulated in a `MEDDataObject` (MEDomics standard format for patient data/results)
 - [ ] **Cross-platform symlinks** — Unix symlinks do not work natively on Windows (require developer mode or admin rights). Consider an installation script with copy as fallback.
 
@@ -207,7 +218,7 @@
 - [x] **`<ConsolePanel />`** — Real-time SSE logs
 - [x] **`<SettingsPanel />`** — Font, colors, analysis mode, console toggle
 - [x] **`<LiveModal />`** — Live analysis (C-STORE, folder, HDMI)
-- [ ] **Integration into the MEDomics navigation system** — Pending MEDomics platform wiring
+- [x] **Integration into the MEDomics navigation system** — Done: `starhe.jsx` iframe + `STARHE_INIT` postMessage; `starhe-ui/` static build in MEDomics `public/`
 - [ ] **MEDDataObject encapsulation** — Produce and consume MEDDataObjects
 
 ### 🧪 Phase 4: Testing & Deployment (Long term)
@@ -224,14 +235,15 @@
 ### 🌐 React UI development cycle
 > ```bash
 > # Rebuild and restart Go server (after any .go file change)
-> lsof -ti :8080 | xargs kill -9 2>/dev/null
+> lsof -ti :8082 | xargs kill -9 2>/dev/null
 > cd go_server && go build -o go_server . && ./go_server &
 >
 > # Start Vite dev server with HMR (no rebuild needed for React/TS changes)
 > cd react_ui && npm run dev
 >
-> # Production build (type-check + bundle)
+> # Production build + deploy to MEDomics
 > cd react_ui && npm run build
+> cp -r dist/. ../MEDomics/renderer/public/starhe-ui/
 > ```
 
 ### 🧹 prepUS Preprocessing

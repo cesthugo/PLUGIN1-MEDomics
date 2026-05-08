@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.4.1` — Last updated: April 29, 2026*
+*Version `0.5.0` — Last updated: 7 mai 2026*
 
 ---
 
@@ -176,7 +176,7 @@ cd pythonCode/modules
 ```bash
 cd go_server
 go run .
-# Listens on http://localhost:8080 (PORT configurable via environment variable)
+# Listens on http://localhost:8082 (PORT configurable via environment variable)
 ```
 
 Python paths are detected **automatically** by `config.go` from the `go_server/` directory (relative path `../pythonCode/modules/…`). No environment variables are necessary if the venv was created in step 1 and the server is launched from `go_server/`.
@@ -185,7 +185,7 @@ Go server environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `8080` | HTTP server port |
+| `PORT` | `8082` | HTTP server port |
 | `STARHE_PYTHON_EXE` | absolute path in `config.go` | Python 3.13 from venv |
 | `STARHE_PYTHON_PATH` | absolute path in `config.go` | Root directory of Python modules |
 | `MONGO_URI` | `mongodb://localhost:54017/` | MongoDB URI |
@@ -224,9 +224,9 @@ react_ui/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
       ContextMenu.tsx         → right-click context menu
       SettingsPanel.tsx       → settings overlay (font, colors, analysis mode, console toggle)
       LiveModal.tsx           → live analysis modal (C-STORE / folder / HDMI)
-        │ HTTP + SSE (proxied by Vite dev server → port 8080 in dev)
+        │ HTTP + SSE (proxied by Vite dev server → port 8082 in dev)
         ▼
-  Go Server (port 8080)
+  Go Server (port 8082)
   go_server/main.go           → HTTP routing + CORS middleware
   go_server/handlers.go       → /starhe/analyze SSE, /starhe/results CRUD
   go_server/handlers_dicom.go → /starhe/dicom/load (path), /starhe/dicom/upload (file), /starhe/dicom/delete
@@ -253,7 +253,36 @@ Tkinter UI
   starhe_plugin/pipeline.py (same engine, run in a thread)
 ```
 
-### MEDomics integrated mode
+### MEDomics integrated mode — iframe
+
+The React UI production build (`react_ui/dist/`) is deployed as a **static bundle** inside the MEDomics renderer:
+
+```
+MEDomics/renderer/public/starhe-ui/   ← cp -r react_ui/dist/. here
+```
+
+`MEDomics/renderer/components/mainPages/starhe.jsx` renders an `<iframe src="/starhe-ui/index.html">` and, once loaded, sends a `postMessage` to configure the API base URL:
+
+```js
+// starhe.jsx
+const STARHE_API_BASE = 'http://localhost:8082'
+iframeRef.current.contentWindow.postMessage(
+  { type: 'STARHE_INIT', apiBase: STARHE_API_BASE }, '*'
+)
+```
+
+`react_ui/src/main.tsx` listens for `STARHE_INIT` and sets `window.__STARHE_API_BASE__` before mounting. All `api.ts` calls use this value at runtime, so the build is environment-agnostic.
+
+> **Why hardcoded?** The STARHE Go server always runs on port 8082. It is independent of the MEDomics main server (port 54288). Using `WorkspaceContext.port` (the MEDomics server port) caused "Failed to fetch" errors.
+
+**After any React change, redeploy:**
+```bash
+cd react_ui && npm run build
+cp -r dist/. ../MEDomics/renderer/public/starhe-ui/
+cd ../MEDomics/renderer && npx next build
+```
+
+### MEDomics integrated mode — Go blueprint
 
 ```
 MEDomics Frontend (Electron / React)
@@ -319,7 +348,9 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 | Feature | Description |
 |---|---|
 | **Multi-tab / multi-file** | Load N DICOM files concurrently; each tab stores its own independent state (frames, zoom, measures, contrast, analysis results…); analysis results are injected into the tab that launched the analysis, regardless of which tab is active when results arrive |
-| **DICOM loading** | Via absolute path (Electron / MEDomics) or file upload drag-and-drop (browser) |
+| **Multi-panel split view** | Drag a tab or thumbnail card into the viewer → opens that file in a new side-by-side panel; click a panel to focus it (blue outline); sidebar and gallery target the focused panel’s file; `×` removes a panel; CSS grid auto-layout (1/2/3/4 columns); empty state shows a drag hint; patient isolation — switching to a different patient automatically removes the previous patient’s panels |
+| **DICOM loading** | Via absolute path (Electron / MEDomics), file picker (browser), or **folder picker** |
+| **Folder loading** | "📁 Charger un dossier DICOM" button in the sidebar — browser folder picker (`webkitdirectory`); auto-detects `.dcm`, `.dicom`, and extension-less files; loads all files sequentially |
 | **Frame viewer** | Hardware-accelerated canvas, `letter-box` fit, smooth scroll / keyboard navigation |
 | **Playback** | Variable-speed loop (0.25×→3.0×) calibrated from DICOM `FrameTime` |
 | **Pan / Zoom** | Mouse wheel zoom, middle-click drag, Ctrl+0/+/- shortcuts |
@@ -339,15 +370,16 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 ### Development workflow
 
 ```bash
-# Start the Go server (rebuild required after any Go file change)
-lsof -ti :8080 | xargs kill -9 2>/dev/null
+# Rebuild and restart Go server (rebuild required after any Go file change)
+lsof -ti :8082 | xargs kill -9 2>/dev/null
 cd go_server && go build -o go_server . && ./go_server &
 
 # Start the Vite dev server (HMR — no rebuild needed for React/TS changes)
 cd react_ui && npm run dev
 
-# Type-check + production build
+# Type-check + production build + deploy to MEDomics
 cd react_ui && npm run build
+cp -r dist/. ../MEDomics/renderer/public/starhe-ui/
 ```
 
 ### API surface (Go server → React)

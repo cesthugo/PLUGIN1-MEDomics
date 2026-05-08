@@ -23,7 +23,8 @@ The window opens with the control sidebar on the left and the viewing area on th
 
 1. In the sidebar, section **DICOM FILE**, click **📂 Load a DICOM file**.
 2. The dialog allows selecting **one or more files** simultaneously (`Ctrl+click` or `Shift+click`).
-3. Accepted formats:
+3. To load an **entire folder** at once, click **📁 Charger un dossier DICOM** — all `.dcm`, `.dicom`, and extension-less files in the selected folder are detected and loaded automatically.
+4. Accepted formats:
    - Standard `.dcm` files
    - **Files without extension** (e.g. `A0000`, `IM-0001`) — use the **"All files"** filter
 
@@ -53,7 +54,32 @@ The **tab bar** is located at the bottom of the viewer, like a web browser.
 
 ---
 
-## ▶ 3. Sequence Navigation
+## 🗇 3. Multi-Panel Split View
+
+The **viewer area** supports displaying several files side by side in a grid.
+
+### Open a panel
+| Action | Result |
+|---|---|
+| **Drag a tab** from the tab bar and drop it on the viewer | Adds a new panel for that file |
+| **Drag a thumbnail** from the gallery (group tab strip) and drop it on the viewer | Same |
+
+### Interact with panels
+| Action | Result |
+|---|---|
+| **Click inside a panel** | Focuses it — blue outline appears; sidebar and detection gallery switch to that file |
+| **`×` button** on a panel header | Removes that panel from the grid |
+| Grid with 1 / 2 / 3 / 4+ panels | Layout adapts automatically (1, 2, or 3 columns) |
+
+### Patient isolation
+When you switch to a **different patient** (click a tab belonging to another patient), all panels from the previous patient are automatically removed. Only panels belonging to the new patient are kept.
+
+### Empty state
+If no panels are open, the viewer shows a hint message reminding you to drag a tab or thumbnail into the viewer.
+
+---
+
+## ▶ 4. Sequence Navigation
 
 ### Navigation buttons
 | Control | Action |
@@ -75,7 +101,7 @@ The **tab bar** is located at the bottom of the viewer, like a web browser.
 
 ---
 
-## ⌨️ 4. Keyboard Shortcuts
+## ⌨️ 5. Keyboard Shortcuts
 
 > Shortcuts are disabled when an input field has focus.
 
@@ -123,7 +149,7 @@ The **tab bar** is located at the bottom of the viewer, like a web browser.
 
 ---
 
-## 🔍 5. Pan & Zoom
+## 🔍 6. Pan & Zoom
 
 **Pan activation:** Right-click → **Move / Zoom** or key `P` (cursor becomes a hand)
 
@@ -143,7 +169,7 @@ To return to the initial view: key `R` or Right-click → **Reset View**
 
 ---
 
-## 📏 6. Measurement Tool (Multi-Segments)
+## 📏 7. Measurement Tool (Multi-Segments)
 
 **Activation:** Right-click → **Measurement tool** or key `M` (cursor becomes a crosshair)
 
@@ -176,7 +202,7 @@ Multiple measurements can be drawn simultaneously.
 
 ---
 
-## 📜 7. Series Scroll (Frame-by-Frame Wheel)
+## 📜 8. Series Scroll (Frame-by-Frame Wheel)
 
 **Activation:** Right-click → **Series Scroll** or key `S`
 
@@ -189,7 +215,7 @@ In **Normal** mode (no special mode activated), vertical left-button drag also s
 
 ---
 
-## 🎨 8. Contrast & Brightness Settings
+## 🎨 9. Contrast & Brightness Settings
 
 ### Via the context menu
 - Right-click → **Contrast…** or **Brightness…** — opens a floating window with slider
@@ -207,7 +233,7 @@ In **Normal** mode (no special mode activated), vertical left-button drag also s
 
 ---
 
-## 🔄 9. Reset View
+## 🔄 10. Reset View
 
 Key `R` or Right-click → **Reset View**: resets in one action:
 - Zoom → 1.0 (auto fit)
@@ -219,7 +245,7 @@ Key `R` or Right-click → **Reset View**: resets in one action:
 
 ---
 
-## ⚙️ 10. Preprocessing
+## ⚙️ 11. Preprocessing
 
 1. First load a DICOM file
 2. In the **PREPROCESSING** section, configure:
@@ -233,7 +259,7 @@ Key `R` or Right-click → **Reset View**: resets in one action:
 
 ---
 
-## 🧠 11. AI Analysis
+## 🧠 12. AI Analysis
 
 1. Load a DICOM and run preprocessing (optional)
 2. Click **🧠 Launch STARHE Analysis**
@@ -253,7 +279,7 @@ Key `R` or Right-click → **Reset View**: resets in one action:
 
 ---
 
-## 💬 12. Console
+## 💬 13. Console
 
 The **Console** at the bottom of the window displays in real time:
 - Loading and anonymization steps
@@ -265,14 +291,14 @@ It is read-only.
 
 ---
 
-## 🎗 13. Light / Dark Theme
+## 🎗 14. Light / Dark Theme
 
 The **🌙 Dark theme** button at the bottom of the sidebar toggles between light and dark theme.  
 The sidebar always remains dark in both modes.
 
 ---
 
-## 📡 14. Live Analysis (Analyse en direct)
+## 📡 15. Live Analysis (Analyse en direct)
 
 The **📡 Analyse en direct** button in the sidebar opens a dedicated window for real-time analysis of a live ultrasound feed.
 
