@@ -210,51 +210,6 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
           </div>
         </label>
 
-        {/* ───────────────────────────────────────────────────── */}
-        <div style={{ borderTop: '1px solid #2a3245', margin: '4px 0' }} />
-        {/* Mode d’analyse */}
-        <SettingRow label="Modèles IA lancés lors de l’analyse">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {([
-              { value: 'both',        label: 'STARHE RISK  +  STARHE DETECT',  desc: 'Risque CHC et détection des lésions' },
-              { value: 'risk_only',   label: 'STARHE RISK uniquement',          desc: 'Risque CHC (classification C3D)' },
-              { value: 'detect_only', label: 'STARHE DETECT uniquement',        desc: 'Détection des lésions (RTMDet)' },
-            ] as const).map(opt => {
-              const active = settings.analysisMode === opt.value;
-              return (
-                <label
-                  key={opt.value}
-                  style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 10,
-                    cursor: 'pointer',
-                    background: active ? '#0d2a4a' : '#0d1117',
-                    border: `1px solid ${active ? '#1565C0' : '#2a3245'}`,
-                    borderRadius: 5, padding: '8px 10px',
-                    transition: 'background 0.1s, border-color 0.1s',
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="analysisMode"
-                    value={opt.value}
-                    checked={active}
-                    onChange={() => onUpdate({ analysisMode: opt.value })}
-                    style={{ accentColor: '#1565C0', marginTop: 2, flexShrink: 0 }}
-                  />
-                  <div>
-                    <div style={{ color: active ? '#93c5fd' : SBAR_FG, fontSize: 12, fontWeight: 700 }}>
-                      {opt.label}
-                    </div>
-                    <div style={{ color: SBAR_MUTED, fontSize: 10, marginTop: 2 }}>
-                      {opt.desc}
-                    </div>
-                  </div>
-                </label>
-              );
-            })}
-          </div>
-        </SettingRow>
-
         {/* Bouton réinitialiser */}
         <button
           onClick={onReset}

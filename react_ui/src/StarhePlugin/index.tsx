@@ -38,6 +38,7 @@ import { ConsolePanel }   from './components/ConsolePanel';
 import { AdjustDialog }   from './components/AdjustDialog';
 import { ContextMenu, buildCanvasContextMenu } from './components/ContextMenu';
 import { LiveModal }      from './components/LiveModal';
+import { BatchModal }     from './components/BatchModal';
 import { SettingsPanel }       from './components/SettingsPanel';
 import { DetectionGallery }    from './components/DetectionGallery';
 
@@ -95,6 +96,9 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   tabsRef.current   = tabs;
   const patientsRef = useRef<Patient[]>(patients);
   patientsRef.current = patients;
+
+  // Onglets visibles simultanément dans la visionneuse (multi-panneaux)
+  const [visiblePanelIds, setVisiblePanelIds] = useState<number[]>([]);
 
   // Dérivés : calculés à chaque render à partir des IDs stables
   const activeTabIdx = tabs.findIndex(t => t.id === activeTabId);
@@ -195,7 +199,10 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
   // ── Fenêtre live ───────────────────────────────────────────────────────────
-  const [showLive, setShowLive] = useState(false);
+  const [showLive,  setShowLive]  = useState(false);
+
+  // ── Fenêtre batch ─────────────────────────────────────────────────────────
+  const [showBatch, setShowBatch] = useState(false);
 
   // ── Chargement DICOM ───────────────────────────────────────────────────────
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
@@ -234,6 +241,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
     });
     setActivePatientName(data.patientName);
+    setVisiblePanelIds(prev => [...prev, newTab.id]);
     addLog(`DICOM chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
@@ -249,7 +257,9 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       const msg = err instanceof Error
         ? (err.message || err.name || 'Erreur inconnue')
         : String(err);
-      const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
+      const isNetworkErr = !err || msg === 'Failed to fetch' || msg === 'Load failed'
+        || msg === 'Error' || /NetworkError|fetch/i.test(msg);
+      const hint = isNetworkErr ? ' — serveur inaccessible (port 8082 ?)' : '';
       addLog(`ERREUR chargement ${displayName} : ${msg}${hint}`, 'error');
     } finally {
       setLoadingPaths(prev => { const next = new Set(prev); next.delete(path); return next; });
@@ -268,12 +278,47 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       const msg = err instanceof Error
         ? (err.message || err.name || 'Erreur inconnue')
         : String(err);
-      const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
+      const isNetworkErr = !err || msg === 'Failed to fetch' || msg === 'Load failed'
+        || msg === 'Error' || /NetworkError|fetch/i.test(msg);
+      const hint = isNetworkErr ? ' — serveur inaccessible (port 8082 ?)' : '';
       addLog(`ERREUR chargement ${file.name} : ${msg}${hint}`, 'error');
     } finally {
       setLoadingPaths(prev => { const next = new Set(prev); next.delete(file.name); return next; });
     }
   }, [addLog, addTab, loadingPaths]);
+
+  // Chargement via sélection d'un dossier (détecte tous les DICOM dedans)
+  const onLoadFolder = useCallback(async () => {
+    if (isElectron && (window.electronAPI as any)?.openDicomFolder) {
+      const paths: string[] = await (window.electronAPI as any).openDicomFolder();
+      for (const p of paths) {
+        const name = p.split(/[\\/]/).pop() ?? p;
+        await doLoadPath(p, name);
+      }
+    } else {
+      const input = document.createElement('input');
+      input.type = 'file';
+      (input as any).webkitdirectory = true;
+      (input as any).multiple = true;
+      input.onchange = async () => {
+        const files = Array.from(input.files ?? []);
+        const dicomFiles = files.filter(f => {
+          const lname = f.name.toLowerCase();
+          // .dcm, .dicom, ou sans extension (ex: A0000, 01-0016-D-J)
+          return lname.endsWith('.dcm') || lname.endsWith('.dicom') || !lname.includes('.');
+        });
+        if (dicomFiles.length === 0) {
+          addLog('Aucun fichier DICOM trouvé dans ce dossier (.dcm / .dicom / sans extension).', 'warning');
+          return;
+        }
+        addLog(`${dicomFiles.length} fichier(s) DICOM détecté(s) dans le dossier.`, 'info');
+        for (const file of dicomFiles) {
+          await doLoadFile(file);
+        }
+      };
+      input.click();
+    }
+  }, [isElectron, doLoadPath, doLoadFile, addLog]);
 
   // Chargement via explorateur de fichiers
   const onLoadDicom = useCallback(async () => {
@@ -309,6 +354,10 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const updateActiveTab = useCallback((updater: (t: TabState) => TabState) => {
     setTabs(prev => prev.map(t => t.id === activeTabId ? updater(t) : t));
   }, [activeTabId]);
+
+  const updateTabById = useCallback((tabId: number, updater: (t: TabState) => TabState) => {
+    setTabs(prev => prev.map(t => t.id === tabId ? updater(t) : t));
+  }, []);
 
   const onPrevFrame = useCallback(() => {
     if (!activeTab?.data) return;
@@ -461,7 +510,17 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     if (isPlaying) setIsPlaying(false);
     setActiveTabId(tabId);
     const patient = patientsRef.current.find(p => p.tabIds.includes(tabId));
-    if (patient) setActivePatientName(patient.name);
+    if (patient) {
+      setActivePatientName(patient.name);
+      // Restreindre la grille aux panneaux appartenant au nouveau patient actif
+      setVisiblePanelIds(prev => {
+        const patientTabIds = new Set(patient.tabIds);
+        const filtered = prev.filter(id => patientTabIds.has(id));
+        // S'assurer que le nouvel onglet actif est bien présent dans la grille
+        if (!filtered.includes(tabId)) return [...filtered, tabId];
+        return filtered.length === prev.length ? prev : filtered;
+      });
+    }
   }, [isPlaying]);
 
   const closeTab = useCallback((tabId: number) => {
@@ -486,6 +545,21 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     setPatients(updatedPatients);
     const newPatient = updatedPatients.find(p => p.tabIds.includes(newActiveTab?.id ?? -1));
     if (newPatient) setActivePatientName(newPatient.name);
+    setVisiblePanelIds(prev => prev.filter(id => id !== tabId));
+  }, []);
+
+  // ── Panneaux multi-visionneuse ──────────────────────────────────────────────
+  const onAddPanel = useCallback((tabId: number) => {
+    setVisiblePanelIds(prev => prev.includes(tabId) ? prev : [...prev, tabId]);
+    switchTab(tabId);
+  }, [switchTab]);
+
+  const onRemovePanel = useCallback((tabId: number) => {
+    setVisiblePanelIds(prev => {
+      const next = prev.filter(id => id !== tabId);
+      setActiveTabId(cur => (cur === tabId ? (next[0] ?? -1) : cur));
+      return next;
+    });
   }, []);
 
   // ── Raccourcis clavier ─────────────────────────────────────────────────────
@@ -653,7 +727,9 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           sidebarBg={displaySettings.sidebarBg}
           textColor={displaySettings.textColor}
           analysisMode={displaySettings.analysisMode}
+          onAnalysisModeChange={(mode) => updateSettings({ analysisMode: mode })}
           onLoadDicom={onLoadDicom}
+          onLoadFolder={onLoadFolder}
           onLoadPath={onLoadPath}
           onPrevFrame={onPrevFrame}
           onNextFrame={onNextFrame}
@@ -666,6 +742,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           onRunPipeline={onRunPipeline}
           onResetAnalysis={onResetAnalysis}
           onOpenLive={() => setShowLive(true)}
+          onOpenBatch={() => setShowBatch(true)}
           onGotoFrame={onGotoFrame}
           onToggleTheme={() => setDarkMode(d => !d)}
         />
@@ -733,17 +810,17 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               }}
             />
 
-            {/* Canvas DICOM */}
-            <DicomCanvas
-              tab={activeTab}
-              onZoomPan={onZoomPan}
-              onContrastBright={onContrastBright}
-              onFrameChange={onCanvasFrameChange}
-              onMeasureAdd={onMeasureAdd}
-              onMeasureMove={onMeasureMove}
-              onMeasureLabelMove={onMeasureLabelMove}
-              onMeasureSelect={onMeasureSelect}
-              onContextMenu={(x, y) => setCtxMenu({ x, y })}
+            {/* Grille multi-panneaux */}
+            <PanelGrid
+              visiblePanelIds={visiblePanelIds}
+              tabs={tabs}
+              activeTabId={activeTabId}
+              onFocusPanel={switchTab}
+              onAddPanel={onAddPanel}
+              onRemovePanel={onRemovePanel}
+              updateTabById={updateTabById}
+              setCtxMenu={setCtxMenu}
+              setIsPlaying={setIsPlaying}
             />
 
             {/* Barre onglets fichiers */}
@@ -753,6 +830,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               onSwitchTab={switchTab}
               onCloseTab={closeTab}
               onOpenNew={onLoadDicom}
+              onAddPanel={onAddPanel}
             />
           </div>
 
@@ -825,6 +903,18 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         />
       )}
 
+      {/* Analyse en lot */}
+      {showBatch && (
+        <BatchModal
+          onClose={() => setShowBatch(false)}
+          analysisMode={displaySettings.analysisMode}
+          onOpenInTab={(serverPath, name) => {
+            setShowBatch(false);
+            doLoadPath(serverPath, name);
+          }}
+        />
+      )}
+
       {/* Panneau réglages d'affichage */}
       {showSettings && (
         <SettingsPanel
@@ -893,6 +983,31 @@ function PatientTab({ name, active, onClick }: { name: string; active: boolean; 
   );
 }
 
+// ── Helpers groupement par date ───────────────────────────────────────────────
+
+interface DateGroup {
+  key:   string;      // clé de regroupement (studyDate ou '__single_ID')
+  label: string;      // libellé formaté (JJ/MM/AAAA ou '—')
+  tabs:  TabState[];
+}
+
+function groupTabsByDate(tabs: TabState[]): DateGroup[] {
+  const map = new Map<string, TabState[]>();
+  for (const tab of tabs) {
+    const sd  = tab.data?.studyDate ?? '';
+    const key = /^\d{8}$/.test(sd) ? sd : `__single_${tab.id}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(tab);
+  }
+  return Array.from(map.entries()).map(([key, grpTabs]) => ({
+    key,
+    label: /^\d{8}$/.test(key)
+      ? `${key.slice(6, 8)}/${key.slice(4, 6)}/${key.slice(0, 4)}`
+      : (grpTabs[0]?.label ?? '—'),
+    tabs: grpTabs,
+  }));
+}
+
 // ── Barre onglets fichiers ────────────────────────────────────────────────────
 
 function FileTabBar({
@@ -901,55 +1016,110 @@ function FileTabBar({
   onSwitchTab,
   onCloseTab,
   onOpenNew,
+  onAddPanel,
 }: {
   tabs: TabState[];
   activeTabId: number;
   onSwitchTab: (id: number) => void;
   onCloseTab:  (id: number) => void;
   onOpenNew:   () => void;
+  onAddPanel:  (id: number) => void;
 }) {
+  const groups      = groupTabsByDate(tabs);
+  const activeGroup = groups.find(g => g.tabs.some(t => t.id === activeTabId));
+  const showStrip   = activeGroup !== undefined && activeGroup.tabs.length > 1;
+
   return (
-    <div
-      style={{
-        background: TAB_BG, height: 32, minHeight: 32,
-        display: 'flex', alignItems: 'stretch',
-        borderTop: '1px solid #0a0a14',
-        overflowX: 'auto', flexShrink: 0,
-      }}
-    >
-      {tabs.map(tab => {
-        const active = tab.id === activeTabId;
-        return (
-          <FileTab
-            key={tab.id}
-            label={tab.label}
-            active={active}
-            onClick={() => onSwitchTab(tab.id)}
-            onClose={() => onCloseTab(tab.id)}
-          />
-        );
-      })}
-      <button
-        onClick={onOpenNew}
+    <div style={{ flexShrink: 0 }}>
+      {/* ── Ligne onglets ─────────────────────────────────────────────── */}
+      <div
         style={{
-          background: '#000', color: '#fff',
-          border: 'none', cursor: 'pointer',
-          fontSize: 16, fontWeight: 700,
-          padding: '0 10px',
-          marginLeft: 2,
-          alignSelf: 'center',
+          background: TAB_BG, height: 32, minHeight: 32,
+          display: 'flex', alignItems: 'stretch',
+          borderTop: '1px solid #0a0a14',
+          overflowX: 'auto',
         }}
-        title="Ajouter un fichier"
-      >+</button>
+      >
+        {groups.map(group => {
+          const isGroupActive = group.tabs.some(t => t.id === activeTabId);
+          if (group.tabs.length === 1) {
+            return (
+              <FileTab
+                key={group.tabs[0].id}
+                tabId={group.tabs[0].id}
+                label={group.label}
+                active={group.tabs[0].id === activeTabId}
+                onClick={() => onSwitchTab(group.tabs[0].id)}
+                onClose={() => onCloseTab(group.tabs[0].id)}
+              />
+            );
+          }
+          return (
+            <GroupTab
+              key={group.key}
+              label={group.label}
+              count={group.tabs.length}
+              active={isGroupActive}
+              onClick={() => {
+                // Si le groupe est déjà actif, ne rien faire ;
+                // sinon activer le premier onglet du groupe.
+                if (!isGroupActive) onSwitchTab(group.tabs[0].id);
+              }}
+            />
+          );
+        })}
+        <button
+          onClick={onOpenNew}
+          style={{
+            background: '#000', color: '#fff',
+            border: 'none', cursor: 'pointer',
+            fontSize: 16, fontWeight: 700,
+            padding: '0 10px',
+            marginLeft: 2,
+            alignSelf: 'center',
+          }}
+          title="Ajouter un fichier"
+        >+</button>
+      </div>
+
+      {/* ── Strip miniatures (groupe actif multi-fichiers) ─────────────── */}
+      {showStrip && (
+        <div
+          style={{
+            background: '#080c14',
+            borderTop: '1px solid #0a0a14',
+            display: 'flex', gap: 6,
+            padding: '6px 8px',
+            overflowX: 'auto',
+            flexShrink: 0,
+          }}
+        >
+          {activeGroup!.tabs.map(tab => (
+            <ThumbnailCard
+              key={tab.id}
+              tab={tab}
+              active={tab.id === activeTabId}
+              onClick={() => onSwitchTab(tab.id)}
+              onClose={() => onCloseTab(tab.id)}
+              onAddPanel={() => onAddPanel(tab.id)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function FileTab({
-  label, active, onClick, onClose,
-}: { label: string; active: boolean; onClick: () => void; onClose: () => void }) {
+  label, active, tabId, onClick, onClose,
+}: { label: string; active: boolean; tabId: number; onClick: () => void; onClose: () => void }) {
   return (
     <div
+      draggable
+      onDragStart={e => {
+        e.dataTransfer.setData('application/starhe-tab-id', String(tabId));
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
       style={{
         cursor: 'pointer',
         background: active ? TAB_ACT_BG : TAB_BG,
@@ -963,6 +1133,7 @@ function FileTab({
         flexShrink: 0,
       }}
       onClick={onClick}
+      title="Glisser vers la visionneuse pour ouvrir en panneau"
     >
       {label}
       <button
@@ -978,6 +1149,313 @@ function FileTab({
         onMouseLeave={e => (e.currentTarget.style.color = '#fff')}
         title="Fermer l'onglet"
       >×</button>
+    </div>
+  );
+}
+
+function GroupTab({
+  label, count, active, onClick,
+}: { label: string; count: number; active: boolean; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        cursor: 'pointer',
+        background: active ? TAB_ACT_BG : TAB_BG,
+        color: active ? '#e5e7eb' : '#6b7280',
+        fontSize: 11,
+        display: 'flex', alignItems: 'center', gap: 4,
+        padding: '0 10px',
+        borderTop: active ? `2px solid ${BLUE}` : '2px solid transparent',
+        paddingTop: active ? 0 : 2,
+        whiteSpace: 'nowrap', userSelect: 'none',
+        flexShrink: 0,
+      }}
+    >
+      📁 {label}
+      <span
+        style={{
+          background: BLUE, color: '#fff',
+          fontSize: 9, fontWeight: 700,
+          borderRadius: 10, padding: '1px 5px',
+          marginLeft: 2,
+        }}
+      >
+        {count}
+      </span>
+    </div>
+  );
+}
+
+function ThumbnailCard({
+  tab, active, onClick, onClose, onAddPanel,
+}: { tab: TabState; active: boolean; onClick: () => void; onClose: () => void; onAddPanel: () => void }) {
+  const thumb     = tab.data?.framesB64?.[0];
+  const filename  = tab.data?.fileName ?? tab.label;
+  const shortName = filename.length > 16 ? filename.slice(0, 15) + '…' : filename;
+
+  return (
+    <div
+      draggable
+      onDragStart={e => {
+        e.dataTransfer.setData('application/starhe-tab-id', String(tab.id));
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
+      onClick={onClick}
+      title="Cliquer ou glisser vers la visionneuse"
+      style={{
+        width: 76, flexShrink: 0,
+        cursor: 'pointer',
+        border: `2px solid ${active ? BLUE : '#1e2030'}`,
+        borderRadius: 4,
+        background: active ? TAB_ACT_BG : '#0c1018',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        overflow: 'hidden',
+        position: 'relative',
+        transition: 'border-color 0.12s',
+      }}
+    >
+      {/* Bouton fermer */}
+      <button
+        onClick={e => { e.stopPropagation(); onClose(); }}
+        style={{
+          position: 'absolute', top: 2, right: 2,
+          background: 'rgba(0,0,0,0.55)', border: 'none',
+          color: '#ccc', cursor: 'pointer',
+          fontSize: 10, padding: '1px 4px', borderRadius: 2,
+          zIndex: 1, lineHeight: 1,
+        }}
+        onMouseEnter={e => (e.currentTarget.style.color = '#ff4444')}
+        onMouseLeave={e => (e.currentTarget.style.color = '#ccc')}
+        title="Fermer"
+      >×</button>
+
+      {/* Miniature premier frame */}
+      {thumb ? (
+        <img
+          src={`data:image/jpeg;base64,${thumb}`}
+          style={{ width: '100%', height: 54, objectFit: 'cover', display: 'block' }}
+          alt=""
+        />
+      ) : (
+        <div
+          style={{
+            width: '100%', height: 54,
+            background: '#1a1a2e',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#333', fontSize: 18,
+          }}
+        >
+          ⏳
+        </div>
+      )}
+
+      {/* Nom du fichier */}
+      <div
+        style={{
+          fontSize: 9,
+          color: active ? '#e5e7eb' : '#6b7280',
+          padding: '2px 4px',
+          textAlign: 'center',
+          width: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+        title={filename}
+      >
+        {shortName}
+      </div>
+    </div>
+  );
+}
+
+// ── Grille multi-panneaux ─────────────────────────────────────────────────────
+
+interface PanelGridProps {
+  visiblePanelIds: number[];
+  tabs:            TabState[];
+  activeTabId:     number;
+  onFocusPanel:    (tabId: number) => void;
+  onAddPanel:      (tabId: number) => void;
+  onRemovePanel:   (tabId: number) => void;
+  updateTabById:   (tabId: number, updater: (t: TabState) => TabState) => void;
+  setCtxMenu:      (menu: { x: number; y: number } | null) => void;
+  setIsPlaying:    (v: boolean | ((p: boolean) => boolean)) => void;
+}
+
+function PanelGrid({
+  visiblePanelIds, tabs, activeTabId,
+  onFocusPanel, onAddPanel, onRemovePanel, updateTabById,
+  setCtxMenu, setIsPlaying,
+}: PanelGridProps) {
+  const n    = visiblePanelIds.length;
+  const cols = n <= 1 ? 1 : n <= 2 ? 2 : n <= 6 ? 3 : 4;
+
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
+  const handleDrop     = (e: React.DragEvent) => {
+    e.preventDefault();
+    const id = Number(e.dataTransfer.getData('application/starhe-tab-id'));
+    if (id) onAddPanel(id);
+  };
+
+  if (n === 0) {
+    return (
+      <div
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        style={{
+          flex: 1, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          background: CANVAS_BG, gap: 10, minHeight: 0,
+        }}
+      >
+        <span style={{ fontSize: 36, opacity: 0.15 }}>⊞</span>
+        <span style={{ color: '#444', fontSize: 12 }}>
+          Chargez un fichier DICOM ou glissez un onglet ici
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+      style={{
+        flex: 1,
+        display: 'grid',
+        gridTemplateColumns: `repeat(${cols}, 1fr)`,
+        gap: 2,
+        background: '#060810',
+        overflow: 'hidden',
+        minHeight: 0,
+      }}
+    >
+      {visiblePanelIds.map(tabId => {
+        const tab = tabs.find(t => t.id === tabId);
+        if (!tab) return null;
+        return (
+          <ViewPanel
+            key={tabId}
+            tab={tab}
+            focused={tabId === activeTabId}
+            panelCount={n}
+            onFocus={() => onFocusPanel(tabId)}
+            onRemove={() => onRemovePanel(tabId)}
+            onZoomPan={(z, px, py) =>
+              updateTabById(tabId, t => ({ ...t, zoom: z, panX: px, panY: py }))}
+            onContrastBright={(c, b) =>
+              updateTabById(tabId, t => ({ ...t, contrast: c, brightness: b }))}
+            onFrameChange={(idx) => {
+              onFocusPanel(tabId);
+              setIsPlaying(false);
+              updateTabById(tabId, t => ({ ...t, frameIdx: idx }));
+            }}
+            onMeasureAdd={(fi, m) =>
+              updateTabById(tabId, t => {
+                const f = { ...t.measuresByFrame };
+                f[fi] = [...(f[fi] ?? []), m];
+                return { ...t, measuresByFrame: f };
+              })}
+            onMeasureMove={(fi, si, pts) =>
+              updateTabById(tabId, t => {
+                const f = { ...t.measuresByFrame };
+                const s = [...(f[fi] ?? [])];
+                if (pts[0][0] === -1) s.splice(si, 1);
+                else s[si] = { ...s[si], pts };
+                f[fi] = s;
+                return { ...t, measuresByFrame: f };
+              })}
+            onMeasureLabelMove={(fi, si, off) =>
+              updateTabById(tabId, t => {
+                const f = { ...t.measuresByFrame };
+                const s = [...(f[fi] ?? [])];
+                if (s[si]) { s[si] = { ...s[si], labelOffset: off }; f[fi] = s; }
+                return { ...t, measuresByFrame: f };
+              })}
+            onMeasureSelect={(_fi, si) =>
+              updateTabById(tabId, t => ({ ...t, selectedMeasure: si }))}
+            onContextMenu={(x, y) => { onFocusPanel(tabId); setCtxMenu({ x, y }); }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function ViewPanel({
+  tab, focused, panelCount, onFocus, onRemove,
+  onZoomPan, onContrastBright, onFrameChange,
+  onMeasureAdd, onMeasureMove, onMeasureLabelMove, onMeasureSelect,
+  onContextMenu,
+}: {
+  tab:              TabState;
+  focused:          boolean;
+  panelCount:       number;
+  onFocus:          () => void;
+  onRemove:         () => void;
+  onZoomPan:        (z: number, px: number, py: number) => void;
+  onContrastBright: (c: number, b: number) => void;
+  onFrameChange:    (idx: number) => void;
+  onMeasureAdd:     (frameIdx: number, measure: Measure) => void;
+  onMeasureMove:    (frameIdx: number, segIdx: number, pts: [[number,number],[number,number]]) => void;
+  onMeasureLabelMove: (frameIdx: number, segIdx: number, off: [number,number]) => void;
+  onMeasureSelect:  (frameIdx: number, segIdx: number | null) => void;
+  onContextMenu:    (x: number, y: number) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex', flexDirection: 'column',
+        outline: focused ? `2px solid ${BLUE}` : '2px solid transparent',
+        outlineOffset: -2,
+        overflow: 'hidden',
+      }}
+      onClick={onFocus}
+    >
+      {/* En-tête panneau (affiché seulement en mode multi) */}
+      {panelCount > 1 && (
+        <div
+          style={{
+            background: '#0c1018',
+            height: 22, minHeight: 22,
+            display: 'flex', alignItems: 'center',
+            padding: '0 6px', gap: 4,
+            flexShrink: 0,
+            borderBottom: '1px solid #0a0a14',
+          }}
+        >
+          <span style={{
+            color: focused ? '#a0aec0' : '#555',
+            fontSize: 10, flex: 1,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {tab.data?.fileName ?? tab.label}
+          </span>
+          <button
+            onClick={e => { e.stopPropagation(); onRemove(); }}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: '#555', fontSize: 13, padding: '0 2px', lineHeight: 1,
+            }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f87171')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#555')}
+            title="Retirer du panneau"
+          >×</button>
+        </div>
+      )}
+      <DicomCanvas
+        tab={tab}
+        onZoomPan={onZoomPan}
+        onContrastBright={onContrastBright}
+        onFrameChange={onFrameChange}
+        onMeasureAdd={onMeasureAdd}
+        onMeasureMove={onMeasureMove}
+        onMeasureLabelMove={onMeasureLabelMove}
+        onMeasureSelect={onMeasureSelect}
+        onContextMenu={onContextMenu}
+      />
     </div>
   );
 }

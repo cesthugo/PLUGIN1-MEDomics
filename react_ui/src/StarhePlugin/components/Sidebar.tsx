@@ -146,8 +146,12 @@ export interface SidebarProps {
   textColor?:     string;
   /** Modèles IA à exécuter (depuis les réglages d'affichage) */
   analysisMode?:  'both' | 'risk_only' | 'detect_only';
+  /** Callback pour modifier le mode d'analyse depuis la sidebar */
+  onAnalysisModeChange?: (mode: 'both' | 'risk_only' | 'detect_only') => void;
 
   onLoadDicom:      () => void;
+  /** Chargement de tous les DICOM d'un dossier */
+  onLoadFolder:     () => void;
   /** Chargement direct par chemin absolu (mode dev navigateur, hors Electron) */
   onLoadPath:       (path: string) => void;
   onPrevFrame:      () => void;
@@ -161,6 +165,7 @@ export interface SidebarProps {
   onRunPipeline:    () => void;
   onResetAnalysis:  () => void;
   onOpenLive:       () => void;
+  onOpenBatch:      () => void;
   onGotoFrame:      (idx: number) => void;
   onToggleTheme:    () => void;
 }
@@ -172,7 +177,9 @@ export function Sidebar({
   sidebarBg,
   textColor,
   analysisMode = 'both',
+  onAnalysisModeChange,
   onLoadDicom,
+  onLoadFolder,
   onLoadPath,
   onPrevFrame,
   onNextFrame,
@@ -185,10 +192,12 @@ export function Sidebar({
   onRunPipeline,
   onResetAnalysis,
   onOpenLive,
+  onOpenBatch,
   onGotoFrame,
   onToggleTheme,
 }: SidebarProps) {
-  const [pathInput, setPathInput] = useState('');
+  const [pathInput,       setPathInput]       = useState('');
+  const [showModelPicker, setShowModelPicker] = useState(false);
   // Détection Electron : via l'API preload (méthode fiable avec contextIsolation)
   const isElectron = typeof window !== 'undefined' &&
     (window.electronAPI !== undefined ||
@@ -218,6 +227,7 @@ export function Sidebar({
         <SH title="Fichier DICOM" />
         <div style={{ padding: '6px 10px 3px' }}>
           <SBtn onClick={onLoadDicom}>📂   Charger un fichier DICOM</SBtn>
+          <div style={{ marginTop: 4 }}><SBtn onClick={onLoadFolder}>📁   Charger un dossier DICOM</SBtn></div>
         </div>
         {/* Saisie chemin direct — visible uniquement hors Electron (dev navigateur) */}
         {!isElectron && (
@@ -326,7 +336,75 @@ export function Sidebar({
 
         {/* ANALYSE IA */}
         <SH title="Analyse IA" />
-        <div style={{ padding: '8px 10px 4px' }}>
+
+        {/* ── Sélecteur de modèles (dropdown) ────────────────────────── */}
+        <div style={{ padding: '6px 10px 2px' }}>
+          <button
+            onClick={() => setShowModelPicker(v => !v)}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between',
+              background: showModelPicker ? '#0d1f3a' : '#0d0d14',
+              border: `1px solid ${showModelPicker ? BLUE : '#2a3245'}`,
+              borderRadius: 4, padding: '5px 10px',
+              color: SBAR_FG, fontSize: 11, cursor: 'pointer',
+            }}
+          >
+            <span>
+              🤖&nbsp;&nbsp;Modèles&nbsp;:
+              <span style={{ color: '#93c5fd', marginLeft: 6, fontWeight: 700 }}>
+                {analysisMode === 'both'        ? 'RISK + DETECT'
+                 : analysisMode === 'risk_only' ? 'RISK'
+                 :                               'DETECT'}
+              </span>
+            </span>
+            <span style={{ fontSize: 9, color: SBAR_MUTED }}>{showModelPicker ? '▲' : '▼'}</span>
+          </button>
+
+          {showModelPicker && (
+            <div style={{
+              background: '#0d1117', border: `1px solid ${BLUE}`,
+              borderTop: 'none', borderRadius: '0 0 4px 4px',
+              padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 8,
+            }}>
+              {([
+                { key: 'risk',   label: 'STARHE RISK',   desc: 'Risque CHC (C3D)' },
+                { key: 'detect', label: 'STARHE DETECT', desc: 'Détection lésions (RTMDet)' },
+              ] as const).map(({ key, label, desc }) => {
+                const checked = key === 'risk'
+                  ? analysisMode !== 'detect_only'
+                  : analysisMode !== 'risk_only';
+                return (
+                  <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      style={{ accentColor: BLUE, width: 14, height: 14, flexShrink: 0 }}
+                      onChange={e => {
+                        if (!onAnalysisModeChange) return;
+                        const nowRisk   = key === 'risk'   ? e.target.checked : analysisMode !== 'detect_only';
+                        const nowDetect = key === 'detect' ? e.target.checked : analysisMode !== 'risk_only';
+                        // Empêche de décocher les deux
+                        if (!nowRisk && !nowDetect) return;
+                        onAnalysisModeChange(
+                          nowRisk && nowDetect ? 'both'
+                          : nowRisk            ? 'risk_only'
+                          :                     'detect_only'
+                        );
+                      }}
+                    />
+                    <div>
+                      <div style={{ color: checked ? '#93c5fd' : SBAR_FG, fontSize: 11, fontWeight: 700 }}>{label}</div>
+                      <div style={{ color: SBAR_MUTED, fontSize: 10 }}>{desc}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: '4px 10px 4px' }}>
           <SBtn
             onClick={onRunPipeline}
             disabled={!data || analysisStatus === 'running'}
@@ -343,8 +421,11 @@ export function Sidebar({
             🗑   Réinitialiser l'analyse
           </SBtn>
         </div>
-        <div style={{ padding: '0 10px 10px' }}>
+        <div style={{ padding: '0 10px 4px' }}>
           <SBtn onClick={onOpenLive} accent>📡   Analyse en direct</SBtn>
+        </div>
+        <div style={{ padding: '0 10px 10px' }}>
+          <SBtn onClick={onOpenBatch} accent>📋   Analyse en lot (batch)</SBtn>
         </div>
 
         {/* RÉSULTATS */}

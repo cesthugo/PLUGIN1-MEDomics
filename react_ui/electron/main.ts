@@ -23,6 +23,13 @@ const isDev = !app.isPackaged;
 // ── Serveur Go ────────────────────────────────────────────────────────────────
 
 let goServer: ChildProcess | null = null;
+/** true dès que l'app commence à se fermer — inhibe les redémarrages */
+let appQuitting = false;
+
+// Délais de backoff exponentiel entre les redémarrages (ms)
+const RESTART_DELAYS = [1_000, 2_000, 5_000, 10_000, 30_000];
+let restartAttempt = 0;
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Retourne le chemin vers le binaire go_server selon l'environnement. */
 function getGoServerBin(): string {
@@ -37,6 +44,8 @@ function getGoServerBin(): string {
 }
 
 function startGoServer(): void {
+  if (appQuitting) return;
+
   const bin = getGoServerBin();
 
   if (!fs.existsSync(bin)) {
@@ -50,18 +59,36 @@ function startGoServer(): void {
     env: { ...process.env },
   });
 
+  console.log(`[STARHE] Serveur Go démarré (pid ${goServer.pid}, tentative ${restartAttempt + 1})`);
+
   goServer.on('error', (err) =>
     console.error('[STARHE] Erreur démarrage serveur Go :', err.message),
   );
 
   goServer.on('exit', (code, signal) => {
-    if (code !== 0 && code !== null) {
-      console.warn(`[STARHE] Serveur Go arrêté (code=${code}, signal=${signal})`);
-    }
     goServer = null;
+
+    // Arrêt volontaire (SIGTERM/SIGINT depuis before-quit) → ne pas redémarrer
+    if (appQuitting || signal === 'SIGTERM' || signal === 'SIGINT') return;
+
+    // Crash ou arrêt inattendu → redémarrage automatique avec backoff
+    const delay = RESTART_DELAYS[Math.min(restartAttempt, RESTART_DELAYS.length - 1)];
+    restartAttempt += 1;
+    console.warn(
+      `[STARHE] Serveur Go arrêté (code=${code}, signal=${signal}).` +
+      ` Redémarrage dans ${delay / 1000} s… (tentative ${restartAttempt})`,
+    );
+
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      startGoServer();
+    }, delay);
   });
 
-  console.log(`[STARHE] Serveur Go démarré (pid ${goServer.pid})`);
+  // Redémarrage réussi : remettre le compteur à zéro après 30 s de stabilité
+  setTimeout(() => {
+    if (goServer && !appQuitting) restartAttempt = 0;
+  }, 30_000);
 }
 
 // ── Fenêtre principale ────────────────────────────────────────────────────────
@@ -127,6 +154,11 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  appQuitting = true;
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
   if (goServer) {
     goServer.kill('SIGTERM');
   }
