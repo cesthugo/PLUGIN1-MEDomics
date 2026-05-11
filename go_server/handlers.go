@@ -89,52 +89,6 @@ func findCachedResult(ctx context.Context, filePath, analysisMode string) (bson.
 	return doc, nil
 }
 
-// findFallbackCachedResult vérifie si un résultat existant couvre déjà
-// le sous-ensemble demandé, même si l'analysis_mode stocké diffère.
-//
-//   - risk_only   → cherche tout doc pour ce fichier où analysis_mode contient “risk=1”
-//   - detect_only → cherche tout doc pour ce fichier où analysis_mode contient “detect=1”
-//   - both        → pas de fallback (mode complet, rien à compléter)
-func findFallbackCachedResult(ctx context.Context, req analyzeRequest) (bson.M, error) {
-	if req.RunRisk && req.RunDetection {
-		return nil, nil
-	}
-	if mongoClient == nil {
-		return nil, nil
-	}
-
-	// Regex sur analysis_mode pour s'assurer que le modèle requis a bien été exécuté.
-	// Évite de retourner un résultat risk_only pour une requête detect_only (et vice-versa).
-	filter := bson.M{"file_path": req.DicomPath}
-	if req.RunRisk && !req.RunDetection {
-		// risk_only : n'importe quel doc où RISK a été exécuté
-		filter["$or"] = bson.A{
-			bson.M{"analysis_mode": bson.M{"$regex": "risk=1"}},
-			// anciens documents pré-refactor qui utilisaient "original" ou "backscan"
-			bson.M{"analysis_mode": bson.M{"$regex": "^(original|backscan|crop)$"}, "risk": bson.M{"$exists": true}},
-		}
-	} else if !req.RunRisk && req.RunDetection {
-		// detect_only : n'importe quel doc où DETECT a été exécuté
-		filter["$or"] = bson.A{
-			bson.M{"analysis_mode": bson.M{"$regex": "detect=1"}},
-			// anciens documents
-			bson.M{"analysis_mode": bson.M{"$regex": "^(original|backscan|crop)$"}, "detections_per_frame": bson.M{"$exists": true}},
-		}
-	}
-
-	ctx2, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	var doc bson.M
-	err := collection().FindOne(ctx2, filter).Decode(&doc)
-	if err == mongo.ErrNoDocuments {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return doc, nil
-}
-
 // streamCachedResult rejoue un résultat mis en cache comme événements SSE.
 func streamCachedResult(w http.ResponseWriter, f http.Flusher, doc bson.M) {
 	// Événement progress pour informer le client
@@ -228,31 +182,15 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Vérification du cache MongoDB avant de lancer Python.
-	// On tente toujours les deux niveaux indépendamment :
-	//   1. Exact : même analysis_mode exact
-	//   2. Fallback : un résultat plus complet (ex. risk+detect) couvre le sous-ensemble demandé
+	// Vérification du cache MongoDB avant de lancer Python
 	analysisMode := computeAnalysisMode(req)
-
-	exactDoc, exactErr := findCachedResult(r.Context(), req.DicomPath, analysisMode)
-	if exactErr != nil {
-		log.Printf("cache MongoDB (exact) erreur: %v", exactErr)
-	} else if exactDoc != nil {
-		log.Printf("cache hit (exact): %s [%s]", req.DicomPath, analysisMode)
-		streamCachedResult(w, flusher, exactDoc)
+	if cached, err := findCachedResult(r.Context(), req.DicomPath, analysisMode); err != nil {
+		log.Printf("avertissement cache MongoDB: %v", err)
+	} else if cached != nil {
+		log.Printf("cache hit: %s [%s]", req.DicomPath, analysisMode)
+		streamCachedResult(w, flusher, cached)
 		return
 	}
-
-	fallbackDoc, fbErr := findFallbackCachedResult(r.Context(), req)
-	if fbErr != nil {
-		log.Printf("cache MongoDB (fallback) erreur: %v", fbErr)
-	} else if fallbackDoc != nil {
-		log.Printf("cache hit (fallback): %s [%s]", req.DicomPath, analysisMode)
-		streamCachedResult(w, flusher, fallbackDoc)
-		return
-	}
-
-	log.Printf("cache miss → lancement Python: %s [%s]", req.DicomPath, analysisMode)
 
 	// Construction des arguments subprocess
 	args := []string{

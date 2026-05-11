@@ -27,6 +27,7 @@ pythonCode/modules/starhe_plugin/temp/
 dist/
 build/
 .pytest_cache/
+logs/
 
 # ── Build artifacts de prepUS (généré par pip install / python setup.py build) ─
 third_party/prepUS/build/

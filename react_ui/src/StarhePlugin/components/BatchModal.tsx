@@ -38,6 +38,12 @@ interface BatchItem {
   detCount?:  number;
   /** Message d'erreur si status === 'error' */
   error?:    string;
+  /** Détections par frame (pour export JSON et rechargement bboxes) */
+  detections?: Detection[][];
+  /** Nombre de frames du DICOM (métadonnée pour le JSON) */
+  numFrames?:  number;
+  /** ROI crop retourné par le pipeline */
+  roi?:        unknown;
 }
 
 let _id = 1;
@@ -121,12 +127,21 @@ function BatchRow({ item, onRemove }: { item: BatchItem; onRemove: () => void })
 
 // ── Composant principal ───────────────────────────────────────────────────────
 
+export interface BatchResultToOpen {
+  serverPath:  string;
+  name:        string;
+  detections?: Detection[][];
+  risk?:       { score: number; label: string };
+  numFrames?:  number;
+  roi?:        unknown;
+}
+
 export interface BatchModalProps {
   onClose:       () => void;
   /** Mode d'analyse par défaut (depuis les réglages globaux) */
   analysisMode:  'both' | 'risk_only' | 'detect_only';
-  /** Callback pour ouvrir le fichier analysé dans un onglet principal */
-  onOpenInTab:   (serverPath: string, name: string) => void;
+  /** Callback pour ouvrir le fichier analysé dans un onglet principal (avec résultats pré-chargés) */
+  onOpenInTab:   (result: BatchResultToOpen) => void;
 }
 
 export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: BatchModalProps) {
@@ -134,6 +149,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
   const [running,      setRunning]      = useState(false);
   const [done,         setDone]         = useState(false);
   const [batchMode,    setBatchMode]    = useState<'both' | 'risk_only' | 'detect_only'>(defaultMode);
+  const [selected,     setSelected]     = useState<Set<number>>(new Set());
   const abortRef = useRef<(() => void) | null>(null);
   const cancelledRef = useRef(false);
 
@@ -142,18 +158,40 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
     setItems(prev => prev.map(it => it.id === id ? { ...it, ...patch } : it));
   }, []);
 
+  // ── Détection DICOM : .dcm, .dicom, ou sans extension (ex: A0000, IM-0001) ─
+  const isDicomFile = (f: File) => {
+    const lname = f.name.toLowerCase();
+    return lname.endsWith('.dcm') || lname.endsWith('.dicom') || !lname.includes('.');
+  };
+
   // ── Ajout de fichiers (upload navigateur) ──────────────────────────────────
   const onFileDrop = useCallback((files: FileList | null) => {
     if (!files) return;
-    const newItems: BatchItem[] = Array.from(files)
-      .filter(f => !f.name.match(/\.(png|jpg|jpeg|gif|mp4|mov|avi)$/i))
-      .map(f => ({
-        id: uid(), name: f.name, serverPath: '', file: f,
-        status: 'waiting' as ItemStatus, progress: 'En attente',
-      }));
-    setItems(prev => [...prev, ...newItems]);
+    const dicomFiles = Array.from(files).filter(isDicomFile);
+    const skipped = Array.from(files).length - dicomFiles.length;
+    const newItems: BatchItem[] = dicomFiles.map(f => ({
+      id: uid(), name: f.name, serverPath: '', file: f,
+      status: 'waiting' as ItemStatus, progress: 'En attente',
+    }));
+    if (skipped > 0 && dicomFiles.length === 0) {
+      // tous les fichiers ont été ignorés — feedback visuel géré par le compteur
+    }
+    setItems(prev => [
+      ...prev,
+      ...newItems.filter(ni => !prev.some(ex => ex.name === ni.name)),
+    ]);
     setDone(false);
   }, []);
+
+  // ── Ajout d'un dossier entier (navigateur) ────────────────────────────────
+  const onPickFolder = useCallback(() => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    (inp as any).webkitdirectory = true;
+    (inp as any).multiple = true;
+    inp.onchange = () => onFileDrop(inp.files);
+    inp.click();
+  }, [onFileDrop]);
 
   // ── Ajout par chemin absolu (Electron / saisie manuelle) ──────────────────
   const pathRef = useRef<HTMLInputElement>(null);
@@ -218,9 +256,12 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
       };
 
       await new Promise<void>((resolve) => {
-        let riskScore: number | undefined;
-        let riskLabel: string | undefined;
-        let detCount: number | undefined;
+        let riskScore:  number | undefined;
+        let riskLabel:  string | undefined;
+        let detCount:   number | undefined;
+        let detections: Detection[][] | undefined;
+        let numFrames:  number | undefined;
+        let roi:        unknown;
 
         const abort = streamAnalysis(
           req,
@@ -235,8 +276,14 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
               riskLabel = r.label ?? r.risk_label ?? riskLabel;
             }
             if (payload.data?.detections_per_frame) {
-              const dets = payload.data.detections_per_frame as Detection[][];
-              detCount = dets.reduce((acc, fd) => acc + fd.length, 0);
+              detections = payload.data.detections_per_frame as Detection[][];
+              detCount   = detections.reduce((acc, fd) => acc + fd.length, 0);
+            }
+            if (payload.data?.num_frames !== undefined) {
+              numFrames = payload.data.num_frames as number;
+            }
+            if (payload.data?.roi !== undefined) {
+              roi = payload.data.roi;
             }
           },
           () => {
@@ -247,7 +294,10 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
               serverPath,
               riskScore,
               riskLabel,
-              detCount: detCount ?? 0,
+              detCount:   detCount ?? 0,
+              detections: detections ?? [],
+              numFrames,
+              roi,
             });
             resolve();
           },
@@ -335,6 +385,85 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
     URL.revokeObjectURL(url);
   }, [items, batchMode]);
 
+  // ── Import JSON ─────────────────────────────────────────────────────────
+  const importJSON = useCallback(() => {
+    const inp  = document.createElement('input');
+    inp.type   = 'file';
+    inp.accept = '.json,application/json';
+    inp.onchange = () => {
+      const file = inp.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const payload = JSON.parse(reader.result as string);
+          if (!payload?.starhe_batch || !Array.isArray(payload.results)) {
+            alert('Fichier JSON invalide — pas un export STARHE batch.');
+            return;
+          }
+          const imported: BatchItem[] = (payload.results as any[]).map(r => ({
+            id:         uid(),
+            name:       r.file_name ?? r.server_path ?? 'inconnu',
+            serverPath: r.server_path ?? '',
+            file:       undefined,
+            status:     'done' as ItemStatus,
+            progress:   'Importé depuis JSON',
+            riskScore:  r.risk?.score,
+            riskLabel:  r.risk?.label,
+            detCount:   (r.detections_per_frame as Detection[][])
+                          ?.reduce((acc: number, fd: Detection[]) => acc + fd.length, 0) ?? 0,
+            detections: r.detections_per_frame ?? [],
+            numFrames:  r.num_frames ?? undefined,
+            roi:        r.roi ?? undefined,
+          }));
+          setItems(prev => [
+            ...prev,
+            ...imported.filter(ni => !prev.some(ex => ex.name === ni.name)),
+          ]);
+          setDone(true);
+        } catch {
+          alert('Impossible de lire le fichier JSON.');
+        }
+      };
+      reader.readAsText(file);
+    };
+    inp.click();
+  }, []);
+
+  // ── Export JSON ─────────────────────────────────────────────────────────
+  const exportJSON = useCallback(() => {
+    const analysisLabel =
+      batchMode === 'both'      ? 'RISK + DETECT' :
+      batchMode === 'risk_only' ? 'RISK only'     : 'DETECT only';
+
+    const payload = {
+      starhe_batch:   '1.0',
+      exported_at:    new Date().toISOString(),
+      analysis_mode:  analysisLabel,
+      results: items
+        .filter(it => it.status === 'done')
+        .map(it => ({
+          file_name:            it.name,
+          server_path:          it.serverPath,
+          num_frames:           it.numFrames ?? null,
+          roi:                  it.roi ?? null,
+          risk: it.riskScore !== undefined
+            ? { score: it.riskScore, label: it.riskLabel ?? '' }
+            : null,
+          detections_per_frame: it.detections ?? [],
+        })),
+    };
+
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `starhe_batch_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [items, batchMode]);
+
   // Fermeture sur Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !running) onClose(); };
@@ -367,6 +496,15 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
           <span style={{ fontSize: 14, fontWeight: 700, color: SBAR_FG }}>
             📋  Analyse batch
           </span>
+          <button
+            onClick={importJSON}
+            title="Importer un fichier JSON exporté précédemment (recharge les résultats + bboxes)"
+            style={{
+              background: '#1e3a5f', border: '1px solid #1d4ed8',
+              borderRadius: 4, padding: '3px 10px',
+              color: '#93c5fd', fontSize: 11, cursor: 'pointer', fontWeight: 600,
+            }}
+          >⬆ Importer JSON</button>
           {/* Sélecteur de mode d'analyse */}
           <div style={{ display: 'flex', gap: 4 }}>
             {(['both', 'risk_only', 'detect_only'] as const).map(m => {
@@ -412,18 +550,35 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
             onDrop={onDrop}
             style={{
               border: `2px dashed ${CARD_BORDER}`, borderRadius: 6,
-              padding: '12px 16px', marginBottom: 10, textAlign: 'center',
+              padding: '12px 16px', marginBottom: 8, textAlign: 'center',
               color: SBAR_MUTED, fontSize: 12, cursor: 'pointer',
               background: '#0a0e18',
             }}
             onClick={() => {
               const inp = document.createElement('input');
-              inp.type = 'file'; inp.multiple = true; inp.accept = '.dcm,*';
+              inp.type = 'file'; inp.multiple = true;
+              // Pas de restriction accept : laisse passer les fichiers sans extension
               inp.onchange = () => onFileDrop(inp.files);
               inp.click();
             }}
           >
             📂  Glisser-déposer des fichiers DICOM ici, ou cliquer pour sélectionner
+            <div style={{ fontSize: 11, marginTop: 4, color: '#4a5568' }}>
+              Accepte : <code>.dcm</code> · <code>.dicom</code> · fichiers sans extension (ex : A0000)
+            </div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <button
+              onClick={onPickFolder}
+              style={{
+                width: '100%', background: '#0a0e18',
+                border: `1px dashed ${CARD_BORDER}`, borderRadius: 6,
+                padding: '7px 16px', color: SBAR_MUTED, fontSize: 12,
+                cursor: 'pointer', textAlign: 'center',
+              }}
+            >
+              📁  Charger un dossier entier — détecte automatiquement tous les fichiers DICOM
+            </button>
           </div>
 
           {/* Saisie chemin absolu */}
@@ -489,15 +644,26 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
           {/* Actions */}
           <div style={{ display: 'flex', gap: 8 }}>
             {doneCount > 0 && !running && (
-              <button
-                onClick={exportCSV}
-                title="Télécharger les résultats au format CSV"
-                style={{
-                  background: '#14532d', border: '1px solid #166534',
-                  borderRadius: 4, padding: '6px 14px',
-                  color: '#86efac', fontSize: 12, cursor: 'pointer', fontWeight: 600,
-                }}
-              >⬇  Générer CSV</button>
+              <>
+                <button
+                  onClick={exportJSON}
+                  title="Télécharger les résultats + bounding boxes au format JSON (rechargeable)"
+                  style={{
+                    background: '#1e3a5f', border: '1px solid #1d4ed8',
+                    borderRadius: 4, padding: '6px 14px',
+                    color: '#93c5fd', fontSize: 12, cursor: 'pointer', fontWeight: 600,
+                  }}
+                >⬇  Générer JSON</button>
+                <button
+                  onClick={exportCSV}
+                  title="Télécharger les résultats au format CSV"
+                  style={{
+                    background: '#14532d', border: '1px solid #166534',
+                    borderRadius: 4, padding: '6px 14px',
+                    color: '#86efac', fontSize: 12, cursor: 'pointer', fontWeight: 600,
+                  }}
+                >⬇  Générer CSV</button>
+              </>
             )}
             {running ? (
               <button
@@ -544,21 +710,80 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
               <span style={{ fontSize: 11, fontWeight: 700, color: SBAR_MUTED, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                 Récapitulatif
               </span>
-              {!running && (
-                <button
-                  onClick={exportCSV}
-                  title="Télécharger les résultats au format CSV"
-                  style={{
-                    background: '#14532d', border: '1px solid #166534',
-                    borderRadius: 3, padding: '2px 10px',
-                    color: '#86efac', fontSize: 11, cursor: 'pointer', fontWeight: 600,
-                  }}
-                >⬇ CSV</button>
-              )}
+              {!running && (() => {
+                const doneItems = items.filter(it => it.status === 'done');
+                const selItems  = doneItems.filter(it => selected.has(it.id));
+                const openAll   = () => doneItems.forEach(it => onOpenInTab({
+                  serverPath: it.serverPath, name: it.name,
+                  detections: it.detections,
+                  risk: it.riskScore !== undefined ? { score: it.riskScore, label: it.riskLabel ?? '' } : undefined,
+                  numFrames: it.numFrames, roi: it.roi,
+                }));
+                const openSel   = () => selItems.forEach(it => onOpenInTab({
+                  serverPath: it.serverPath, name: it.name,
+                  detections: it.detections,
+                  risk: it.riskScore !== undefined ? { score: it.riskScore, label: it.riskLabel ?? '' } : undefined,
+                  numFrames: it.numFrames, roi: it.roi,
+                }));
+                return (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {selItems.length > 0 && (
+                      <button
+                        onClick={openSel}
+                        title={`Ouvrir les ${selItems.length} fichier(s) sélectionné(s) dans des onglets`}
+                        style={{
+                          background: '#1e3a5f', border: '1px solid #1d4ed8',
+                          borderRadius: 3, padding: '2px 10px',
+                          color: '#93c5fd', fontSize: 11, cursor: 'pointer', fontWeight: 600,
+                        }}
+                      >↗ Ouvrir sélection ({selItems.length})</button>
+                    )}
+                    <button
+                      onClick={openAll}
+                      title={`Ouvrir tous les ${doneItems.length} fichiers dans des onglets`}
+                      style={{
+                        background: '#1c2a1c', border: '1px solid #166534',
+                        borderRadius: 3, padding: '2px 10px',
+                        color: '#86efac', fontSize: 11, cursor: 'pointer', fontWeight: 600,
+                      }}
+                    >↗ Tout ouvrir ({doneItems.length})</button>
+                    <button
+                      onClick={exportJSON}
+                      title="Télécharger les résultats + bounding boxes au format JSON"
+                      style={{
+                        background: '#1e3a5f', border: '1px solid #1d4ed8',
+                        borderRadius: 3, padding: '2px 10px',
+                        color: '#93c5fd', fontSize: 11, cursor: 'pointer', fontWeight: 600,
+                      }}
+                    >⬇ JSON</button>
+                    <button
+                      onClick={exportCSV}
+                      title="Télécharger les résultats au format CSV"
+                      style={{
+                        background: '#14532d', border: '1px solid #166534',
+                        borderRadius: 3, padding: '2px 10px',
+                        color: '#86efac', fontSize: 11, cursor: 'pointer', fontWeight: 600,
+                      }}
+                    >⬇ CSV</button>
+                  </div>
+                );
+              })()}
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
               <thead>
                 <tr style={{ color: SBAR_MUTED }}>
+                  <th style={{ padding: '3px 6px', width: 28, textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      title="Tout sélectionner / désélectionner"
+                      checked={items.filter(it => it.status === 'done').every(it => selected.has(it.id)) && items.some(it => it.status === 'done')}
+                      onChange={e => {
+                        const doneIds = items.filter(it => it.status === 'done').map(it => it.id);
+                        setSelected(e.target.checked ? new Set(doneIds) : new Set());
+                      }}
+                      style={{ cursor: 'pointer', accentColor: '#3b82f6' }}
+                    />
+                  </th>
                   <th style={{ textAlign: 'left', padding: '3px 6px', fontWeight: 600 }}>Fichier</th>
                   <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>Risque CHC</th>
                   <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>Score</th>
@@ -568,7 +793,19 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
               </thead>
               <tbody>
                 {items.filter(it => it.status === 'done').map(it => (
-                  <tr key={it.id} style={{ borderTop: `1px solid ${CARD_BORDER}` }}>
+                  <tr key={it.id} style={{ borderTop: `1px solid ${CARD_BORDER}`, background: selected.has(it.id) ? '#0f1e38' : 'transparent' }}>
+                    <td style={{ padding: '3px 6px', textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(it.id)}
+                        onChange={e => setSelected(prev => {
+                          const next = new Set(prev);
+                          e.target.checked ? next.add(it.id) : next.delete(it.id);
+                          return next;
+                        })}
+                        style={{ cursor: 'pointer', accentColor: '#3b82f6' }}
+                      />
+                    </td>
                     <td style={{ padding: '3px 6px', color: SBAR_FG, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {it.name}
                     </td>
@@ -583,7 +820,16 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
                     </td>
                     <td style={{ padding: '3px 6px', textAlign: 'center' }}>
                       <button
-                        onClick={() => onOpenInTab(it.serverPath, it.name)}
+                        onClick={() => onOpenInTab({
+                          serverPath:  it.serverPath,
+                          name:        it.name,
+                          detections:  it.detections,
+                          risk:        it.riskScore !== undefined
+                                         ? { score: it.riskScore, label: it.riskLabel ?? '' }
+                                         : undefined,
+                          numFrames:   it.numFrames,
+                          roi:         it.roi,
+                        })}
                         title="Ouvrir dans un onglet"
                         style={{
                           background: 'none', border: `1px solid ${CARD_BORDER}`,

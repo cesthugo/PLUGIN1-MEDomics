@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Port du serveur Go — surchargeable via STARHE_PORT (ex: STARHE_PORT=9090 ./start_react.sh)
+const GO_PORT = process.env.STARHE_PORT ?? '8082'
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -10,13 +13,13 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Proxie les appels API vers le serveur Go (port 8080)
+      // Proxie les appels API vers le serveur Go
       '/starhe': {
-        target: 'http://localhost:8082',
+        target: `http://localhost:${GO_PORT}`,
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:8082',
+        target: `http://localhost:${GO_PORT}`,
         changeOrigin: true,
       },
     },

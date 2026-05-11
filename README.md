@@ -68,22 +68,20 @@ Two AI models are used:
 ### 1. Launch the React UI (primary interface)
 
 ```bash
-# 1. Start the Go server (builds the binary, uses absolute paths from os.Executable)
-cd go_server
-go build -o go_server . && ./go_server
-# Listening on http://localhost:8080
+# macOS / Linux
+./start_react.sh
 
-# 2. In a separate terminal: start the Vite dev server
-cd react_ui
-npm install   # first time only
-npm run dev
-# Open http://localhost:5173
+# Windows PowerShell
+.\start_react.ps1
 ```
+
+The launcher builds and starts the Go server on `http://localhost:8082`, then starts the React/Vite UI on `http://localhost:5173`.
+Logs are written to `logs/go_server.log`, `logs/react_ui.log`, and `logs/starhe_dev.log`.
 
 > **Production build**: `cd react_ui && npm run build` — outputs to `react_ui/dist/`.  
 > The `dist/` folder can be served statically by any HTTP server or embedded in an Electron shell.
 
-The React UI auto-proxies all `/starhe/*` calls to `http://localhost:8080` (configured in `vite.config.ts`). In production or Electron, set `window.__STARHE_API_BASE__ = 'http://localhost:8080'`.
+The React UI auto-proxies all `/starhe/*` calls to `http://localhost:8082` (configured in `vite.config.ts`). In production or Electron, set `window.__STARHE_API_BASE__ = 'http://localhost:8082'`.
 
 ### 2. Launch the Tkinter prototype (legacy development)
 
@@ -370,12 +368,8 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 ### Development workflow
 
 ```bash
-# Rebuild and restart Go server (rebuild required after any Go file change)
-lsof -ti :8082 | xargs kill -9 2>/dev/null
-cd go_server && go build -o go_server . && ./go_server &
-
-# Start the Vite dev server (HMR — no rebuild needed for React/TS changes)
-cd react_ui && npm run dev
+# Start Go + React together (Go is rebuilt automatically)
+./start_react.sh
 
 # Type-check + production build + deploy to MEDomics
 cd react_ui && npm run build
