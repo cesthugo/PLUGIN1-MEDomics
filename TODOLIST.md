@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **7 mai 2026**
+> Last updated: **11 mai 2026**
 
 ---
 
@@ -166,6 +166,22 @@
 - [x] **Go server connection fixed** — `starhe.jsx`: `STARHE_API_BASE = 'http://localhost:8082'` hardcoded; removed dependency on `WorkspaceContext.port` which was often `null` at iframe load time, causing "Failed to fetch" errors on port 8082
 - [x] **MEDomics Next.js renderer rebuilt** — `npx next build` after all fixes
 - [x] **Go binary rebuilt** — `go build -o go_server .` in `go_server/`; server confirmed on port 8082 via `/health`
+
+### 🗂 Batch Analysis — Export/Import JSON (11 mai 2026)
+- [x] **`start_react.sh`** — `find_free_port()` : auto-détecte le premier port TCP libre ≥ 8082 ; exporte `STARHE_PORT` ; passe `PORT="$STARHE_PORT"` au binaire Go
+- [x] **`vite.config.ts`** — lit `process.env.STARHE_PORT ?? '8082'` pour la cible du proxy Vite
+- [x] **`BatchModal.tsx` — persistance des bboxes** — `BatchItem` stocke `detections?: Detection[][]`, `numFrames?`, `roi?` ; remplis à la fin de chaque analyse SSE
+- [x] **`BatchModal.tsx` — `exportJSON()`** — génère `starhe_batch_YYYY-MM-DD.json` avec `detections_per_frame` complet ; format `{ starhe_batch: "1.0", exported_at, analysis_mode, results: [...] }`
+- [x] **`BatchModal.tsx` — `importJSON()`** — file picker `.json` ; parse et valide le format `starhe_batch` ; ajoute les items avec `status: 'done'` et résultats pré-remplis (risk + detections) sans re-analyser
+- [x] **`BatchModal.tsx` — `BatchResultToOpen` interface** — interface exportée : `{ serverPath, name, detections?, risk?, numFrames?, roi? }`
+- [x] **`BatchModal.tsx` — "→ Tab"** — passe l'objet `BatchResultToOpen` complet (avec bboxes) à `onOpenInTab`
+- [x] **`BatchModal.tsx` — checkboxes + ouverture multiple** — case à cocher par ligne + case globale "tout sélectionner" dans l'en-tête du tableau ; boutons **"↗ Ouvrir sélection (N)"** et **"↗ Tout ouvrir (N)"** dans le récapitulatif
+- [x] **`index.tsx` — `import { BatchModal }`** — import + `type BatchResultToOpen` depuis `./components/BatchModal`
+- [x] **`index.tsx` — `showBatch` state** — `const [showBatch, setShowBatch] = useState(false)`
+- [x] **`index.tsx` — `onLoadFolder`** — callback `webkitdirectory` : ouvre un dossier, filtre `.dcm` / `.dicom` / sans extension, charge séquentiellement via `doLoadFile`
+- [x] **`index.tsx` — `<Sidebar onOpenBatch>` + `onLoadFolder`** — props branchées sur les nouveaux callbacks
+- [x] **`index.tsx` — `onOpenInTab` handler** — `loadDicom(serverPath)` → crée l'onglet avec `detectionsBy.original` + `resultsBy.original` pré-injectés ; fallback file picker si le fichier temp serveur a expiré
+
 
 ---
 

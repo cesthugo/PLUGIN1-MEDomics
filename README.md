@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.5.0` — Last updated: 7 mai 2026*
+*Version `0.5.0` — Last updated: 11 mai 2026*
 
 ---
 
@@ -183,7 +183,7 @@ Go server environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `8082` | HTTP server port |
+| `PORT` / `STARHE_PORT` | `8082` | HTTP server port — `start_react.sh` auto-detects the first free port ≥ 8082 and exports it as `STARHE_PORT` |
 | `STARHE_PYTHON_EXE` | absolute path in `config.go` | Python 3.13 from venv |
 | `STARHE_PYTHON_PATH` | absolute path in `config.go` | Root directory of Python modules |
 | `MONGO_URI` | `mongodb://localhost:54017/` | MongoDB URI |
@@ -222,6 +222,7 @@ react_ui/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
       ContextMenu.tsx         → right-click context menu
       SettingsPanel.tsx       → settings overlay (font, colors, analysis mode, console toggle)
       LiveModal.tsx           → live analysis modal (C-STORE / folder / HDMI)
+      BatchModal.tsx          → batch analysis modal (multi-file, JSON/CSV export-import, open-in-tab with pre-injected bboxes)
         │ HTTP + SSE (proxied by Vite dev server → port 8082 in dev)
         ▼
   Go Server (port 8082)
@@ -362,6 +363,7 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 | **Settings panel** | Font scale, font family, text/sidebar/bg colors, analysis mode, console toggle — persisted to `localStorage` |
 | **Live analysis modal** | Full port of `live_tab.py`: 3 sources (C-STORE, folder, HDMI), real-time RTMDet overlay, risk score |
 | **MongoDB cache** | Cached results restored instantly on re-open; "Réinitialiser l'analyse" clears the server cache |
+| **Batch analysis modal** | Multi-file sequential analysis; results table with risk score + bbox count per file; **JSON export** (full `detections_per_frame` — reloadable); **JSON import** — reload previous results without re-running inference; **CSV export**; checkboxes to open one, several, or all files in viewer tabs with detections pre-injected; fallback file picker when temp file has expired |
 | **Theme** | Dark theme by default; sidebar and background colors fully configurable from Settings |
 | **Keyboard shortcuts** | Space (play/pause), ←/→ (±1 frame), Shift+←/→ (±10), Home, P/M/S/R/C/L, `+`/`-` (±speed without modifier), `Cmd+`/`Cmd-`/`Cmd+0` (zoom only), B (loop), Ctrl+Tab / Ctrl+W |
 

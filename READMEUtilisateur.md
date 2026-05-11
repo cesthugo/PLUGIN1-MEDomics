@@ -272,7 +272,68 @@ The sidebar always remains dark in both modes.
 
 ---
 
-## 📡 14. Live Analysis (Analyse en direct)
+## 📋 14. Batch Analysis (Analyse en lot)
+
+The **📋 Analyse en lot (batch)** button in the sidebar opens the batch modal to analyze multiple DICOM files sequentially and manage results.
+
+### Opening the modal
+
+Click **📋 Analyse en lot (batch)** in the sidebar. A full-screen modal opens.
+
+### Loading files
+
+| Method | Description |
+|---|---|
+| **Drag-and-drop** | Drag `.dcm`, `.dicom`, or extension-less files directly onto the drop zone |
+| **Click the drop zone** | Opens a file picker to select one or more DICOM files |
+| **Folder button** | Loads an entire directory — only DICOM files are kept |
+| **Absolute path** | Type a server-side path and click **Ajouter** |
+| **⬆ Importer JSON** | Reload a previously exported JSON file (see below) — files appear instantly with their results pre-filled, no re-analysis needed |
+
+### Running the batch
+
+1. Add the files you want to analyze.
+2. Select the analysis mode (RISK + DETECT / RISK / DETECT) in the header.
+3. Click **▶ Lancer le batch**.
+4. Each file is analyzed sequentially; progress is shown inline per file.
+
+### Results table (Récapitulatif)
+
+Once at least one file is done, a summary table appears at the bottom:
+
+| Column | Description |
+|---|---|
+| Checkbox | Select individual files to open |
+| Fichier | File name |
+| Risque CHC | Risk label (Risque faible / Risque élevé) |
+| Score | Numeric risk score (%) |
+| Lésions | Number of detected lesions |
+| Ouvrir | **→ Tab** button — opens that file in the viewer with detections already overlaid |
+
+**Opening multiple files at once:**
+- Check the files you want, then click **↗ Ouvrir sélection (N)**.
+- Or click **↗ Tout ouvrir (N)** to open all analyzed files at once.
+- Each file opens in its own tab with the risk score and bounding boxes pre-injected — no re-analysis required.
+
+> If the session was restarted and the server temp file has expired, a file picker opens automatically so you can re-upload the original DICOM. The results (bboxes + risk) from the JSON are already loaded — only the image data needs to be re-provided.
+
+### Exporting results
+
+| Button | Format | Contents |
+|---|---|---|
+| **⬇ Générer JSON** | `.json` | Full results including all bounding boxes per frame (`detections_per_frame`) — reloadable in a future session |
+| **⬇ Générer CSV** | `.csv` | Summary table (file name, risk label, score, lesion count) |
+
+### Importing a previous JSON
+
+Click **⬆ Importer JSON**, select a `starhe_batch_*.json` file generated previously.  
+The files appear in the list with status ✅ and their results already filled in.  
+Click **→ Tab** or **↗ Tout ouvrir** to open them in the viewer without re-running the AI.
+
+
+---
+
+## 📡 15. Live Analysis (Analyse en direct)
 
 The **📡 Analyse en direct** button in the sidebar opens a dedicated window for real-time analysis of a live ultrasound feed.
 
@@ -322,7 +383,7 @@ The pipeline automatically detects the ultrasound cone after the first 30 frames
 
 ---
 
-## ⚠️ Important Notes
+## ⚠️ 16. Important Notes
 
 - **Anonymization**: each loaded file is anonymized **in memory**. The original file on disk **is not modified**.
 - **Multiple open files**: each tab has its own independent state (playback, zoom, measurements, results). Switching tabs automatically saves and restores the entire state.

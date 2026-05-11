@@ -43,18 +43,40 @@ function Require-Command {
 Require-Command "go"
 Require-Command "npm"
 
+# ── Choix du port Go ─────────────────────────────────────────────────────────
+# Si STARHE_PORT est déjà défini dans l'environnement, on le respecte.
+# Sinon on part de 8082 et on cherche le premier port libre.
+function Find-FreePort {
+    param([int]$StartPort = 8082)
+    $port = $StartPort
+    while ($true) {
+        try {
+            $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $port)
+            $l.Start(); $l.Stop()
+            return $port
+        } catch {
+            $port++
+        }
+    }
+}
+
+if (-not $env:STARHE_PORT) {
+    $env:STARHE_PORT = (Find-FreePort 8082).ToString()
+}
+Write-DevLog "Port Go : $env:STARHE_PORT"
+
 $GoProcess = $null
 $ReactProcess = $null
 
 try {
     $goAlreadyReady = $false
     try {
-        Invoke-WebRequest -Uri "http://localhost:8082/health" -UseBasicParsing -TimeoutSec 1 | Out-Null
+        Invoke-WebRequest -Uri "http://localhost:$env:STARHE_PORT/health" -UseBasicParsing -TimeoutSec 1 | Out-Null
         $goAlreadyReady = $true
     } catch { }
 
     if ($goAlreadyReady) {
-        Write-DevLog "Serveur Go déjà disponible sur http://localhost:8082, réutilisation du processus existant."
+        Write-DevLog "Serveur Go déjà disponible sur http://localhost:$env:STARHE_PORT, réutilisation du processus existant."
     } else {
         Write-DevLog "Compilation du serveur Go..."
         Push-Location (Join-Path $RootDir "go_server")
@@ -64,6 +86,7 @@ try {
         }
 
         Write-DevLog "Lancement du serveur Go..."
+        $env:PORT = $env:STARHE_PORT
         $GoProcess = Start-Process -FilePath ".\go_server.exe" `
             -WorkingDirectory (Join-Path $RootDir "go_server") `
             -RedirectStandardOutput $GoLog `
@@ -74,14 +97,14 @@ try {
         Write-DevLog "Serveur Go démarré avec PID $($GoProcess.Id). Logs: $GoLog / $GoErrLog"
     }
 
-    Write-DevLog "Attente du healthcheck Go sur http://localhost:8082/health..."
+    Write-DevLog "Attente du healthcheck Go sur http://localhost:$env:STARHE_PORT/health..."
     $ready = $false
     for ($i = 0; $i -lt 30; $i++) {
-        if ($GoProcess.HasExited) {
+        if ($null -ne $GoProcess -and $GoProcess.HasExited) {
             throw "Le serveur Go s'est arrêté. Consulte $GoLog"
         }
         try {
-            Invoke-WebRequest -Uri "http://localhost:8082/health" -UseBasicParsing -TimeoutSec 1 | Out-Null
+            Invoke-WebRequest -Uri "http://localhost:$env:STARHE_PORT/health" -UseBasicParsing -TimeoutSec 1 | Out-Null
             $ready = $true
             break
         } catch {
