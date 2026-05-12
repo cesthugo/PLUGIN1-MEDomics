@@ -17,6 +17,8 @@ GO_LOG="$LOG_DIR/go_server.log"
 REACT_LOG="$LOG_DIR/react_ui.log"
 MAIN_LOG="$LOG_DIR/starhe_dev.log"
 
+VENV_PYTHON="$ROOT_DIR/pythonCode/modules/starhe_plugin/.venv/bin/python"
+
 GO_PID=""
 REACT_PID=""
 STOPPED=false
@@ -55,6 +57,17 @@ fi
 if ! command -v npm >/dev/null 2>&1; then
   log "ERREUR: npm est introuvable dans le PATH."
   exit 1
+fi
+
+# ── Vérification venv Python ─────────────────────────────────────────────────
+if [[ ! -f "$VENV_PYTHON" ]]; then
+  log "Venv Python introuvable — lancement du setup..."
+  bash "$ROOT_DIR/setup.sh"
+  if [[ ! -f "$VENV_PYTHON" ]]; then
+    log "ERREUR: setup.sh n'a pas créé le venv. Consulte les logs."
+    exit 1
+  fi
+  log "Venv Python prêt."
 fi
 
 # ── Choix du port Go ─────────────────────────────────────────────────────────
@@ -101,8 +114,8 @@ for _ in {1..30}; do
 done
 
 if [[ ! -d "$ROOT_DIR/react_ui/node_modules" ]]; then
-  log "Dépendances React absentes: exécution de npm install..."
-  (cd "$ROOT_DIR/react_ui" && npm install) >>"$REACT_LOG" 2>&1
+  log "Dépendances React absentes: exécution de npm ci..."
+  (cd "$ROOT_DIR/react_ui" && npm ci) >>"$REACT_LOG" 2>&1
 fi
 
 log "Lancement de React/Vite sur http://localhost:5173..."

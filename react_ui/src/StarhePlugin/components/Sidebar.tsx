@@ -150,8 +150,8 @@ export interface SidebarProps {
   onAnalysisModeChange?: (mode: 'both' | 'risk_only' | 'detect_only') => void;
 
   onLoadDicom:      () => void;
-  /** Chargement de tous les DICOM d'un dossier */
-  onLoadFolder:     () => void;
+  /** Sélection manuelle de fichiers DICOM individuels */
+  onLoadDicomFiles: () => void;
   /** Chargement direct par chemin absolu (mode dev navigateur, hors Electron) */
   onLoadPath:       (path: string) => void;
   onPrevFrame:      () => void;
@@ -170,6 +170,7 @@ export interface SidebarProps {
   onToggleTheme:    () => void;
 }
 
+
 export function Sidebar({
   tab,
   analysisStatus,
@@ -179,7 +180,7 @@ export function Sidebar({
   analysisMode = 'both',
   onAnalysisModeChange,
   onLoadDicom,
-  onLoadFolder,
+  onLoadDicomFiles,
   onLoadPath,
   onPrevFrame,
   onNextFrame,
@@ -226,8 +227,45 @@ export function Sidebar({
         {/* FICHIER DICOM */}
         <SH title="Fichier DICOM" />
         <div style={{ padding: '6px 10px 3px' }}>
-          <SBtn onClick={onLoadDicom}>📂   Charger un fichier DICOM</SBtn>
-          <div style={{ marginTop: 4 }}><SBtn onClick={onLoadFolder}>📁   Charger un dossier DICOM</SBtn></div>
+          {/* Bouton fractionné : dossier entier | fichiers individuels */}
+          <div style={{ display: 'flex', width: '100%', gap: 0 }}>
+            <button
+              onClick={onLoadDicom}
+              title="Sélectionner un dossier — charge tous les fichiers DICOM à l'intérieur"
+              style={{
+                flex: 1, display: 'flex', alignItems: 'center', gap: 6,
+                background: '#131f2e', border: '1px solid #1e2d45',
+                borderRight: 'none', borderRadius: '5px 0 0 5px',
+                color: '#7eb8f7', fontSize: 12, fontWeight: 600,
+                padding: '6px 10px', cursor: 'pointer',
+                transition: 'background 0.12s, border-color 0.12s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#1a2d44'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#2563eb'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#131f2e'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#1e2d45'; }}
+            >
+              <span style={{ fontSize: 14 }}>📁</span> Dossier DICOM
+            </button>
+            <div style={{ width: 1, background: '#1e2d45', flexShrink: 0 }} />
+            <button
+              onClick={onLoadDicomFiles}
+              title="Sélectionner manuellement un ou plusieurs fichiers DICOM"
+              style={{
+                flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: '#131f2e', border: '1px solid #1e2d45',
+                borderLeft: 'none', borderRadius: '0 5px 5px 0',
+                color: '#7eb8f7', fontSize: 13, padding: '6px 9px', cursor: 'pointer',
+                transition: 'background 0.12s, border-color 0.12s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#1a2d44'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#2563eb'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#131f2e'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#1e2d45'; }}
+            >
+              🗂️
+            </button>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 2px 0' }}>
+            <span style={{ fontSize: 9, color: '#475569', flex: 1, textAlign: 'center' }}>Dossier entier</span>
+            <span style={{ fontSize: 9, color: '#475569', width: 36, textAlign: 'center' }}>Fichiers</span>
+          </div>
         </div>
         {/* Saisie chemin direct — visible uniquement hors Electron (dev navigateur) */}
         {!isElectron && (

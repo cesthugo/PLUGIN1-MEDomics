@@ -142,9 +142,14 @@ export interface BatchModalProps {
   analysisMode:  'both' | 'risk_only' | 'detect_only';
   /** Callback pour ouvrir le fichier analysé dans un onglet principal (avec résultats pré-chargés) */
   onOpenInTab:   (result: BatchResultToOpen) => void;
+  /**
+   * Callback pour ouvrir plusieurs fichiers avec le sélecteur de disposition.
+   * Si absent, les fichiers s'ouvrent individuellement dans des onglets séparés.
+   */
+  onOpenInLayout?: (results: BatchResultToOpen[]) => void;
 }
 
-export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: BatchModalProps) {
+export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, onOpenInLayout }: BatchModalProps) {
   const [items,        setItems]        = useState<BatchItem[]>([]);
   const [running,      setRunning]      = useState(false);
   const [done,         setDone]         = useState(false);
@@ -341,12 +346,14 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
       batchMode === 'risk_only'   ? 'RISK only' :
                                     'DETECT only';
 
+    const includeRisk   = batchMode !== 'detect_only';
+    const includeDetect = batchMode !== 'risk_only';
+
     const header = [
       'Fichier',
       'Statut',
-      'Risque CHC',
-      'Score risque (%)',
-      'Nombre de lésions détectées',
+      ...(includeRisk   ? ['Risque CHC', 'Score risque (%)']      : []),
+      ...(includeDetect ? ['Nombre de lésions détectées']          : []),
       'Mode analyse',
       'Date export',
     ];
@@ -359,9 +366,8 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
       it.status === 'done'  ? 'Terminé' :
       it.status === 'error' ? 'Erreur'  :
       it.status === 'analyzing' ? 'En cours' : 'En attente',
-      it.riskLabel  ?? '',
-      it.riskScore  !== undefined ? (it.riskScore * 100).toFixed(2) : '',
-      it.status === 'done' ? String(it.detCount ?? 0) : '',
+      ...(includeRisk   ? [it.riskLabel ?? '', it.riskScore !== undefined ? (it.riskScore * 100).toFixed(2) : ''] : []),
+      ...(includeDetect ? [it.status === 'done' ? String(it.detCount ?? 0) : '']                                  : []),
       analysisLabel,
       dateStr,
     ]);
@@ -713,18 +719,22 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab }: 
               {!running && (() => {
                 const doneItems = items.filter(it => it.status === 'done');
                 const selItems  = doneItems.filter(it => selected.has(it.id));
-                const openAll   = () => doneItems.forEach(it => onOpenInTab({
+                const toResult  = (it: BatchItem): BatchResultToOpen => ({
                   serverPath: it.serverPath, name: it.name,
                   detections: it.detections,
                   risk: it.riskScore !== undefined ? { score: it.riskScore, label: it.riskLabel ?? '' } : undefined,
                   numFrames: it.numFrames, roi: it.roi,
-                }));
-                const openSel   = () => selItems.forEach(it => onOpenInTab({
-                  serverPath: it.serverPath, name: it.name,
-                  detections: it.detections,
-                  risk: it.riskScore !== undefined ? { score: it.riskScore, label: it.riskLabel ?? '' } : undefined,
-                  numFrames: it.numFrames, roi: it.roi,
-                }));
+                });
+                const openAll = () => {
+                  const results = doneItems.map(toResult);
+                  if (results.length > 1 && onOpenInLayout) onOpenInLayout(results);
+                  else results.forEach(r => onOpenInTab(r));
+                };
+                const openSel = () => {
+                  const results = selItems.map(toResult);
+                  if (results.length > 1 && onOpenInLayout) onOpenInLayout(results);
+                  else results.forEach(r => onOpenInTab(r));
+                };
                 return (
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     {selItems.length > 0 && (

@@ -42,6 +42,8 @@ import { SettingsPanel }       from './components/SettingsPanel';
 import { DetectionGallery }    from './components/DetectionGallery';
 import { BatchModal }          from './components/BatchModal';
 import type { BatchResultToOpen } from './components/BatchModal';
+import { LayoutPickerModal }   from './components/LayoutPickerModal';
+import type { LayoutMode }     from './components/LayoutPickerModal';
 
 // ── ID auto-incrémenté ────────────────────────────────────────────────────────
 let _nextTabId = 1;
@@ -200,6 +202,10 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const [showLive,  setShowLive]  = useState(false);
   const [showBatch, setShowBatch] = useState(false);
 
+  // ── Vue multi-panneaux ─────────────────────────────────────────────────────
+  const [pendingLayoutOpen, setPendingLayoutOpen] = useState<BatchResultToOpen[] | null>(null);
+  const [multiPanel, setMultiPanel] = useState<{ layout: LayoutMode; tabIds: number[] } | null>(null);
+
   // ── Chargement DICOM ───────────────────────────────────────────────────────
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
 
@@ -240,6 +246,41 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     addLog(`DICOM chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
+  // ── Ouverture d'un résultat batch en onglet (helper partagé) ─────────────
+  const openBatchResultAsTab = useCallback(async (result: BatchResultToOpen): Promise<number> => {
+    const name = result.name;
+    addLog(`Chargement : ${name}`, 'info');
+    const data = await loadDicom(result.serverPath);
+    const label = makeTabLabel(data.studyDate, data.fileName);
+    const newTab: TabState = {
+      ...makeDefaultTab(),
+      label,
+      patientName: data.patientName,
+      dicomPath:   result.serverPath,
+      data,
+      detectionsBy: result.detections?.length ? { original: result.detections } : {},
+      resultsBy: result.risk ? { original: {
+        riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
+        riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
+        detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lésion(s)`,
+        detFg:    '#facc15',
+      }} : {},
+    };
+    setTabs(prev => [...prev, newTab]);
+    setPatients(prev => {
+      const existIdx = prev.findIndex(p => p.name === data.patientName);
+      if (existIdx >= 0) {
+        const updated = [...prev];
+        updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
+        return updated;
+      }
+      return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
+    });
+    setActivePatientName(data.patientName);
+    addLog(`DICOM chargé avec résultats — ${data.frameCount} frame(s).`, 'success');
+    return newTab.id;
+  }, [addLog]);
+
   // Chargement par chemin absolu (Electron ou saisie manuelle)
   const doLoadPath = useCallback(async (path: string, displayName: string) => {
     if (loadingPaths.has(path)) return;
@@ -278,7 +319,9 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }
   }, [addLog, addTab, loadingPaths]);
 
-  // Chargement via explorateur de fichiers
+  // Chargement DICOM — sélecteur de dossier (webkitdirectory) :
+  // l’utilisateur choisit un dossier et tous les fichiers .dcm / .dicom /
+  // sans extension à l’intérieur sont chargés automatiquement.
   const onLoadDicom = useCallback(async () => {
     if (isElectron && window.electronAPI?.openDicomFiles) {
       // Mode Electron : dialogue natif système → chemins absolus réels
@@ -288,12 +331,17 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         await doLoadPath(p, name);
       }
     } else {
-      // Mode navigateur standard : upload des octets via <input type="file">
+      // Mode navigateur : sélecteur de dossier (webkitdirectory)
+      const isDicom = (f: File) => {
+        const n = f.name.toLowerCase();
+        return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
+      };
       const input = document.createElement('input');
       input.type = 'file';
-      input.multiple = true;
+      (input as any).webkitdirectory = true;
+      (input as any).multiple = true;
       input.onchange = async () => {
-        for (const file of Array.from(input.files ?? [])) {
+        for (const file of Array.from(input.files ?? []).filter(isDicom)) {
           await doLoadFile(file);
         }
       };
@@ -301,17 +349,16 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }
   }, [isElectron, doLoadPath, doLoadFile]);
 
-  // Chargement d'un dossier entier (navigateur — webkitdirectory)
-  const onLoadFolder = useCallback(() => {
+  // Sélection manuelle de fichiers DICOM individuels
+  const onLoadDicomFiles = useCallback(() => {
+    const isDicom = (f: File) => {
+      const n = f.name.toLowerCase();
+      return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
+    };
     const input = document.createElement('input');
     input.type = 'file';
-    (input as any).webkitdirectory = true;
-    (input as any).multiple = true;
+    input.multiple = true;
     input.onchange = async () => {
-      const isDicom = (f: File) => {
-        const n = f.name.toLowerCase();
-        return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
-      };
       for (const file of Array.from(input.files ?? []).filter(isDicom)) {
         await doLoadFile(file);
       }
@@ -675,6 +722,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           textColor={displaySettings.textColor}
           analysisMode={displaySettings.analysisMode}
           onLoadDicom={onLoadDicom}
+          onLoadDicomFiles={onLoadDicomFiles}
           onLoadPath={onLoadPath}
           onPrevFrame={onPrevFrame}
           onNextFrame={onNextFrame}
@@ -688,7 +736,6 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           onResetAnalysis={onResetAnalysis}
           onOpenLive={() => setShowLive(true)}
           onOpenBatch={() => setShowBatch(true)}
-          onLoadFolder={onLoadFolder}
           onGotoFrame={onGotoFrame}
           onToggleTheme={() => setDarkMode(d => !d)}
         />
@@ -729,6 +776,92 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               <span style={{ fontSize: 12, fontWeight: 700, color: cardTitleFg }}>
                 Visionneuse DICOM
               </span>
+              {/* ── Boutons de disposition (toujours visibles) ─────── */}
+              {(() => {
+                const n = patientTabs.length;
+                const cur = multiPanel?.layout ?? 'single';
+                const btnBase: React.CSSProperties = {
+                  background: 'none', border: '1px solid transparent',
+                  borderRadius: 4, cursor: 'pointer',
+                  padding: '3px 5px', display: 'flex', alignItems: 'center',
+                  transition: 'border-color 0.12s, background 0.12s',
+                };
+                const btnActive: React.CSSProperties = {
+                  ...btnBase,
+                  background: '#1e2d45', border: '1px solid #3b82f6',
+                };
+                const btnDisabled: React.CSSProperties = {
+                  ...btnBase, opacity: 0.3, cursor: 'not-allowed',
+                };
+                const layouts: { key: LayoutMode; title: string; need: number; icon: React.ReactNode }[] = [
+                  {
+                    key: 'single', title: 'Vue simple (1 fichier)', need: 1,
+                    icon: (
+                      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
+                        <rect x="1" y="1" width="14" height="10" rx="1" fill="#4a90d9" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    key: 'split-v', title: 'Vue scindée verticalement (2 fichiers côte à côte)', need: 2,
+                    icon: (
+                      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
+                        <rect x="1"  y="1" width="6" height="10" rx="1" fill="#4a90d9" />
+                        <rect x="9"  y="1" width="6" height="10" rx="1" fill="#4a90d9" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    key: 'split-h', title: 'Vue scindée horizontalement (2 fichiers haut/bas)', need: 2,
+                    icon: (
+                      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
+                        <rect x="1" y="1"  width="14" height="4" rx="1" fill="#4a90d9" />
+                        <rect x="1" y="7"  width="14" height="4" rx="1" fill="#4a90d9" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    key: 'quad', title: 'Vue 4 panneaux (2×2)', need: 2,
+                    icon: (
+                      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
+                        <rect x="1" y="1" width="6" height="4" rx="1" fill="#4a90d9" />
+                        <rect x="9" y="1" width="6" height="4" rx="1" fill="#4a90d9" />
+                        <rect x="1" y="7" width="6" height="4" rx="1" fill="#4a90d9" />
+                        <rect x="9" y="7" width="6" height="4" rx="1" fill="#4a90d9" />
+                      </svg>
+                    ),
+                  },
+                ];
+                return (
+                  <div style={{ marginLeft: 10, display: 'flex', alignItems: 'center', gap: 2 }}>
+                    {layouts.map(({ key, title, need, icon }) => {
+                      const active   = cur === key;
+                      const disabled = n < need;
+                      return (
+                        <button
+                          key={key}
+                          title={title}
+                          disabled={disabled}
+                          style={disabled ? btnDisabled : active ? btnActive : btnBase}
+                          onMouseEnter={e => { if (!disabled && !active) { (e.currentTarget as HTMLElement).style.background = '#132030'; (e.currentTarget as HTMLElement).style.borderColor = '#2d4a6a'; } }}
+                          onMouseLeave={e => { if (!disabled && !active) { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.borderColor = 'transparent'; } }}
+                          onClick={() => {
+                            if (disabled) return;
+                            if (key === 'single') {
+                              setMultiPanel(null);
+                            } else {
+                              const ids = patientTabs.slice(0, key === 'quad' ? 4 : 2).map(t => t.id);
+                              setMultiPanel({ layout: key, tabIds: ids });
+                            }
+                          }}
+                        >
+                          {icon}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
               {/* Boutons zoom */}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2, paddingRight: 8 }}>
                 <button
@@ -756,21 +889,96 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               }}
             />
 
-            {/* Canvas DICOM */}
-            <DicomCanvas
-              tab={activeTab}
-              onZoomPan={onZoomPan}
-              onContrastBright={onContrastBright}
-              onFrameChange={onCanvasFrameChange}
-              onMeasureAdd={onMeasureAdd}
-              onMeasureMove={onMeasureMove}
-              onMeasureLabelMove={onMeasureLabelMove}
-              onMeasureSelect={onMeasureSelect}
-              onContextMenu={(x, y) => setCtxMenu({ x, y })}
-            />
-
-            {/* Barre onglets fichiers */}
-            <FileTabBar
+            {/* Canvas DICOM — vue simple ou vue multi-panneaux */}
+            {multiPanel ? (
+              <MultiPanelView
+                layout={multiPanel.layout}
+                tabIds={multiPanel.tabIds}
+                tabs={tabs}
+                activeTabId={activeTabId}
+                onFocusPanel={id => setActiveTabId(id)}
+                onExit={() => setMultiPanel(null)}
+                onDropToPanel={(slotIdx, droppedTabId) => {
+                  const { layout, tabIds: cur } = multiPanel;
+                  const slots = layout === 'quad' ? 4 : layout === 'single' ? 1 : 2;
+                  const newIds: number[] = Array.from({ length: slots }, (_, i) => cur[i] ?? -1);
+                  const existingSlot = newIds.indexOf(droppedTabId);
+                  if (existingSlot === slotIdx) { setActiveTabId(droppedTabId); return; }
+                  if (existingSlot >= 0) {
+                    const tmp = newIds[slotIdx]; newIds[slotIdx] = droppedTabId; newIds[existingSlot] = tmp;
+                  } else {
+                    newIds[slotIdx] = droppedTabId;
+                  }
+                  setMultiPanel({ layout, tabIds: newIds });
+                  setActiveTabId(droppedTabId);
+                }}
+                onExpandLayout={droppedTabId => {
+                  const { layout, tabIds: cur } = multiPanel;
+                  const slots = layout === 'quad' ? 4 : layout === 'single' ? 1 : 2;
+                  if (slots >= 4) {
+                    // Déjà au maximum — remplacer le dernier slot
+                    const newIds = [...cur.slice(0, 3), droppedTabId];
+                    setMultiPanel({ layout: 'quad', tabIds: newIds });
+                  } else {
+                    // Élargir à quad et ajouter le fichier au prochain slot libre
+                    const newIds: number[] = Array.from({ length: 4 }, (_, i) => cur[i] ?? -1);
+                    const firstEmpty = newIds.indexOf(-1);
+                    newIds[firstEmpty >= 0 ? firstEmpty : slots] = droppedTabId;
+                    setMultiPanel({ layout: 'quad', tabIds: newIds });
+                  }
+                  setActiveTabId(droppedTabId);
+                }}
+                onZoomPan={onZoomPan}
+                onContrastBright={onContrastBright}
+                onFrameChange={onCanvasFrameChange}
+                onMeasureAdd={onMeasureAdd}
+                onMeasureMove={onMeasureMove}
+                onMeasureLabelMove={onMeasureLabelMove}
+                onMeasureSelect={onMeasureSelect}
+                onRemovePanel={slotIdx => {
+                  const { layout, tabIds: cur } = multiPanel;
+                  const slots = layout === 'quad' ? 4 : 2;
+                  const newIds = Array.from({ length: slots }, (_, i): number => cur[i] ?? -1);
+                  newIds[slotIdx] = -1;
+                  const filled = newIds.filter(id => id !== -1);
+                  if (filled.length === 0) { setMultiPanel(null); return; }
+                  if (filled.length === 1) { setMultiPanel(null); setActiveTabId(filled[0]); return; }
+                  if (filled.length === 2) { setMultiPanel({ layout: 'split-v', tabIds: filled }); return; }
+                  setMultiPanel({ layout: 'quad', tabIds: newIds });
+                }}
+                onContextMenu={(x, y) => setCtxMenu({ x, y })}
+              />
+            ) : (
+              <div
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}
+                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                onDrop={e => {
+                  e.preventDefault();
+                  const raw = e.dataTransfer.getData('text/plain');
+                  if (!raw.startsWith('starhe-tab:')) return;
+                  const droppedId = parseInt(raw.replace('starhe-tab:', ''), 10);
+                  if (!tabs.some(t => t.id === droppedId)) return;
+                  const curId = activeTab?.id ?? -1;
+                  if (droppedId === curId || curId === -1) return;
+                  // Auto-switch à split-v avec le fichier courant + le fichier glissé
+                  setMultiPanel({ layout: 'split-v', tabIds: [curId, droppedId] });
+                }}
+              >
+                <DicomCanvas
+                  tab={activeTab}
+                  onZoomPan={onZoomPan}
+                  onContrastBright={onContrastBright}
+                  onFrameChange={onCanvasFrameChange}
+                  onMeasureAdd={onMeasureAdd}
+                  onMeasureMove={onMeasureMove}
+                  onMeasureLabelMove={onMeasureLabelMove}
+                  onMeasureSelect={onMeasureSelect}
+                  onContextMenu={(x, y) => setCtxMenu({ x, y })}
+                />
+              </div>
+            )}
+            {/* Bande de vignettes — toujours visible (vue simple et multi-panneaux) */}
+            <FileThumbnailStrip
               tabs={patientTabs}
               activeTabId={activeTab?.id ?? -1}
               onSwitchTab={switchTab}
@@ -853,70 +1061,40 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         <BatchModal
           onClose={() => setShowBatch(false)}
           analysisMode={displaySettings.analysisMode}
-          onOpenInTab={(result: BatchResultToOpen) => {
+          onOpenInTab={async (result: BatchResultToOpen) => {
             setShowBatch(false);
+            try {
+              const tabId = await openBatchResultAsTab(result);
+              setActiveTabId(tabId);
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              addLog(`ERREUR ouverture ${result.name} : ${msg}`, 'error');
+            }
+          }}
+          onOpenInLayout={(results: BatchResultToOpen[]) => {
+            setShowBatch(false);
+            setPendingLayoutOpen(results);
+          }}
+        />
+      )}
 
-            /** Crée l'onglet avec les données DICOM + résultats pré-injectés */
-            const openWithData = (data: import('./types').DicomData) => {
-              const label = makeTabLabel(data.studyDate, data.fileName);
-              const detCount = result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0;
-              const newTab: TabState = {
-                ...makeDefaultTab(),
-                label,
-                patientName: data.patientName,
-                dicomPath:   result.serverPath,
-                data,
-                detectionsBy: result.detections?.length
-                  ? { original: result.detections }
-                  : {},
-                resultsBy: result.risk
-                  ? { original: {
-                      riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
-                      riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
-                      detText:  `${detCount} lésion(s)`,
-                      detFg:    '#facc15',
-                    } }
-                  : {},
-              };
-              setTabs(prev => [...prev, newTab]);
-              setActiveTabId(newTab.id);
-              setPatients(prev => {
-                const existIdx = prev.findIndex(p => p.name === data.patientName);
-                if (existIdx >= 0) {
-                  const updated = [...prev];
-                  updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
-                  return updated;
-                }
-                return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
-              });
-              setActivePatientName(data.patientName);
-              addLog(`DICOM chargé avec résultats — ${data.frameCount} frame(s), ${detCount} lésion(s).`, 'success');
-            };
-
-            /** Fallback : sélection manuelle du fichier si le temp-fichier serveur n'existe plus */
-            const promptReupload = () => {
-              addLog(`Fichier serveur introuvable — sélectionnez "${result.name}" sur votre disque.`, 'warning');
-              const inp = document.createElement('input');
-              inp.type    = 'file';
-              inp.accept  = '.dcm,.dicom,*';
-              inp.onchange = async () => {
-                const file = inp.files?.[0];
-                if (!file) return;
-                addLog(`Re-chargement : ${file.name}`, 'info');
-                try {
-                  const data = await loadDicomFile(file);
-                  openWithData(data);
-                } catch (err2: unknown) {
-                  addLog(`ERREUR : ${err2 instanceof Error ? err2.message : String(err2)}`, 'error');
-                }
-              };
-              inp.click();
-            };
-
-            // Tentative 1 : chemin serveur (marche si même session ou server-path encore valide)
-            loadDicom(result.serverPath)
-              .then(openWithData)
-              .catch(promptReupload);
+      {/* Sélecteur de disposition multi-panneaux */}
+      {pendingLayoutOpen && (
+        <LayoutPickerModal
+          count={pendingLayoutOpen.length}
+          onCancel={() => setPendingLayoutOpen(null)}
+          onPick={async (layout: LayoutMode) => {
+            const toOpen = pendingLayoutOpen.slice(0, layout === 'single' ? 1 : layout === 'quad' ? 4 : 2);
+            setPendingLayoutOpen(null);
+            addLog(`Ouverture de ${toOpen.length} fichier(s) en vue ${layout}…`, 'info');
+            try {
+              const tabIds = await Promise.all(toOpen.map(r => openBatchResultAsTab(r)));
+              setActiveTabId(tabIds[0]);
+              if (layout !== 'single') setMultiPanel({ layout, tabIds });
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              addLog(`ERREUR ouverture multi-panneaux : ${msg}`, 'error');
+            }
           }}
         />
       )}
@@ -991,91 +1169,550 @@ function PatientTab({ name, active, onClick }: { name: string; active: boolean; 
 
 // ── Barre onglets fichiers ────────────────────────────────────────────────────
 
-function FileTabBar({
+// ── Bande de vignettes fichiers (remplace FileTabBar) ─────────────────────────
+
+function FileThumbnailStrip({
   tabs,
   activeTabId,
   onSwitchTab,
   onCloseTab,
   onOpenNew,
 }: {
-  tabs: TabState[];
+  tabs:        TabState[];
   activeTabId: number;
   onSwitchTab: (id: number) => void;
   onCloseTab:  (id: number) => void;
   onOpenNew:   () => void;
 }) {
-  return (
-    <div
-      style={{
-        background: TAB_BG, height: 32, minHeight: 32,
-        display: 'flex', alignItems: 'stretch',
-        borderTop: '1px solid #0a0a14',
-        overflowX: 'auto', flexShrink: 0,
-      }}
-    >
-      {tabs.map(tab => {
-        const active = tab.id === activeTabId;
-        return (
-          <FileTab
-            key={tab.id}
-            label={tab.label}
-            active={active}
-            onClick={() => onSwitchTab(tab.id)}
-            onClose={() => onCloseTab(tab.id)}
-          />
-        );
-      })}
-      <button
-        onClick={onOpenNew}
-        style={{
-          background: '#000', color: '#fff',
-          border: 'none', cursor: 'pointer',
-          fontSize: 16, fontWeight: 700,
-          padding: '0 10px',
-          marginLeft: 2,
-          alignSelf: 'center',
-        }}
-        title="Ajouter un fichier"
-      >+</button>
-    </div>
-  );
-}
+  // Groupe les onglets par date (partie avant " · " dans le label)
+  const groups = React.useMemo(() => {
+    const map = new Map<string, TabState[]>();
+    for (const tab of tabs) {
+      const dateKey = tab.label.includes(' · ') ? tab.label.split(' · ')[0] : '—';
+      if (!map.has(dateKey)) map.set(dateKey, []);
+      map.get(dateKey)!.push(tab);
+    }
+    return Array.from(map.entries());
+  }, [tabs]);
 
-function FileTab({
-  label, active, onClick, onClose,
-}: { label: string; active: boolean; onClick: () => void; onClose: () => void }) {
+  const multiGroup = groups.length > 1;
+
+  if (!tabs.length) {
+    return (
+      <div style={{
+        height: 32, minHeight: 32, background: TAB_BG,
+        borderTop: '1px solid #0a0a14',
+        display: 'flex', alignItems: 'center', flexShrink: 0,
+      }}>
+        <button
+          onClick={onOpenNew}
+          style={{ background: 'none', color: '#374151', border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 700, padding: '0 10px' }}
+          title="Ajouter un fichier"
+        >+</button>
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        cursor: 'pointer',
-        background: active ? TAB_ACT_BG : TAB_BG,
-        color: active ? '#e5e7eb' : '#6b7280',
-        fontSize: 11,
-        display: 'flex', alignItems: 'center', gap: 2,
-        padding: '0 2px 0 8px',
-        borderTop: active ? `2px solid ${BLUE}` : '2px solid transparent',
-        paddingTop: active ? 0 : 2,
-        whiteSpace: 'nowrap', userSelect: 'none',
-        flexShrink: 0,
-      }}
-      onClick={onClick}
-    >
-      {label}
-      <button
-        onClick={e => { e.stopPropagation(); onClose(); }}
+    <div style={{
+      background: '#0c0f18',
+      borderTop: '1px solid #0a0a14',
+      display: 'flex',
+      alignItems: 'flex-start',
+      minHeight: 100,
+      flexShrink: 0,
+      overflowX: 'auto',
+      overflowY: 'hidden',
+      padding: '6px 6px 4px',
+      gap: 8,
+    }}>
+      {groups.map(([dateKey, groupTabs]) => (
+        <div key={dateKey} style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 }}>
+          {/* En-tête de groupe (date) — affiché si plusieurs groupes OU groupe avec >1 fichier */}
+          {(multiGroup || groupTabs.length > 1) && (
+            <div style={{
+              fontSize: 9, fontWeight: 600, color: '#475569',
+              textAlign: 'center', letterSpacing: '0.03em',
+              padding: '0 2px',
+              borderBottom: '1px solid #1e293b',
+              marginBottom: 2,
+            }}>
+              {dateKey}
+            </div>
+          )}
+          {/* Rangée de vignettes du groupe */}
+          <div style={{ display: 'flex', gap: 4 }}>
+            {groupTabs.map(tab => {
+              const active = tab.id === activeTabId;
+              const firstFrame = tab.data?.framesB64?.[0];
+              const labelParts = tab.label.split(' · ');
+              const shortName = labelParts.length > 1 ? labelParts.slice(1).join(' · ') : tab.label;
+
+              return (
+                <div
+                  key={tab.id}
+                  title={tab.label}
+                  draggable={true}
+                  onDragStart={e => {
+                    e.dataTransfer.setData('text/plain', `starhe-tab:${tab.id}`);
+                    e.dataTransfer.effectAllowed = 'move';
+                    (e.currentTarget as HTMLElement).style.opacity = '0.5';
+                  }}
+                  onDragEnd={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
+                  onClick={() => onSwitchTab(tab.id)}
+                  style={{
+                    position: 'relative',
+                    width: 70,
+                    minWidth: 70,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    cursor: 'pointer',
+                    borderRadius: 4,
+                    border: active ? '2px solid #3b82f6' : '2px solid #1e293b',
+                    background: active ? '#0f1e35' : '#111827',
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                    transition: 'border-color 0.12s, background 0.12s',
+                  }}
+                  onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.borderColor = '#334155'; }}
+                  onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.borderColor = '#1e293b'; }}
+                >
+                  {/* Vignette — première frame JPEG */}
+                  <div style={{
+                    width: '100%', height: 58,
+                    background: '#050810',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    overflow: 'hidden', flexShrink: 0,
+                  }}>
+                    {firstFrame ? (
+                      <img
+                        src={`data:image/jpeg;base64,${firstFrame}`}
+                        alt={shortName}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <rect x="1" y="1" width="18" height="18" rx="2" fill="#1e293b" />
+                        <path d="M6 10h8M10 6v8" stroke="#334155" strokeWidth="1.5" strokeLinecap="round" />
+                      </svg>
+                    )}
+                  </div>
+
+                  {/* Nom de fichier */}
+                  <div style={{
+                    padding: '2px 3px',
+                    fontSize: 9,
+                    color: active ? '#cbd5e1' : '#6b7280',
+                    textAlign: 'center',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    background: active ? '#0f1e35' : 'transparent',
+                    flexShrink: 0,
+                  }}>
+                    {shortName}
+                  </div>
+
+                  {/* Bouton fermer */}
+                  <button
+                    onClick={e => { e.stopPropagation(); onCloseTab(tab.id); }}
+                    title="Fermer"
+                    style={{
+                      position: 'absolute', top: 2, right: 2,
+                      background: 'rgba(0,0,0,0.55)',
+                      border: 'none', borderRadius: 2,
+                      color: '#64748b', fontSize: 9, lineHeight: 1,
+                      padding: '1px 3px', cursor: 'pointer',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                    onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
+                  >×</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      {/* Bouton ajouter un fichier */}
+      <div
+        onClick={onOpenNew}
+        title="Ouvrir un nouveau fichier DICOM"
         style={{
-          background: '#000', color: '#fff',
-          border: 'none', cursor: 'pointer',
-          fontSize: 12, lineHeight: 1,
-          padding: '2px 4px', marginLeft: 2,
-          borderRadius: 2,
+          width: 28, minWidth: 28, alignSelf: 'stretch',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', color: '#374151', fontSize: 20, fontWeight: 700,
+          borderRadius: 4, border: '1px dashed #1e293b',
+          transition: 'color 0.12s, border-color 0.12s, background 0.12s',
+          flexShrink: 0, marginTop: groups.length > 1 || (groups[0]?.[1].length ?? 0) > 1 ? 16 : 0,
         }}
-        onMouseEnter={e => (e.currentTarget.style.color = '#ff4444')}
-        onMouseLeave={e => (e.currentTarget.style.color = '#fff')}
-        title="Fermer l'onglet"
-      >×</button>
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLElement).style.color = '#7eb8f7';
+          (e.currentTarget as HTMLElement).style.borderColor = '#3b82f6';
+          (e.currentTarget as HTMLElement).style.background = '#0f1e35';
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLElement).style.color = '#374151';
+          (e.currentTarget as HTMLElement).style.borderColor = '#1e293b';
+          (e.currentTarget as HTMLElement).style.background = 'transparent';
+        }}
+      >+</div>
     </div>
   );
 }
 
 export default StarhePlugin;
+
+// ── Visionneuse multi-panneaux ────────────────────────────────────────────────
+
+interface MultiPanelViewProps {
+  layout:            LayoutMode;
+  tabIds:            number[];
+  tabs:              TabState[];
+  activeTabId:       number;
+  onFocusPanel:      (tabId: number) => void;
+  onExit:            () => void;
+  onDropToPanel:     (slotIdx: number, tabId: number) => void;
+  onExpandLayout:    (tabId: number) => void;
+  onRemovePanel:     (slotIdx: number) => void;
+  onZoomPan:          (zoom: number, panX: number, panY: number) => void;
+  onContrastBright:   (contrast: number, brightness: number) => void;
+  onFrameChange:      (idx: number) => void;
+  onMeasureAdd:       (frameIdx: number, measure: Measure) => void;
+  onMeasureMove:      (frameIdx: number, segIdx: number, newPts: [[number, number], [number, number]]) => void;
+  onMeasureLabelMove: (frameIdx: number, segIdx: number, labelOffset: [number, number]) => void;
+  onMeasureSelect:    (frameIdx: number, segIdx: number | null) => void;
+  onContextMenu:      (x: number, y: number) => void;
+}
+
+function MultiPanelView({
+  layout, tabIds, tabs, activeTabId,
+  onFocusPanel, onExit, onDropToPanel, onExpandLayout, onRemovePanel,
+  onZoomPan, onContrastBright, onFrameChange,
+  onMeasureAdd, onMeasureMove, onMeasureLabelMove, onMeasureSelect, onContextMenu,
+}: MultiPanelViewProps) {
+  const slots = layout === 'quad' ? 4 : layout === 'single' ? 1 : 2;
+  const [dragOverSlot,   setDragOverSlot]   = React.useState<number | null>(null);
+  const [dragDepth,      setDragDepth]      = React.useState(0);
+  const [dragOverExpand, setDragOverExpand] = React.useState(false);
+
+  // Resize state — colSplit/rowSplit are percentages [10, 90]
+  const [colSplit, setColSplit] = React.useState(50);
+  const [rowSplit, setRowSplit] = React.useState(50);
+  const [resizing, setResizing] = React.useState<'col' | 'row' | null>(null);
+  const gridRef = React.useRef<HTMLDivElement>(null);
+
+  // Reset splits when layout changes
+  React.useEffect(() => { setColSplit(50); setRowSplit(50); }, [layout]);
+
+  // Global mouse move/up for resize drag
+  React.useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: MouseEvent) => {
+      const el = gridRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (resizing === 'col') {
+        setColSplit(Math.max(10, Math.min(90, (e.clientX - rect.left) / rect.width  * 100)));
+      } else {
+        setRowSplit(Math.max(10, Math.min(90, (e.clientY - rect.top)  / rect.height * 100)));
+      }
+    };
+    const onUp = () => setResizing(null);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup',   onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [resizing]);
+
+  const c = colSplit; const r = rowSplit;
+  const gridStyle: React.CSSProperties =
+    layout === 'split-v' ? { gridTemplateColumns: `${c}fr ${100-c}fr` } :
+    layout === 'split-h' ? { gridTemplateRows:    `${r}fr ${100-r}fr` } :
+    layout === 'quad'    ? { gridTemplateColumns: `${c}fr ${100-c}fr`, gridTemplateRows: `${r}fr ${100-r}fr` } :
+    {};
+
+  // Stable no-op callbacks for unfocused panels (avoids re-renders)
+  const NOOP_ZP  = React.useCallback(()                  => {}, []);
+  const NOOP_CB  = React.useCallback(()                  => {}, []);
+  const NOOP_FC  = React.useCallback((_: number)         => {}, []);
+  const NOOP_MA  = React.useCallback((_a: number, _b: Measure)                                              => {}, []);
+  const NOOP_MM  = React.useCallback((_a: number, _b: number, _c: [[number,number],[number,number]])        => {}, []);
+  const NOOP_LM  = React.useCallback((_a: number, _b: number, _c: [number,number])                         => {}, []);
+  const NOOP_MS  = React.useCallback((_a: number, _b: number | null)                                       => {}, []);
+  const NOOP_CTX = React.useCallback((_a: number, _b: number)                                              => {}, []);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+
+      {/* Barre d'en-tête du mode multi-panneaux */}
+      <div style={{
+        display: 'flex', alignItems: 'center', height: 28, flexShrink: 0,
+        background: '#0b1320', borderBottom: '1px solid #0a0a14',
+        padding: '0 10px', gap: 8,
+      }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+          Vue multiple
+        </span>
+        <span style={{ fontSize: 10, color: '#334155' }}>
+          {layout === 'split-v' ? 'Gauche / Droite' : layout === 'split-h' ? 'Haut / Bas' : 'Grille 2×2'}
+        </span>
+        <button
+          onClick={onExit}
+          title="Quitter la vue multiple et revenir à la vue normale"
+          style={{
+            marginLeft: 'auto', background: 'transparent',
+            border: '1px solid #374151', borderRadius: 4,
+            color: '#94a3b8', fontSize: 10, fontWeight: 600,
+            padding: '2px 8px', cursor: 'pointer',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.borderColor = '#ef4444')}
+          onMouseLeave={e => (e.currentTarget.style.borderColor = '#374151')}
+        >
+          ✕ Quitter
+        </button>
+      </div>
+
+      {/* Grille de panneaux — avec zones de dépôt drag & drop + redimensionnement */}
+      <div
+        ref={gridRef}
+        style={{
+          flex: 1, display: 'grid', ...gridStyle,
+          gap: 2, background: '#000',
+          overflow: 'hidden', minHeight: 0,
+          position: 'relative',
+          cursor: resizing === 'col' ? 'col-resize' : resizing === 'row' ? 'row-resize' : 'default',
+          userSelect: resizing ? 'none' : 'auto',
+        }}
+        onDragEnter={() => setDragDepth(d => d + 1)}
+        onDragLeave={() => setDragDepth(d => d - 1)}
+        onDrop={() => setDragDepth(0)}
+      >
+        {Array.from({ length: slots }, (_, i) => {
+          const tabId     = tabIds[i];
+          const tab       = tabId !== undefined && tabId >= 0 ? tabs.find(t => t.id === tabId) ?? null : null;
+          const isFocused = tabId !== undefined && tabId === activeTabId;
+          const isDragTarget = dragOverSlot === i;
+
+          return (
+            <div
+              key={i}
+              style={{
+                position: 'relative', overflow: 'hidden',
+                display: 'flex', flexDirection: 'column',
+                outline: isDragTarget
+                  ? '2px solid #f59e0b'
+                  : isFocused ? '2px solid #3b82f6' : '1px solid #0a0a14',
+                outlineOffset: (isDragTarget || isFocused) ? '-2px' : '-1px',
+                background: isDragTarget ? 'rgba(245,158,11,0.08)' : 'transparent',
+                transition: 'outline 0.1s, background 0.1s',
+              }}
+              onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverSlot(i); }}
+              onDragEnter={e => { e.preventDefault(); setDragOverSlot(i); }}
+              onDragLeave={() => setDragOverSlot(null)}
+              onDrop={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOverSlot(null);
+                const raw = e.dataTransfer.getData('text/plain');
+                if (!raw.startsWith('starhe-tab:')) return;
+                const droppedId = parseInt(raw.replace('starhe-tab:', ''), 10);
+                onDropToPanel(i, droppedId);
+              }}
+            >
+              {/* Canvas du panneau (pointer-events bloqués si non-focalisé) */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', pointerEvents: isFocused ? 'auto' : 'none' }}>
+                {tab ? (
+                  <DicomCanvas
+                    tab={tab}
+                    onZoomPan={isFocused          ? onZoomPan        : NOOP_ZP}
+                    onContrastBright={isFocused   ? onContrastBright : NOOP_CB}
+                    onFrameChange={isFocused      ? onFrameChange    : NOOP_FC}
+                    onMeasureAdd={isFocused       ? onMeasureAdd     : NOOP_MA}
+                    onMeasureMove={isFocused      ? onMeasureMove    : NOOP_MM}
+                    onMeasureLabelMove={isFocused ? onMeasureLabelMove : NOOP_LM}
+                    onMeasureSelect={isFocused    ? onMeasureSelect  : NOOP_MS}
+                    onContextMenu={isFocused      ? onContextMenu    : NOOP_CTX}
+                  />
+                ) : (
+                  <div style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: '#080d14',
+                  }}>
+                    <span style={{ color: isDragTarget ? '#f59e0b' : '#1e293b', fontSize: 12 }}>
+                      {isDragTarget ? '⊕ Déposer ici' : 'Panneau vide'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Overlay de sélection (panneau non-actif) */}
+              {!isFocused && tab && !isDragTarget && (
+                <div
+                  onClick={() => onFocusPanel(tabId!)}
+                  style={{ position: 'absolute', inset: 0, cursor: 'pointer', background: 'rgba(0,0,0,0.06)' }}
+                >
+                  <span style={{
+                    position: 'absolute', bottom: 6, right: 6,
+                    fontSize: 10, color: '#64748b',
+                    background: 'rgba(0,0,0,0.6)', padding: '2px 5px', borderRadius: 3,
+                    pointerEvents: 'none',
+                  }}>
+                    Cliquer pour activer
+                  </span>
+                </div>
+              )}
+
+              {/* Indicateur de dépôt sur panneau occupé */}
+              {isDragTarget && tab && (
+                <div style={{
+                  position: 'absolute', inset: 0, pointerEvents: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'rgba(245,158,11,0.18)',
+                }}>
+                  <span style={{
+                    fontSize: 13, fontWeight: 700, color: '#fbbf24',
+                    background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4,
+                  }}>⇄ Remplacer</span>
+                </div>
+              )}
+
+              {/* Badge nom du fichier */}
+              {tab && !isDragTarget && (
+                <div style={{
+                  position: 'absolute', top: 4, left: 4, zIndex: 5,
+                  pointerEvents: 'none',
+                  fontSize: 10, color: '#94a3b8',
+                  background: 'rgba(0,0,0,0.55)', padding: '1px 6px', borderRadius: 3,
+                  maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {tab.label}
+                </div>
+              )}
+
+              {/* Bouton fermer le panneau (haut droite) */}
+              {tab && (
+                <button
+                  title="Fermer ce panneau"
+                  onClick={e => { e.stopPropagation(); onRemovePanel(i); }}
+                  style={{
+                    position: 'absolute', top: 4, right: 4, zIndex: 15,
+                    width: 18, height: 18,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.55)',
+                    border: '1px solid rgba(100,116,139,0.4)',
+                    borderRadius: 3,
+                    color: '#94a3b8',
+                    fontSize: 10, fontWeight: 700,
+                    cursor: 'pointer',
+                    lineHeight: 1,
+                    padding: 0,
+                    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.85)';
+                    (e.currentTarget as HTMLButtonElement).style.color = '#fff';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#ef4444';
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.55)';
+                    (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(100,116,139,0.4)';
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {/* ── Poignées de redimensionnement ───────────────────────── */}
+
+        {/* Séparateur vertical — split-v et quad */}
+        {(layout === 'split-v' || layout === 'quad') && (
+          <div
+            title="Glisser pour redimensionner"
+            style={{
+              position: 'absolute',
+              top: 0, bottom: 0,
+              left: `calc(${colSplit}% - 5px)`,
+              width: 10,
+              cursor: 'col-resize',
+              zIndex: 20,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+            onMouseDown={e => { e.preventDefault(); setResizing('col'); }}
+          >
+            <div style={{
+              width: resizing === 'col' ? 3 : 2,
+              height: resizing === 'col' ? '90%' : '60%',
+              background: resizing === 'col' ? '#3b82f6' : 'rgba(100,116,139,0.5)',
+              borderRadius: 2,
+              transition: 'height 0.15s, background 0.15s, width 0.15s',
+              pointerEvents: 'none',
+            }} />
+          </div>
+        )}
+
+        {/* Séparateur horizontal — split-h et quad */}
+        {(layout === 'split-h' || layout === 'quad') && (
+          <div
+            title="Glisser pour redimensionner"
+            style={{
+              position: 'absolute',
+              left: 0, right: 0,
+              top: `calc(${rowSplit}% - 5px)`,
+              height: 10,
+              cursor: 'row-resize',
+              zIndex: 20,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+            onMouseDown={e => { e.preventDefault(); setResizing('row'); }}
+          >
+            <div style={{
+              height: resizing === 'row' ? 3 : 2,
+              width: resizing === 'row' ? '90%' : '60%',
+              background: resizing === 'row' ? '#3b82f6' : 'rgba(100,116,139,0.5)',
+              borderRadius: 2,
+              transition: 'width 0.15s, background 0.15s, height 0.15s',
+              pointerEvents: 'none',
+            }} />
+          </div>
+        )}
+      </div>
+
+      {/* Zone d'expansion — visible lors d'un glisser quand <4 panneaux */}
+      {dragDepth > 0 && slots < 4 && (
+        <div
+          style={{
+            height: dragOverExpand ? 44 : 26,
+            flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: dragOverExpand ? '#0f2040' : '#080d14',
+            borderTop: dragOverExpand ? '1px solid #f59e0b' : '1px solid #0a0a14',
+            cursor: 'copy',
+            fontSize: 11,
+            color: dragOverExpand ? '#fbbf24' : '#475569',
+            transition: 'all 0.15s',
+            gap: 6,
+          }}
+          onDragEnter={e => { e.stopPropagation(); setDragOverExpand(true); }}
+          onDragLeave={() => setDragOverExpand(false)}
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+          onDrop={e => {
+            e.preventDefault(); e.stopPropagation();
+            setDragDepth(0); setDragOverExpand(false);
+            const raw = e.dataTransfer.getData('text/plain');
+            if (!raw.startsWith('starhe-tab:')) return;
+            const tabId = parseInt(raw.replace('starhe-tab:', ''), 10);
+            onExpandLayout(tabId);
+          }}
+        >
+          <span style={{ fontSize: 14 }}>⊕</span>
+          <span>{dragOverExpand ? 'Déposer pour ajouter un panneau' : 'Glisser ici pour agrandir la vue'}</span>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **11 mai 2026**
+> Last updated: **12 mai 2026**
 
 ---
 
@@ -182,6 +182,14 @@
 - [x] **`index.tsx` — `<Sidebar onOpenBatch>` + `onLoadFolder`** — props branchées sur les nouveaux callbacks
 - [x] **`index.tsx` — `onOpenInTab` handler** — `loadDicom(serverPath)` → crée l'onglet avec `detectionsBy.original` + `resultsBy.original` pré-injectés ; fallback file picker si le fichier temp serveur a expiré
 
+
+### 🔧 Cross-platform & DICOM fixes (12 mai 2026)
+- [x] **Split button DICOM** — `Sidebar.tsx` : bouton fractionné `📁 Dossier DICOM | 🗂️` ; partie gauche = `webkitdirectory` (dossier entier), partie droite = sélection manuelle multi-fichiers individuels ; `onLoadDicomFiles` callback branché dans `index.tsx`
+- [x] **DICOM JPEG 2000** — `reader.py` : `extract_frames()` réécrit avec 3 niveaux de fallback : (1) `ds.pixel_array` nominal, (2) `ds.decompress()` pydicom 3.x, (3) `_extract_j2k_raw_scan()` — scan brut de `PixelData` pour le marqueur `FF 4F FF 51` (SOC+SIZ J2K), décode chaque codestream directement avec `openjpeg.decode` ; validé 24/24 fichiers (J2K lossless, J2K lossy, JPEG baseline, RLE)
+- [x] **pylibjpeg** — `requirements.txt` : ajout `pylibjpeg>=2.0.0`, `pylibjpeg-openjpeg>=2.0.0` (JPEG 2000), `pylibjpeg-libjpeg>=2.1.0` (JPEG lossless/lossy) ; décodeurs automatiquement utilisés par pydicom 3.x
+- [x] **Go handler erreurs** — `handlers_dicom.go` : réponse d'erreur HTTP 500 enrichie avec `stdout`, `python_error`, `python_traceback` (extrait du JSON Python) pour rendre visible le traceback Python dans la console React
+- [x] **`.gitignore` cross-platform** — ajout `react_ui/node_modules/` et `go_server/go_server` + `go_server/starhe_server` (binaires OS-spécifiques, ne pas commiter) ; `git rm --cached -r` exécuté pour désindexer les fichiers déjà tracqués
+- [x] **`start_react.ps1` / `start_react.sh`** — auto-lancement `setup.ps1` / `setup.sh` si venv Python absent au démarrage ; `npm install` → `npm ci` (installation reproductible depuis `package-lock.json`)
 
 ---
 

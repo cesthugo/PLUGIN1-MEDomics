@@ -173,10 +173,26 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		if tmpToDelete != "" {
 			os.Remove(tmpToDelete)
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		// loader_cli.py écrit l'erreur JSON+traceback sur stdout avant sys.exit(1).
+		// On l'inclut dans la réponse pour que le client puisse afficher l'erreur réelle.
+		errResp := map[string]string{
 			"error":  "subprocess Python échoué : " + err.Error(),
 			"stderr": stderr.String(),
-		})
+		}
+		if len(out) > 0 {
+			errResp["stdout"] = string(out)
+			// Si le JSON Python contient un champ "error", on l'expose directement.
+			var pyErr map[string]string
+			if jsonErr := json.Unmarshal(out, &pyErr); jsonErr == nil {
+				if msg, ok := pyErr["error"]; ok {
+					errResp["python_error"] = msg
+				}
+				if tb, ok := pyErr["traceback"]; ok {
+					errResp["python_traceback"] = tb
+				}
+			}
+		}
+		writeJSON(w, http.StatusInternalServerError, errResp)
 		return
 	}
 

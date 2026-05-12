@@ -3,6 +3,10 @@
 
 # ── Imagerie médicale ─────────────────────────────────────────────────────────
 pydicom>=2.4.0
+# Décodeurs JPEG / JPEG-2000 / JPEG-LS pour pydicom (requis pour certains DICOM compressés)
+pylibjpeg>=2.0.0
+pylibjpeg-openjpeg>=2.0.0   # JPEG 2000
+pylibjpeg-libjpeg>=2.1.0    # JPEG lossless / lossy
 
 # ── Traitement d'image ────────────────────────────────────────────────────────
 opencv-python-headless>=4.9.0.80

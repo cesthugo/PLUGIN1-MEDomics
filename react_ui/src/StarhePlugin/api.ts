@@ -208,10 +208,12 @@ export function streamAnalysis(
 
 export function makeTabLabel(studyDate: string, fileName: string): string {
   const sd = studyDate.trim();
+  // Suffixe court du nom de fichier (sans extension) pour différencier les onglets
+  const base   = fileName.replace(/\.[^.]+$/, '');
+  const suffix = base.slice(0, 12);
   if (sd.length === 8 && /^\d{8}$/.test(sd)) {
-    return `${sd.slice(6, 8)}/${sd.slice(4, 6)}/${sd.slice(0, 4)}`;
+    return `${sd.slice(6, 8)}/${sd.slice(4, 6)}/${sd.slice(0, 4)} · ${suffix}`;
   }
-  if (sd && sd !== '— absent') return sd.slice(0, 14);
-  const base = fileName.replace(/\.[^.]+$/, '');
-  return base.slice(0, 14);
+  if (sd && sd !== '— absent') return `${sd.slice(0, 10)} · ${suffix}`;
+  return suffix;
 }
