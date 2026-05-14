@@ -258,6 +258,7 @@ The React UI production build (`react_ui/dist/`) is deployed as a **static bundl
 
 ```
 MEDomics/renderer/public/starhe-ui/   ← cp -r react_ui/dist/. here
+MEDomics/app/starhe-ui/               ← cp -r react_ui/dist/. here (Electron main process)
 ```
 
 `MEDomics/renderer/components/mainPages/starhe.jsx` renders an `<iframe src="/starhe-ui/index.html">` and, once loaded, sends a `postMessage` to configure the API base URL:
@@ -278,6 +279,7 @@ iframeRef.current.contentWindow.postMessage(
 ```bash
 cd react_ui && npm run build
 cp -r dist/. ../MEDomics/renderer/public/starhe-ui/
+cp -r dist/. ../MEDomics/app/starhe-ui/
 cd ../MEDomics/renderer && npx next build
 ```
 
@@ -376,6 +378,7 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 # Type-check + production build + deploy to MEDomics
 cd react_ui && npm run build
 cp -r dist/. ../MEDomics/renderer/public/starhe-ui/
+cp -r dist/. ../MEDomics/app/starhe-ui/
 ```
 
 ### API surface (Go server → React)
