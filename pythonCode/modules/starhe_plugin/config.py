@@ -88,6 +88,19 @@ INFERENCE_DEVICE = "auto"
 # Coût : ~2–3× plus lent sur CPU.  Désactiver (False) pour la prod rapide.
 DETERMINISTIC_INFERENCE: bool = True
 
+# ── Seuil de décision STARHE-RISK ────────────────────────────────────────────
+# Probabilité minimale (classe 1 = risque élevé) pour qualifier un patient
+# de « Risque élevé ».
+#
+# 0.50 = comportement argmax (défaut mmaction2 / Analyse A en entraînement)
+# 0.60 = réduit les faux positifs Supersonic au prix d'une sensibilité moindre
+#
+# Calibration sur ce jeu de test (47 patients) :
+#   Seuil 0.50 → Sens=90.9%  Spec=52.0%  Acc=70.2%  F1=0.741
+#   Seuil 0.60 → Sens=77.3%  Spec=64.0%  Acc=70.2%  F1=0.708
+#   Réf C3D    → Sens=77.3%  Spec=72.0%  Acc=74.5%
+RISK_THRESHOLD: float = 0.50
+
 # ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
 CROP_BLACK_THRESHOLD   = 10
 CROP_MIN_CONTENT_RATIO = 0.01

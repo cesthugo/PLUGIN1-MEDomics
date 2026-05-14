@@ -96,10 +96,16 @@ def run_pipeline(dicom_path: str,
         backscan_width=backscan_width,
         backscan_height=backscan_height,
     )
-    # Utilise le backscan si dispo (meilleur pour l'IA), sinon le crop seul
-    processed = backscan_frames if backscan_frames is not None else crop_only_frames
+    # RISK : utilise le crop polaire (correspond à la distribution d'entraînement
+    # du C3D — vidéos pré-croppées en coordonnées polaires, sans backscan).
+    # DETECT : utilise le backscan si dispo (reprojection spatiale + remap bbox).
+    processed_risk   = crop_only_frames if crop_only_frames is not None else backscan_frames
+    processed_detect = backscan_frames  if backscan_frames  is not None else crop_only_frames
+    if processed_risk is None:
+        processed_risk = processed_detect  # dernier recours
     # (T, H', W') gris → (T, H', W', 3) RGB pour les modèles IA
-    frames_processed = np.stack([processed, processed, processed], axis=-1)
+    frames_processed      = np.stack([processed_detect, processed_detect, processed_detect], axis=-1)
+    frames_processed_risk = np.stack([processed_risk,   processed_risk,   processed_risk],   axis=-1)
 
     roi = None
     if info and "crop" in info:
@@ -111,7 +117,7 @@ def run_pipeline(dicom_path: str,
     if run_risk:
         go_progress(step := step + 1, TOTAL_STEPS, "Inférence STARHE-RISK (C3D)…")
         risk_model  = STARHERiskModel()
-        risk_result = risk_model.predict(frames_processed)
+        risk_result = risk_model.predict(frames_processed_risk)
     else:
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-RISK ignoré (run_risk=False).")

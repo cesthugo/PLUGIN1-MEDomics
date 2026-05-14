@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from starhe_plugin.config import STARHE_RISK_CHECKPOINT, INFERENCE_DEVICE, DETERMINISTIC_INFERENCE
+from starhe_plugin.config import STARHE_RISK_CHECKPOINT, INFERENCE_DEVICE, DETERMINISTIC_INFERENCE, RISK_THRESHOLD
 from starhe_plugin.utils.go_print import go_print
 from starhe_plugin.ai.models.c3d import C3DRecognizer, preprocess_clips
 
@@ -100,11 +100,11 @@ class STARHERiskModel:
         avg    = probs.mean(dim=0)               # (2,)
 
         scores     = avg.cpu().numpy().tolist()
-        pred_cls   = int(avg.argmax().item())
         risk_score = float(scores[1])            # proba classe 1 (risque élevé)
+        pred_cls   = 1 if risk_score >= RISK_THRESHOLD else 0
 
         go_print("info",
-                 f"RISK : {self.LABELS[pred_cls]} | score={risk_score:.3f}")
+                 f"RISK : {self.LABELS[pred_cls]} | score={risk_score:.3f} (seuil={RISK_THRESHOLD:.2f})")
         return {
             "risk_score": risk_score,
             "risk_label": self.LABELS[pred_cls],

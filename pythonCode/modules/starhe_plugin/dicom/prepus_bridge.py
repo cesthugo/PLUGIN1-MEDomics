@@ -255,6 +255,46 @@ def _ensure_importable() -> None:
     )
 
 
+def _crop_inmemory(frames_rgb: np.ndarray, crop_info: dict) -> np.ndarray:
+    """
+    Calcule les frames rognées en mémoire depuis les pixels numpy bruts.
+
+    Paramètres identiques sur toutes les plateformes (slicing numpy pur).
+    Utilisé à la place de la lecture de video.mp4 (codec lossy) pour garantir
+    des résultats bit-à-bit identiques entre Mac et Windows.
+
+    Paramètres
+    ----------
+    frames_rgb : (T, H, W, 3) uint8 RGB
+    crop_info  : dict avec clés "ymin", "ymax", "xmin", "xmax"
+                 (issus de _compute_lossless_backscan_params — déterministes)
+
+    Retourne
+    --------
+    (T, H_crop, W_crop) uint8 niveaux de gris
+
+    Note sur le masque cône
+    -----------------------
+    prepUS.removeLayoutFile applique mask_valid (masque FOV backscan) sur le
+    video.mp4. On ne l'applique PAS ici car expérimentalement cela EMPIRE les
+    résultats : le masque retire des pixels de tissu normal périphérique qui
+    équilibrent les artefacts intra-cône, et le modèle C3D se retrouve à voir
+    un signal plus "HighRisk-like" sur les cas Supersonic borderline.
+    La différence résiduelle avec Analyse A vient de la géométrie de scan
+    différente entre les MP4 d'entraînement et prepUS (non reproductible sans
+    le script de préparation des données d'origine).
+    """
+    ymin = int(crop_info["ymin"])
+    ymax = int(crop_info["ymax"])
+    xmin = int(crop_info["xmin"])
+    xmax = int(crop_info["xmax"])
+    return np.stack(
+        [cv2.cvtColor(f[ymin:ymax, xmin:xmax].astype(np.uint8), cv2.COLOR_RGB2GRAY)
+         for f in frames_rgb],
+        axis=0,
+    )
+
+
 def preprocess_with_prepus(
     frames: np.ndarray,
     fps: float = 22.0,
@@ -457,10 +497,11 @@ def preprocess_with_prepus(
                     backscan_width,
                     backscan_height,
                 )
-                # crop_only : frames rognées sans backscan (lecture vidéo acceptée ici
-                # car utilisées uniquement pour l'affichage, pas pour l'inférence IA)
-                if os.path.exists(video_mp4):
-                    crop_only_array = _read_video(video_mp4)
+                # crop_only : recalcul in-memory depuis numpy (déterministe).
+                # Les paramètres de crop dans info["crop"] ont déjà été mis à
+                # jour par _compute_lossless_backscan_params ci-dessus → on
+                # obtient des coordonnées identiques sur Mac et Windows.
+                crop_only_array = _crop_inmemory(frames, info["crop"])
                 source = "backscan-inmemory"
             except Exception as exc:
                 go_print("warning",
@@ -471,6 +512,9 @@ def preprocess_with_prepus(
                     raise RuntimeError("backscan_video.mp4 est vide ou illisible.")
                 if os.path.exists(video_mp4):
                     crop_only_array = _read_video(video_mp4)
+                    go_print("warning",
+                             "prepus_bridge: crop_only lu depuis video.mp4 (codec lossy) "
+                             "— résultats RISK peuvent différer entre plateformes.")
                 source = "backscan-video (fallback)"
         elif os.path.exists(backscan_mp4):
             out_array = _read_video(backscan_mp4)

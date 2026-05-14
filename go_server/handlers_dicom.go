@@ -42,7 +42,8 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 	quality := 70
 	maxDim  := 640
 	var dicomPath string
-	var tmpToDelete string // fichier temporaire à supprimer après traitement
+	var tmpToDelete string  // fichier temporaire à supprimer après traitement
+	var originalName string  // nom original fourni par le navigateur (mode upload)
 
 	ct := r.Header.Get("Content-Type")
 
@@ -91,7 +92,7 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		dicomPath = tmpPath
-		_ = header // nom original disponible si besoin
+		originalName = header.Filename
 
 		// Paramètres optionnels depuis le formulaire
 		if v := r.FormValue("quality"); v != "" {
@@ -202,6 +203,9 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		var obj map[string]interface{}
 		if err := json.Unmarshal(out, &obj); err == nil {
 			obj["server_path"] = tmpToDelete
+			if originalName != "" {
+				obj["file_name"] = originalName
+			}
 			if patched, err := json.Marshal(obj); err == nil {
 				out = patched
 			}
