@@ -23,6 +23,7 @@ export interface MultiPanelViewProps {
   onExpandLayout:     (tabId: number) => void;
   onRemovePanel:      (slotIdx: number) => void;
   onZoomPan:          (zoom: number, panX: number, panY: number) => void;
+  onResetAllPanelsPan: () => void;
   onContrastBright:   (contrast: number, brightness: number) => void;
   onFrameChange:      (idx: number) => void;
   onMeasureAdd:       (frameIdx: number, measure: Measure) => void;
@@ -35,7 +36,7 @@ export interface MultiPanelViewProps {
 export function MultiPanelView({
   layout, tabIds, tabs, activeTabId,
   onFocusPanel, onExit, onDropToPanel, onExpandLayout, onRemovePanel,
-  onZoomPan, onContrastBright, onFrameChange,
+  onZoomPan, onResetAllPanelsPan, onContrastBright, onFrameChange,
   onMeasureAdd, onMeasureMove, onMeasureLabelMove, onMeasureSelect, onContextMenu,
 }: MultiPanelViewProps) {
   const slots = layout === 'quad' ? 4 : layout === 'single' ? 1 : 2;
@@ -65,7 +66,7 @@ export function MultiPanelView({
         setRowSplit(Math.max(10, Math.min(90, (e.clientY - rect.top)  / rect.height * 100)));
       }
     };
-    const onUp = () => setResizing(null);
+    const onUp = () => { setResizing(null); onResetAllPanelsPan(); };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup',   onUp);
     return () => {
@@ -169,8 +170,13 @@ export function MultiPanelView({
                 onDropToPanel(i, droppedId);
               }}
             >
-              {/* Canvas du panneau (pointer-events bloqués si non-focalisé) */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', pointerEvents: isFocused ? 'auto' : 'none' }}>
+              {/* Canvas du panneau.
+                 - panneau non-focalisé → pointerEvents: none  (overlay de focus actif)
+                 - resize du séparateur en cours → pointerEvents: none sur TOUS les panneaux
+                   pour que les events souris ne fuient pas sur le canvas pendant le drag
+                   et n'accumulent pas de décalage de pan via un dragRef éventuellement actif.
+              */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', pointerEvents: (isFocused && !resizing) ? 'auto' : 'none' }}>
                 {tab ? (
                   <DicomCanvas
                     tab={tab}

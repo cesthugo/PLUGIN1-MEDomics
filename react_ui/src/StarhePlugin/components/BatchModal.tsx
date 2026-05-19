@@ -134,6 +134,8 @@ export interface BatchResultToOpen {
   risk?:       { score: number; label: string };
   numFrames?:  number;
   roi?:        unknown;
+  /** Objet File original du navigateur — permet de re-uploader si le fichier temp a expiré */
+  file?:       File;
 }
 
 export interface BatchModalProps {
@@ -155,7 +157,9 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
   const [done,         setDone]         = useState(false);
   const [batchMode,    setBatchMode]    = useState<'both' | 'risk_only' | 'detect_only'>(defaultMode);
   const [selected,     setSelected]     = useState<Set<number>>(new Set());
-  const abortRef = useRef<(() => void) | null>(null);
+  const [concurrency,  setConcurrency]  = useState(3);
+  /** Map itemId → abort fn pour les analyses parallèles en cours */
+  const abortMapRef  = useRef<Map<number, () => void>>(new Map());
   const cancelledRef = useRef(false);
 
   // Mise à jour d'un item par id
@@ -216,116 +220,119 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
   const onDragOver = (e: React.DragEvent) => { e.preventDefault(); };
   const onDrop     = (e: React.DragEvent) => { e.preventDefault(); onFileDrop(e.dataTransfer.files); };
 
-  // ── Lancer le batch ───────────────────────────────────────────────────────
+  // ── Traitement d'un seul item (réutilisé par chaque worker) ─────────────
+  const processItem = useCallback(async (item: BatchItem, batchModeSnap: typeof batchMode) => {
+    if (cancelledRef.current) return;
+
+    // 1. Chargement DICOM
+    update(item.id, { status: 'loading', progress: 'Chargement DICOM…' });
+    let serverPath = item.serverPath;
+    try {
+      if (item.file) {
+        const data = await loadDicomFile(item.file);
+        serverPath = data.serverPath || item.name;
+        update(item.id, { serverPath });
+      } else {
+        await loadDicom(serverPath);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      update(item.id, { status: 'error', error: `Chargement échoué : ${msg}` });
+      return;
+    }
+
+    if (cancelledRef.current) return;
+
+    // 2. Analyse SSE
+    update(item.id, { status: 'analyzing', progress: 'Démarrage de l\'analyse…' });
+    const req: AnalyzeRequest = {
+      dicomPath:          serverPath,
+      anonMode:           'hash',
+      runRisk:            batchModeSnap !== 'detect_only',
+      runDetection:       batchModeSnap !== 'risk_only',
+      backScanConversion: true,
+    };
+
+    await new Promise<void>((resolve) => {
+      let riskScore:  number | undefined;
+      let riskLabel:  string | undefined;
+      let detCount:   number | undefined;
+      let detections: Detection[][] | undefined;
+      let numFrames:  number | undefined;
+      let roi:        unknown;
+
+      const abort = streamAnalysis(
+        req,
+        (payload) => {
+          const msg = payload.message ?? '';
+          if (payload.level === 'progress' || payload.level === 'info') {
+            update(item.id, { progress: msg });
+          }
+          if (payload.data?.risk) {
+            const r = payload.data.risk;
+            riskScore = r.score ?? r.risk_score ?? riskScore;
+            riskLabel = r.label ?? r.risk_label ?? riskLabel;
+          }
+          if (payload.data?.detections_per_frame) {
+            detections = payload.data.detections_per_frame as Detection[][];
+            detCount   = detections.reduce((acc, fd) => acc + fd.length, 0);
+          }
+          if (payload.data?.num_frames !== undefined) numFrames = payload.data.num_frames as number;
+          if (payload.data?.roi !== undefined) roi = payload.data.roi;
+        },
+        () => {
+          abortMapRef.current.delete(item.id);
+          update(item.id, {
+            status: 'done', progress: 'Terminé', serverPath,
+            riskScore, riskLabel,
+            detCount:   detCount ?? 0,
+            detections: detections ?? [],
+            numFrames,  roi,
+          });
+          resolve();
+        },
+        (err) => {
+          abortMapRef.current.delete(item.id);
+          update(item.id, { status: 'error', error: err.message });
+          resolve();
+        },
+      );
+      abortMapRef.current.set(item.id, abort);
+    });
+  }, [update]);
+
+  // ── Lancer le batch (workers parallèles) ──────────────────────────────────
   const runBatch = useCallback(async () => {
     cancelledRef.current = false;
     setRunning(true);
     setDone(false);
 
-    const queue = items.filter(it => it.status === 'waiting' || it.status === 'error');
+    const modeSnap = batchMode;
+    // File d'attente partagée entre les workers (mutation protégée : JS mono-thread)
+    const pending = items.filter(it => it.status === 'waiting' || it.status === 'error');
 
-    for (const item of queue) {
-      if (cancelledRef.current) break;
-
-      // ── 1. Chargement DICOM ──────────────────────────────────────────────
-      update(item.id, { status: 'loading', progress: 'Chargement DICOM…' });
-
-      let serverPath = item.serverPath;
-      try {
-        if (item.file) {
-          // Upload navigateur
-          const data = await loadDicomFile(item.file);
-          serverPath = data.serverPath || item.name;
-          update(item.id, { serverPath });
-        } else {
-          // Chemin absolu
-          await loadDicom(serverPath);
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        update(item.id, { status: 'error', error: `Chargement échoué : ${msg}` });
-        continue;
+    // Chaque worker pioche le prochain item disponible jusqu'à épuisement
+    const worker = async () => {
+      while (true) {
+        if (cancelledRef.current) break;
+        const item = pending.shift();
+        if (!item) break;
+        await processItem(item, modeSnap);
       }
+    };
 
-      if (cancelledRef.current) break;
-
-      // ── 2. Analyse SSE ───────────────────────────────────────────────────
-      update(item.id, { status: 'analyzing', progress: 'Démarrage de l\'analyse…' });
-
-      const req: AnalyzeRequest = {
-        dicomPath:         serverPath,
-        anonMode:          'hash',
-        runRisk:           batchMode !== 'detect_only',
-        runDetection:      batchMode !== 'risk_only',
-        backScanConversion: true,
-      };
-
-      await new Promise<void>((resolve) => {
-        let riskScore:  number | undefined;
-        let riskLabel:  string | undefined;
-        let detCount:   number | undefined;
-        let detections: Detection[][] | undefined;
-        let numFrames:  number | undefined;
-        let roi:        unknown;
-
-        const abort = streamAnalysis(
-          req,
-          (payload) => {
-            const msg = payload.message ?? '';
-            if (payload.level === 'progress' || payload.level === 'info') {
-              update(item.id, { progress: msg });
-            }
-            if (payload.data?.risk) {
-              const r = payload.data.risk;
-              riskScore = r.score ?? r.risk_score ?? riskScore;
-              riskLabel = r.label ?? r.risk_label ?? riskLabel;
-            }
-            if (payload.data?.detections_per_frame) {
-              detections = payload.data.detections_per_frame as Detection[][];
-              detCount   = detections.reduce((acc, fd) => acc + fd.length, 0);
-            }
-            if (payload.data?.num_frames !== undefined) {
-              numFrames = payload.data.num_frames as number;
-            }
-            if (payload.data?.roi !== undefined) {
-              roi = payload.data.roi;
-            }
-          },
-          () => {
-            // done
-            update(item.id, {
-              status: 'done',
-              progress: 'Terminé',
-              serverPath,
-              riskScore,
-              riskLabel,
-              detCount:   detCount ?? 0,
-              detections: detections ?? [],
-              numFrames,
-              roi,
-            });
-            resolve();
-          },
-          (err) => {
-            update(item.id, { status: 'error', error: err.message });
-            resolve();
-          },
-        );
-        abortRef.current = abort;
-      });
-
-      abortRef.current = null;
-    }
+    const workers = Array.from({ length: Math.max(1, concurrency) }, worker);
+    await Promise.all(workers);
 
     setRunning(false);
     setDone(true);
-  }, [items, batchMode, update]);
+  }, [items, batchMode, concurrency, processItem]);
 
-  // ── Annuler ───────────────────────────────────────────────────────────────
+  // ── Annuler (interrompt tous les workers en cours) ───────────────────────
   const cancel = useCallback(() => {
     cancelledRef.current = true;
-    abortRef.current?.();
-    abortRef.current = null;
+    for (const abort of abortMapRef.current.values()) abort();
+    abortMapRef.current.clear();
     setRunning(false);
   }, []);
 
@@ -682,6 +689,25 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
               >⏹  Annuler</button>
             ) : (
               <>
+                {/* Sélecteur de parallélisme */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginRight: 4 }}>
+                  <span style={{ fontSize: 11, color: SBAR_MUTED, whiteSpace: 'nowrap' }}>Parallèles :</span>
+                  {([1, 2, 3, 4] as const).map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setConcurrency(n)}
+                      title={n === 1 ? 'Séquentiel (1 à la fois)' : `${n} analyses simultanées`}
+                      style={{
+                        background: concurrency === n ? BLUE : 'transparent',
+                        border: `1px solid ${concurrency === n ? BLUE : CARD_BORDER}`,
+                        borderRadius: 3, padding: '2px 7px',
+                        color: concurrency === n ? '#fff' : SBAR_MUTED,
+                        fontSize: 11, cursor: 'pointer', fontWeight: concurrency === n ? 700 : 400,
+                        minWidth: 24,
+                      }}
+                    >{n}</button>
+                  ))}
+                </div>
                 <button
                   onClick={() => setItems([])}
                   disabled={items.length === 0}
@@ -724,6 +750,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                   detections: it.detections,
                   risk: it.riskScore !== undefined ? { score: it.riskScore, label: it.riskLabel ?? '' } : undefined,
                   numFrames: it.numFrames, roi: it.roi,
+                  file: it.file,
                 });
                 const openAll = () => {
                   const results = doneItems.map(toResult);
@@ -839,6 +866,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                                          : undefined,
                           numFrames:   it.numFrames,
                           roi:         it.roi,
+                          file:        it.file,
                         })}
                         title="Ouvrir dans un onglet"
                         style={{

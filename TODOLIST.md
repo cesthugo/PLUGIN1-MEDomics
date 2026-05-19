@@ -207,6 +207,11 @@
 - [ ] **MEDDataObject** — Results are not yet encapsulated in a `MEDDataObject` (MEDomics standard format for patient data/results)
 - [ ] **Cross-platform symlinks** — Unix symlinks do not work natively on Windows (require developer mode or admin rights). Consider an installation script with copy as fallback.
 
+### 🔬 Preprocessing — Supersonic Imagine fix (identified 14 mai 2026)
+- [ ] **Detect `Manufacturer` DICOM tag** (`0008|0070`) in `prepus_bridge.py` / `reader.py` to identify Supersonic Imagine devices before preprocessing
+- [ ] **Calibrate crop geometry for Supersonic** — 5 confirmed FP patients caused by crop mismatch on Supersonic Imagine devices: `02-0022`, `02-0025`, `05-0018`, `05-0077`, `06-0029`; apply device-specific pixel spacing normalization or ROI recalibration before passing frames to C3D
+- [ ] **Validate fix on Supersonic batch** — re-run batch after fix; expected result: 5 FP → TN, bringing specificity from 52% → ~72% (matching Jérémy's reference)
+
 ---
 
 ## 📅 Roadmap — Next Steps
@@ -251,6 +256,24 @@
 - [ ] **Go API documentation** — Swagger / OpenAPI
 - [ ] **Plugin packaging** — MEDomics extension system compatibility
 - [ ] **Automated installation script** — Automate blueprint copy, symlink creation (or copy on Windows), and `main.go` patching
+
+### 🤖 Phase 5: STARHE Model Improvements (Research term)
+
+> Context: batch analysis of 14 mai 2026 (49 patients) vs. Jérémy reference (50 patients).
+> Current results: **Sens=91.7% / Spec=52%** — reference: **Sens=72% / Spec=72%**.
+> Two categories of remaining errors: 5 FP Supersonic (fixable via preprocessing), 7 FP structural (model limit, also present in Jérémy's reference).
+
+- [ ] **Decision threshold calibration** — Current threshold fixed at 50%. Borderline HighRisk patients (`02-0016` at 53.8%, `02-0049` at 54.0%, `05-0065` at 51.1%) are near-miss. Calibrate threshold on a held-out validation split to optimize F1 or Youden index; even a 48% threshold may recover borderline TPs without introducing many FPs.
+
+- [ ] **Domain adaptation for Supersonic Imagine** — The C3D model was trained predominantly on non-Supersonic devices. Fine-tune on a small annotated Supersonic set, or apply feature-level normalization (histogram matching, z-score per device type) before feeding frames to C3D.
+
+- [ ] **Hard negative mining in retraining** — The 7 structural FPs (`01-0063`, `01-0072`, `01-0083`, `02-0010`, `06-0016`, `06-0018`, `06-0019`) share visual characteristics (advanced fibrosis, heterogeneous parenchyma) that confuse the model. Upweight these cases in the loss during retraining to force the model to learn discriminative features for this sub-population.
+
+- [ ] **Late fusion with FASTRAK score** — FASTRAK and STARHE-RISK make complementary errors: FASTRAK misses `01-0086` (score 5.0 → Low) but STARHE catches it; STARHE generates 12 FPs that FASTRAK avoids. A late fusion (logistic regression on both scores → final binary decision) should outperform either method alone without changing either model. Requires access to FASTRAK scores at inference time.
+
+- [ ] **Uncertainty quantification for borderline cases** — For scores in [45%–55%], output an "uncertain" flag instead of a binary decision. In a clinical workflow, these patients would be referred for a complementary exam (biopsy, MRI) rather than receiving a potentially incorrect automated decision.
+
+- [ ] **Multi-modal temporal input** — The current C3D window is 16 frames (~0.5 s at standard fps). Experiment with longer temporal windows (32–64 frames) to capture lower-frequency hepatic motion patterns associated with CHC risk.
 
 ---
 

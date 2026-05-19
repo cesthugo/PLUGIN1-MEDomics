@@ -96,11 +96,10 @@ def run_pipeline(dicom_path: str,
         backscan_width=backscan_width,
         backscan_height=backscan_height,
     )
-    # RISK : utilise le crop polaire (correspond à la distribution d'entraînement
-    # du C3D — vidéos pré-croppées en coordonnées polaires, sans backscan).
-    # DETECT : utilise le backscan si dispo (reprojection spatiale + remap bbox).
+    # RISK et DETECT : les deux modèles utilisent le crop polaire (coordonnées
+    # polaires sans conversion backscan — correspond à la distribution d'entraînement).
     processed_risk   = crop_only_frames if crop_only_frames is not None else backscan_frames
-    processed_detect = backscan_frames  if backscan_frames  is not None else crop_only_frames
+    processed_detect = crop_only_frames if crop_only_frames is not None else backscan_frames
     if processed_risk is None:
         processed_risk = processed_detect  # dernier recours
     # (T, H', W') gris → (T, H', W', 3) RGB pour les modèles IA
@@ -174,13 +173,16 @@ def run_pipeline(dicom_path: str,
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")
 
-    # ── 7. Remappage backscan → espace DICOM original ─────────────────────────
-    # RTMDet reçoit les frames backscan (512×512) : ses bboxes sont dans cet
-    # espace. Il faut inverser la transformation polaire + l'offset de crop
-    # pour obtenir des coordonnées dans l'image DICOM originale affichée.
+    # ── 7. Remappage crop → espace DICOM original ─────────────────────────────
+    # RTMDet reçoit les frames crop_only (espace polaire rogné) : ses bboxes sont
+    # dans cet espace. Il faut ajouter l'offset de crop (xmin, ymin) pour obtenir
+    # les coordonnées dans l'image DICOM originale affichée.
+    # On passe un info réduit à "crop" pour forcer le décalage simple (pas l'inversion
+    # polaire, qui s'appliquerait si la clé "backscan" était présente).
+    crop_only_info = {"crop": info["crop"]} if info and "crop" in info else info
     detections_per_frame = map_detections_to_dicom_coords(
         detections_per_frame,
-        info,
+        crop_only_info,
         bsc_w=backscan_width,
         bsc_h=backscan_height,
     )

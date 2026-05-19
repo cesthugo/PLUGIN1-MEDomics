@@ -10,7 +10,7 @@
 //  - Actions : addTab, openBatchResultAsTab, switchTab, closeTab, updateActiveTab
 
 import { useCallback, useRef, useState } from 'react';
-import { loadDicom, makeTabLabel } from '../api';
+import { loadDicom, loadDicomFile, makeTabLabel } from '../api';
 import type { TabState, Patient, DicomData, LogLevel } from '../types';
 import type { BatchResultToOpen } from '../components/BatchModal';
 import { nextTabId } from '../utils';
@@ -129,7 +129,19 @@ export function useTabManager({
   /** Charge un DICOM depuis un résultat batch et retourne l'ID du nouvel onglet */
   const openBatchResultAsTab = useCallback(async (result: BatchResultToOpen): Promise<number> => {
     addLog(`Chargement : ${result.name}`, 'info');
-    const data  = await loadDicom(result.serverPath);
+    let data: Awaited<ReturnType<typeof loadDicom>>;
+    try {
+      data = await loadDicom(result.serverPath);
+    } catch (err) {
+      // Temp file expiré — on re-uploade le fichier original si disponible
+      const msg = err instanceof Error ? err.message : String(err);
+      if (result.file && /introuvable|not found|no such file/i.test(msg)) {
+        addLog(`Fichier temporaire expiré — re-upload de ${result.name}…`, 'info');
+        data = await loadDicomFile(result.file);
+      } else {
+        throw err;
+      }
+    }
     const label = makeTabLabel(data.studyDate, data.fileName);
     const newTab: TabState = {
       ...makeDefaultTab(),

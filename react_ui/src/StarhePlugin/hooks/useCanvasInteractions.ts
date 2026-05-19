@@ -3,7 +3,7 @@
 // Réplique les interactions du canvas Tkinter de prototype_tkinter.py.
 // Le hook retourne des gestionnaires d'événements à attacher au <canvas>.
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { ViewMode, Measure } from '../types';
 
 // ── Types internes ────────────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ export function useCanvasInteractions(
   getState: () => InteractState,
   cbs: InteractCallbacks,
 ) {
-  // État du drag (lbm press)
+  // ── État du drag (lbm press)
   const dragRef = useRef<{
     startX:   number;
     startY:   number;
@@ -221,6 +221,20 @@ export function useCanvasInteractions(
       _previewSetter.current = setter;
     }, [],
   );
+
+  // ── Nettoyage global des drags ────────────────────────────────────────────────
+  // Lorsque la souris est relâchée EN DEHORS du canvas (ex. en glissant le
+  // séparateur du mode multi-panneaux), le mouseup natif du canvas ne se déclenche
+  // pas et dragRef resterait non-null. Le listener global sur window corrige cela.
+  useEffect(() => {
+    const clearDrags = () => {
+      dragRef.current   = null;
+      rclickRef.current = null;
+      editRef.current   = null;
+    };
+    window.addEventListener('mouseup', clearDrags);
+    return () => window.removeEventListener('mouseup', clearDrags);
+  }, []);
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -451,11 +465,21 @@ export function useCanvasInteractions(
     }
   }, [getState, cbs]);
 
+  // ── Quitter le canvas : annule tout drag en cours ───────────────────────────
+  // Empêche l'état de drag de « fuir » vers des interactions extérieures
+  // (ex. glisser le séparateur du mode multi-panneaux).
+  const onMouseLeave = useCallback(() => {
+    dragRef.current   = null;
+    rclickRef.current = null;
+    editRef.current   = null;
+  }, []);
+
   return {
     onWheel,
     onMouseDown,
     onMouseMove,
     onMouseUp,
+    onMouseLeave,
     onContextMenuDown,
     onContextMenuUp,
     onKeyDown,

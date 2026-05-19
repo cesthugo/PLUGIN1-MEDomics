@@ -151,6 +151,9 @@ export function DicomCanvas({
   >(null);
 
   // Taille courante du canvas (px)
+  // canvasSizeRef : toujours à jour (mis à jour synchroniquement dans le ResizeObserver)
+  // canvasSize    : état React (déclenche le re-render et la mise à jour des attributs canvas)
+  const canvasSizeRef = useRef({ w: 640, h: 480 });
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 480 });
 
   // Observer de taille
@@ -159,14 +162,38 @@ export function DicomCanvas({
     if (!el) return;
     const ro = new ResizeObserver(entries => {
       for (const e of entries) {
-        setCanvasSize({ w: e.contentRect.width, h: e.contentRect.height });
+        const newSize = { w: e.contentRect.width, h: e.contentRect.height };
+        canvasSizeRef.current = newSize;   // synchrone : utilisé par getState() tout de suite
+        setCanvasSize(newSize);            // asynchrone : déclenche le re-render React
       }
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
+  // Refs stables pour l'effet de recentrage — mis à jour à chaque render,
+  // utilisés dans un effect qui n'a que canvasSize dans ses dépendances.
+  const onZoomPanRef = useRef(onZoomPan);
+  onZoomPanRef.current = onZoomPan;
+  const tabZoomRef = useRef(tab?.zoom ?? 1);
+  tabZoomRef.current = tab?.zoom ?? 1;
+  const hasDataRef = useRef(!!tab?.data);
+  hasDataRef.current = !!tab?.data;
+
+  // Quand le canvas est redimensionné (ex. déplacement du séparateur multi-panneaux),
+  // réinitialise panX=0 / panY=0 pour forcer le recentrage de l'image.
+  // Empêche l'accumulation de décalage qui déplace les visualisations hors de l'écran.
+  const isFirstSizeRef = useRef(true);
+  useEffect(() => {
+    if (isFirstSizeRef.current) { isFirstSizeRef.current = false; return; }
+    if (hasDataRef.current) onZoomPanRef.current(tabZoomRef.current, 0, 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasSize.w, canvasSize.h]);
+
   // État pour le hook d'interactions
+  // canvasSizeRef est utilisé (pas canvasSize) pour que les handlers de zoom/pan
+  // voient toujours les dimensions courantes, même pendant le redimensionnement
+  // du séparateur (avant que React ait rerenderé avec les nouvelles props).
   const getState = useCallback(() => ({
     viewMode:        tab?.viewMode          ?? 'normal',
     zoom:            tab?.zoom              ?? 1,
@@ -178,12 +205,12 @@ export function DicomCanvas({
     frameCount:      tab?.data?.frameCount ?? 0,
     imgW:            tab?.data?.cols       ?? 0,
     imgH:            tab?.data?.rows       ?? 0,
-    canvasW:         canvasSize.w,
-    canvasH:         canvasSize.h,
+    canvasW:         canvasSizeRef.current.w,
+    canvasH:         canvasSizeRef.current.h,
     measuresByFrame: tab?.measuresByFrame  ?? {},
     selectedMeasure: tab?.selectedMeasure  ?? null,
     pixelSpacing:    tab?.data?.pixelSpacing ?? null,
-  }), [tab, canvasSize]);
+  }), [tab]);  // pas besoin de dépendre de canvasSize : la ref est toujours à jour
 
   const interactions = useCanvasInteractions(getState, {
     onZoomPan,
@@ -400,6 +427,7 @@ export function DicomCanvas({
           interactions.onContextMenuDown(e);
         }}
         onMouseMove={interactions.onMouseMove}
+        onMouseLeave={interactions.onMouseLeave}
         onMouseUp={e => {
           interactions.onMouseUp(e);
           interactions.onContextMenuUp(e);

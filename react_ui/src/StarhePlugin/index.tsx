@@ -346,6 +346,14 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const onZoomPan = useCallback((zoom: number, panX: number, panY: number) =>
     updateActiveTab(t => ({ ...t, zoom, panX, panY })), [updateActiveTab]);
 
+  // Réinitialise panX=0 / panY=0 pour tous les onglets visibles en mode multi-panneaux.
+  const onResetAllPanelsPan = useCallback(() => {
+    if (!multiPanel) return;
+    for (const id of multiPanel.tabIds) {
+      if (id >= 0) updateTabById(id, t => ({ ...t, panX: 0, panY: 0 }));
+    }
+  }, [multiPanel, updateTabById]);
+
   const onContrastBright = useCallback((contrast: number, brightness: number) =>
     updateActiveTab(t => ({ ...t, contrast, brightness })), [updateActiveTab]);
 
@@ -501,7 +509,6 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           textColor={displaySettings.textColor}
           analysisMode={displaySettings.analysisMode}
           onLoadDicom={onLoadDicom}
-          onLoadDicomFiles={onLoadDicomFiles}
           onLoadPath={onLoadPath}
           onPrevFrame={onPrevFrame}
           onNextFrame={onNextFrame}
@@ -517,6 +524,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           onOpenBatch={() => setShowBatch(true)}
           onGotoFrame={onGotoFrame}
           onToggleTheme={() => setDarkMode(d => !d)}
+          onAnalysisModeChange={mode => updateSettings({ analysisMode: mode })}
         />
 
         {/* Séparateur 1 px */}
@@ -708,6 +716,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
                   setActiveTabId(droppedTabId);
                 }}
                 onZoomPan={onZoomPan}
+                onResetAllPanelsPan={onResetAllPanelsPan}
                 onContrastBright={onContrastBright}
                 onFrameChange={onCanvasFrameChange}
                 onMeasureAdd={onMeasureAdd}
@@ -850,9 +859,16 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               addLog(`ERREUR ouverture ${result.name} : ${msg}`, 'error');
             }
           }}
-          onOpenInLayout={(results: BatchResultToOpen[]) => {
+          onOpenInLayout={async (results: BatchResultToOpen[]) => {
             setShowBatch(false);
-            setPendingLayoutOpen(results);
+            addLog(`Ouverture de ${results.length} fichier(s)\u2026`, 'info');
+            try {
+              const tabIds = await Promise.all(results.map(r => openBatchResultAsTab(r)));
+              setActiveTabId(tabIds[0]);
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              addLog(`ERREUR ouverture : ${msg}`, 'error');
+            }
           }}
         />
       )}

@@ -20,6 +20,10 @@ Retourne :
                      sinon image masquée/rognée
       info_dict    : dict issu de info.json (crop + paramètres backscan),
                      ou None si le fichier n'existe pas
+
+Note : les modèles IA (C3D et RTMDet) utilisent le crop polaire (crop_only),
+       pas le backscan. Le backscan est conservé pour d'éventuels usages
+       de visualisation mais n'est pas passé aux modèles.
 """
 
 import json
