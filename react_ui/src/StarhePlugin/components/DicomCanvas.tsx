@@ -117,6 +117,9 @@ function drawMeasureSegment(
 export interface DicomCanvasProps {
   tab:              TabState | null;
   onZoomPan:        (zoom: number, panX: number, panY: number) => void;
+  /** Appelé à chaque redimensionnement du canvas pour forcer le recentrage de TOUS les
+   *  panneaux (multi-panneaux). Si absent, on replie sur onZoomPan(zoom,0,0) (vue simple). */
+  onPanReset?:      () => void;
   onContrastBright: (contrast: number, brightness: number) => void;
   onFrameChange:    (idx: number) => void;
   onMeasureAdd:     (frameIdx: number, measure: Measure) => void;
@@ -129,6 +132,7 @@ export interface DicomCanvasProps {
 export function DicomCanvas({
   tab,
   onZoomPan,
+  onPanReset,
   onContrastBright,
   onFrameChange,
   onMeasureAdd,
@@ -175,6 +179,8 @@ export function DicomCanvas({
   // utilisés dans un effect qui n'a que canvasSize dans ses dépendances.
   const onZoomPanRef = useRef(onZoomPan);
   onZoomPanRef.current = onZoomPan;
+  const onPanResetRef = useRef(onPanReset);
+  onPanResetRef.current = onPanReset;
   const tabZoomRef = useRef(tab?.zoom ?? 1);
   tabZoomRef.current = tab?.zoom ?? 1;
   const hasDataRef = useRef(!!tab?.data);
@@ -182,11 +188,24 @@ export function DicomCanvas({
 
   // Quand le canvas est redimensionné (ex. déplacement du séparateur multi-panneaux),
   // réinitialise panX=0 / panY=0 pour forcer le recentrage de l'image.
-  // Empêche l'accumulation de décalage qui déplace les visualisations hors de l'écran.
+  //
+  // - Mode multi-panneaux : onPanReset est fourni → appelle onResetAllPanelsPan() qui
+  //   recentre TOUS les panneaux (focalisés ET non-focalisés), quel que soit l'état de
+  //   l'onZoomPan qui peut être NOOP pour les panneaux non-focalisés.
+  // - Mode vue simple : onPanReset absent → repli sur onZoomPan(zoom,0,0) en sautant
+  //   la première mesure initiale du ResizeObserver (isFirstSizeRef).
   const isFirstSizeRef = useRef(true);
   useEffect(() => {
-    if (isFirstSizeRef.current) { isFirstSizeRef.current = false; return; }
-    if (hasDataRef.current) onZoomPanRef.current(tabZoomRef.current, 0, 0);
+    if (!hasDataRef.current) return;
+    if (onPanResetRef.current) {
+      // Multi-panel : reset ALL panels on every canvas resize — no initial-skip needed
+      // (panX=0 initially, so calling this on mount is a harmless no-op).
+      onPanResetRef.current();
+    } else {
+      // Single panel : skip the very first size measurement to preserve user pan/zoom.
+      if (isFirstSizeRef.current) { isFirstSizeRef.current = false; return; }
+      onZoomPanRef.current(tabZoomRef.current, 0, 0);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasSize.w, canvasSize.h]);
 

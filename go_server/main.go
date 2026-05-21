@@ -35,7 +35,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("POST /starhe/analyze", analyzeHandler)
-	mux.HandleFunc("POST /starhe/live", liveNotImplementedHandler)
+	mux.HandleFunc("POST /starhe/live", liveHandler)
 	mux.HandleFunc("GET /starhe/results", listResultsHandler)
 	mux.HandleFunc("GET /starhe/results/{id}", getResultHandler)
 	mux.HandleFunc("DELETE /starhe/results/{id}", deleteResultHandler)

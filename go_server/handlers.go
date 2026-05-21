@@ -266,11 +266,119 @@ func sseError(w http.ResponseWriter, f http.Flusher, msg string) {
 }
 
 // ── POST /starhe/live ──────────────────────────────────────────────────────
-// Stub — analyse en direct non implémentée dans cette version.
-func liveNotImplementedHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte(`{"error":"Analyse en direct non disponible dans cette version du serveur."}`)) //nolint:errcheck
+//
+// Lance run_live.py en subprocess et streame sa sortie au format SSE.
+// Le subprocess tourne jusqu'à ce que le client se déconnecte (contexte
+// HTTP annulé → exec.CommandContext tue le processus).
+//
+// Corps de requête JSON :
+//
+//	{
+//	  "source":      "cstore" | "folder" | "hdmi",
+//	  "port":        11112,          // C-STORE SCP port (source=cstore)
+//	  "folder_path": "/path/...",    // dossier à surveiller (source=folder)
+//	  "device":      0,              // index cv2 (source=hdmi)
+//	  "no_risk":     false           // désactiver STARHE-RISK
+//	}
+type liveRequest struct {
+	Source     string `json:"source"`
+	Port       int    `json:"port"`
+	FolderPath string `json:"folder_path"`
+	Device     int    `json:"device"`
+	NoRisk     bool   `json:"no_risk"`
+}
+
+func liveHandler(w http.ResponseWriter, r *http.Request) {
+	req := liveRequest{
+		Source: "folder",
+		Port:   11112,
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"corps de requête invalide"}`, http.StatusBadRequest)
+		return
+	}
+
+	switch req.Source {
+	case "cstore", "folder", "hdmi":
+		// valid
+	default:
+		http.Error(w, `{"error":"source invalide (cstore|folder|hdmi)"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Source == "folder" && req.FolderPath == "" {
+		http.Error(w, `{"error":"folder_path est requis pour source=folder"}`, http.StatusBadRequest)
+		return
+	}
+
+	// En-têtes SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming non supporté"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Construction des arguments subprocess
+	args := []string{
+		"-m", "starhe_plugin.ai.run_live",
+		"--source", req.Source,
+	}
+	switch req.Source {
+	case "cstore":
+		args = append(args, "--port", strconv.Itoa(req.Port))
+	case "folder":
+		args = append(args, "--folder", req.FolderPath)
+	case "hdmi":
+		args = append(args, "--device", strconv.Itoa(req.Device))
+	}
+	if req.NoRisk {
+		args = append(args, "--no_risk")
+	}
+
+	cmd := exec.CommandContext(r.Context(), cfg.PythonExe, args...)
+	cmd.Dir = cfg.PythonModPath
+	cmd.Env = append(os.Environ(),
+		"PYTHONPATH="+cfg.PythonModPath,
+		"PYTHONUTF8=1",
+	)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		sseError(w, flusher, "stdout pipe: "+err.Error())
+		return
+	}
+	stderr, _ := cmd.StderrPipe()
+
+	if err := cmd.Start(); err != nil {
+		sseError(w, flusher, "démarrage Python échoué: "+err.Error())
+		return
+	}
+
+	go func() { io.Copy(log.Writer(), stderr) }() //nolint:errcheck
+
+	// Lit stdout ligne par ligne ; chaque GO_PRINT est forwardé en SSE.
+	// Les frames JPEG base64 peuvent dépasser 64 KB — buffer 10 MB.
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "GO_PRINT|") {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) == 3 {
+			writeSSE(w, flusher, parts[2])
+		}
+	}
+
+	if err := cmd.Wait(); err != nil && r.Context().Err() == nil {
+		log.Printf("pipeline live terminé avec erreur: %v", err)
+	}
+
+	writeSSE(w, flusher, "[DONE]")
 }
 
 // ── GET /starhe/results ────────────────────────────────────────────────────

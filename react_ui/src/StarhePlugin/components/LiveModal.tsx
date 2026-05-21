@@ -91,6 +91,9 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
 
   const abortRef = useRef<AbortController | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Refs pour le découplage affichage/inférence (« caméra de surveillance »)
+  const lastFrameB64Ref = useRef<string | null>(null);
+  const lastDetsRef     = useRef<Detection[]>([]);
 
   // ── Dessin du frame live ────────────────────────────────────────────────────
 
@@ -165,19 +168,28 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
           try {
             const payload = JSON.parse(raw);
             if (payload.data?.frame_b64) {
+              // Frame preview : afficher immédiatement avec les bbox existantes
               frameCount++;
               const now = Date.now();
               const fps = now - lastFpsTs > 0 ? Math.round(1000 / (now - lastFpsTs)) : 0;
               lastFpsTs = now;
-              const dets: Detection[] = payload.data.detections ?? [];
-              drawLiveFrame(payload.data.frame_b64, dets);
+              lastFrameB64Ref.current = payload.data.frame_b64;
+              drawLiveFrame(payload.data.frame_b64, lastDetsRef.current);
+              setState(s => ({
+                ...s, fps, frames: frameCount,
+                lastFrameB64: payload.data.frame_b64,
+              }));
+            }
+            if (!payload.data?.frame_b64 && payload.data?.detections !== undefined) {
+              // Résultats d'inférence reçus en asynchrone : overlay sur la frame courante
+              const dets: Detection[] = payload.data.detections;
+              lastDetsRef.current = dets;
+              if (lastFrameB64Ref.current) {
+                drawLiveFrame(lastFrameB64Ref.current, dets);
+              }
               const nDet = dets.length;
               setState(s => ({
-                ...s,
-                fps,
-                frames: frameCount,
-                lastFrameB64: payload.data.frame_b64,
-                lastDets: dets,
+                ...s, lastDets: dets,
                 detText: `${nDet} détection(s)`,
                 detFg:   nDet > 0 ? WARN_FG : SUCCESS_FG,
               }));
@@ -205,6 +217,8 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
   const stopLive = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    lastFrameB64Ref.current = null;
+    lastDetsRef.current = [];
     setState(s => ({ ...s, running: false }));
     addLog('Analyse en direct arrêtée.', 'info');
   }, [addLog]);

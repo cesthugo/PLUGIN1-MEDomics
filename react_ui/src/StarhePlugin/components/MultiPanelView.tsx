@@ -53,6 +53,10 @@ export function MultiPanelView({
   // Reset splits when layout changes
   React.useEffect(() => { setColSplit(50); setRowSplit(50); }, [layout]);
 
+  // Ref stable pour onResetAllPanelsPan — évite les closures périmées dans l'effet de resize.
+  const onResetAllPanelsPanRef = React.useRef(onResetAllPanelsPan);
+  onResetAllPanelsPanRef.current = onResetAllPanelsPan;
+
   // Global mouse move/up for resize drag
   React.useEffect(() => {
     if (!resizing) return;
@@ -66,7 +70,7 @@ export function MultiPanelView({
         setRowSplit(Math.max(10, Math.min(90, (e.clientY - rect.top)  / rect.height * 100)));
       }
     };
-    const onUp = () => { setResizing(null); onResetAllPanelsPan(); };
+    const onUp = () => { setResizing(null); onResetAllPanelsPanRef.current(); };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup',   onUp);
     return () => {
@@ -179,8 +183,9 @@ export function MultiPanelView({
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', pointerEvents: (isFocused && !resizing) ? 'auto' : 'none' }}>
                 {tab ? (
                   <DicomCanvas
-                    tab={tab}
+                    tab={resizing ? { ...tab, panX: 0, panY: 0 } : tab}
                     onZoomPan={isFocused          ? onZoomPan          : NOOP_ZP}
+                    onPanReset={onResetAllPanelsPan}
                     onContrastBright={isFocused   ? onContrastBright   : NOOP_CB}
                     onFrameChange={isFocused      ? onFrameChange      : NOOP_FC}
                     onMeasureAdd={isFocused       ? onMeasureAdd       : NOOP_MA}

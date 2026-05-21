@@ -509,6 +509,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           textColor={displaySettings.textColor}
           analysisMode={displaySettings.analysisMode}
           onLoadDicom={onLoadDicom}
+          onLoadDicomFiles={onLoadDicomFiles}
           onLoadPath={onLoadPath}
           onPrevFrame={onPrevFrame}
           onNextFrame={onNextFrame}
