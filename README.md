@@ -349,7 +349,7 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 | Feature | Description |
 |---|---|
 | **Multi-tab / multi-file** | Load N DICOM files concurrently; each tab stores its own independent state (frames, zoom, measures, contrast, analysis results…); analysis results are injected into the tab that launched the analysis, regardless of which tab is active when results arrive |
-| **Multi-panel split view** | Drag a tab or thumbnail card into the viewer → opens that file in a new side-by-side panel; click a panel to focus it (blue outline); sidebar and gallery target the focused panel’s file; `×` removes a panel; CSS grid auto-layout (1/2/3/4 columns); empty state shows a drag hint; patient isolation — switching to a different patient automatically removes the previous patient’s panels |
+| **Multi-panel split view** | Drag a tab or thumbnail card into the viewer → opens that file in a new side-by-side panel; click a panel to focus it (blue outline); sidebar and gallery target the focused panel’s file; `×` removes a panel; CSS grid auto-layout (1/2/3/4 columns); empty state shows a drag hint; patient isolation — switching to a different patient automatically removes the previous patient’s panels; splitter-drift bug fixed (render override during resize + `onPanReset` prop resets all panels) |
 | **DICOM loading** | Via absolute path (Electron / MEDomics), file picker (browser), or **folder picker** |
 | **Folder loading** | "📁 Charger un dossier DICOM" button in the sidebar — browser folder picker (`webkitdirectory`); auto-detects `.dcm`, `.dicom`, and extension-less files; loads all files sequentially |
 | **Frame viewer** | Hardware-accelerated canvas, `letter-box` fit, smooth scroll / keyboard navigation |

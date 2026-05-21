@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **12 mai 2026**
+> Last updated: **21 mai 2026**
 
 ---
 
@@ -190,6 +190,21 @@
 - [x] **Go handler erreurs** — `handlers_dicom.go` : réponse d'erreur HTTP 500 enrichie avec `stdout`, `python_error`, `python_traceback` (extrait du JSON Python) pour rendre visible le traceback Python dans la console React
 - [x] **`.gitignore` cross-platform** — ajout `react_ui/node_modules/` et `go_server/go_server` + `go_server/starhe_server` (binaires OS-spécifiques, ne pas commiter) ; `git rm --cached -r` exécuté pour désindexer les fichiers déjà tracqués
 - [x] **`start_react.ps1` / `start_react.sh`** — auto-lancement `setup.ps1` / `setup.sh` si venv Python absent au démarrage ; `npm install` → `npm ci` (installation reproductible depuis `package-lock.json`)
+
+### 🖼 React UI — DicomUploader + Correctifs interface (19 mai 2026)
+- [x] **`DicomUploader.tsx`** — Nouveau composant dédié au chargement DICOM (drag-and-drop + picker + URL) ; extrait de `Sidebar.tsx` pour clarifier les responsabilités
+- [x] **`BatchModal.tsx` — Boutons dossier / fichiers** — Correction des boutons "📁 Dossier" et "🗂 Fichiers" dans la modal batch (sélection dossier entier vs fichiers individuels)
+- [x] **Multi-panneaux — Correctif #1** — `MultiPanelView.tsx` : remplacement `tab.panX/panY` par `{...tab, panX:0, panY:0}` pendant le redimensionnement ; `pointerEvents: none` sur les panneaux non-focalisés pendant le resize ; `onResetAllPanelsPanRef` pour éviter les closures périmées
+- [x] **`useCanvasInteractions.ts`** — Ajout d'un listener global `window.mouseup` pour forcer le nettoyage de `dragRef`, `rclickRef`, `editRef` après relâchement hors canvas
+- [x] **`useTabManager.ts`** — `updateTabById` stabilisé avec `useCallback` sans dépendances instables
+- [x] **`pipeline.py` / `prepus_bridge.py`** — Correctifs pipeline batch (voir commit f312a8f)
+
+### 🤖 Analyse live + Correctif multi-panneaux #2 (21 mai 2026)
+- [x] **`run_live.py`** — Nouveau point d'entrée CLI pour l'analyse live ; lancé par le serveur Go comme sous-processus ; 3 sources : `_FolderWatcher` (polling `.dcm` toutes les 0.5 s), `_HDMIReader` (cv2.VideoCapture, `CAP_AVFOUNDATION` sur macOS), `_CStoreReceiver` (pynetdicom SCP, AE=`STARHE_LIVE`) ; même protocole `GO_PRINT|level|{json}` que `pipeline.py` ; preview émise immédiatement avant inférence ; arrêt propre via SIGTERM/SIGINT → `_stop_event`
+- [x] **`handlers.go` — Endpoints live** — Nouveaux endpoints REST + SSE pour l'analyse live : `POST /starhe/live/start` (lance `run_live.py`), `POST /starhe/live/stop` (arrêt du sous-processus), `GET /starhe/live/stream` (SSE des frames preview + détections)
+- [x] **`main.go`** — Enregistrement des nouvelles routes live dans le routeur Go
+- [x] **Multi-panneaux — Correctif #2 (`onPanReset`)** — `DicomCanvas.tsx` : nouvelle prop `onPanReset?: () => void` ; l'effet de resize appelle `onPanReset()` à la place de `NOOP_ZP` → réinitialise tous les panneaux ; 0 erreurs TypeScript
+- [x] **`LiveModal.tsx`** — Mise à jour du modal live pour utiliser les nouveaux endpoints du backend Go
 
 ---
 

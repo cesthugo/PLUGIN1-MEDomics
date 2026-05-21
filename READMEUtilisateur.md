@@ -337,6 +337,8 @@ Click **→ Tab** or **↗ Tout ouvrir** to open them in the viewer without re-r
 
 The **📡 Analyse en direct** button in the sidebar opens a dedicated window for real-time analysis of a live ultrasound feed.
 
+> **Architecture** : clicking **▶ Démarrer** tells the Go server to launch `run_live.py` as a subprocess. The Python process handles the selected input source and streams results back to the UI over SSE. The video preview is sent immediately (before inference), so the image is always fluid even if the AI is slower.
+
 ### Opening the window
 
 Click **📡 Analyse en direct** in the main sidebar. A new window appears.  
