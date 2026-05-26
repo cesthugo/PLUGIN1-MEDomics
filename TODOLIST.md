@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **21 mai 2026**
+> Last updated: **26 mai 2026**
 
 ---
 
@@ -205,6 +205,12 @@
 - [x] **`main.go`** — Enregistrement des nouvelles routes live dans le routeur Go
 - [x] **Multi-panneaux — Correctif #2 (`onPanReset`)** — `DicomCanvas.tsx` : nouvelle prop `onPanReset?: () => void` ; l'effet de resize appelle `onPanReset()` à la place de `NOOP_ZP` → réinitialise tous les panneaux ; 0 erreurs TypeScript
 - [x] **`LiveModal.tsx`** — Mise à jour du modal live pour utiliser les nouveaux endpoints du backend Go
+
+### 🚀 Lanceurs double-clic (26 mai 2026)
+- [x] **`launch_medomics.command`** — Lanceur macOS (double-clic Finder) pour MEDomics + STARHE en mode développement : vérifie Node.js/Go, compile le binaire Go si absent, `npm install` MEDomics si absent, construit et déploie l'UI React si `dist/` absent, puis `npm run dev` dans MEDomics (→ Electron démarre MongoDB + Go MEDomics + Go STARHE automatiquement) ; `chmod +x` appliqué
+- [x] **`launch_medomics.bat`** — Équivalent Windows (double-clic Explorateur) ; même logique, binaire `go_server.exe`, `xcopy /E /Y /I` pour le déploiement React, `pause` en fin
+- [x] **`launch_plugin.command`** — Lanceur macOS standalone STARHE (sans MEDomics) : vérifie Python 3.13 / Node.js / Go, crée le venv si absent + installe dépendances + poids IA, compile le binaire Go, trouve et démarre MongoDB sur le port 54017, démarre le serveur Go (`:8082`) et le serveur Vite (`:5173`) en arrière-plan, attend que React soit prêt, ouvre le navigateur → arrêt propre de tous les services sur Ctrl+C ; `chmod +x` appliqué
+- [x] **`launch_plugin.bat`** — Équivalent Windows standalone : chaque service (MongoDB, Go server, React UI) s'ouvre dans sa propre fenêtre CMD ; ouvre automatiquement le navigateur sur `http://localhost:5173` après détection que le serveur Vite est prêt
 
 ---
 
