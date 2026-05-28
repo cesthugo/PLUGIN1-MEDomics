@@ -32,8 +32,9 @@ build/
 .pytest_cache/
 logs/
 
-# ── Node.js (dépendances React/Vite — binaires spécifiques à l'OS, jamais commiter) ──
-react_ui/node_modules/
+# ── Node.js (dépendances React/Vite – binaires spécifiques à l'OS, jamais commiter) ──
+node_modules/
+react_ui/dist/
 
 # ── Build artifacts de prepUS (généré par pip install / python setup.py build) ─
 third_party/prepUS/build/
