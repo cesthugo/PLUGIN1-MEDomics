@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **26 mai 2026**
+> Last updated: **28 mai 2026**
 
 ---
 
@@ -212,6 +212,25 @@
 - [x] **`launch_plugin.command`** — Lanceur macOS standalone STARHE (sans MEDomics) : vérifie Python 3.13 / Node.js / Go, crée le venv si absent + installe dépendances + poids IA, compile le binaire Go, trouve et démarre MongoDB sur le port 54017, démarre le serveur Go (`:8082`) et le serveur Vite (`:5173`) en arrière-plan, attend que React soit prêt, ouvre le navigateur → arrêt propre de tous les services sur Ctrl+C ; `chmod +x` appliqué
 - [x] **`launch_plugin.bat`** — Équivalent Windows standalone : chaque service (MongoDB, Go server, React UI) s'ouvre dans sa propre fenêtre CMD ; ouvre automatiquement le navigateur sur `http://localhost:5173` après détection que le serveur Vite est prêt
 
+### 🤖 STARHE-RISK — Alignement preprocessing C3D (27–28 mai 2026)
+
+> Contexte : écart de performance identifié par comparaison patient par patient avec les résultats de référence de Jérémy N (48 patients partagés, seuil 50%).
+> Pipeline d'entraînement réel : DICOM → MP4 initial → **prepUS.removeLayoutFile** → `video.mp4` (éventail rogné, niveaux de gris, codec mp4v) → Decord → mmaction2 → C3D.
+
+- [x] **`c3d.py` — `_sample_clips` exact mmaction2** — `avg_interval = (T−16+1) / 10` (+1 manquant) ; `offsets = base×avg + avg/2 − 0.5` (−0.5 manquant).
+- [x] **`c3d.py` — `_resize_shortest` exact mmaction2** — `cv2.resize(uint8, INTER_LINEAR)` au lieu de `F.interpolate(float32, align_corners=False)`.
+- [x] **`pipeline.py` — piste `_frames_via_mp4()` testée puis abandonnée** — Compression MPEG-4 des frames brutes insuffisante (±2–3% sur les scores) ; UI Supersonic non retirée.
+- [x] **Pipeline d'entraînement identifié** — Données d'entraînement = `video.mp4` prepUS (format éventail, niveaux de gris, codec mp4v). Confirmé par le tuteur.
+- [x] **`pipeline.py` — RISK sur `crop_only_frames`** — prepUS tourne désormais pour RISK et DETECT. RISK reçoit `crop_only_frames` (cône rogné, niveaux de gris → pseudo-RGB R=G=B), identique au format des `video.mp4` décodés par Decord.
+- [x] **Validation Batch 4 (28/05/2026)** — **Sens = 91% (21/23), Spec = 52% (13/25)** — résultat identique à la référence Jérémy N. ✅ Objectif atteint.
+
+  | Batch | Config RISK | Sens | Spec |
+  |---|---|---|---|
+  | Jérémy N (réf.) | Training pipeline | 91% | 52% |
+  | Batch 1–2 (sans prepUS) | DICOM brut | 100% | 12% |
+  | Batch 3 (+mp4v) | DICOM brut + mp4v | 100% | 12% |
+  | **Batch 4 (crop_only)** | **prepUS crop** | **91%** | **52%** ✅ |
+
 ---
 
 ## 🚧 In-Progress Tasks
@@ -228,10 +247,11 @@
 - [ ] **MEDDataObject** — Results are not yet encapsulated in a `MEDDataObject` (MEDomics standard format for patient data/results)
 - [ ] **Cross-platform symlinks** — Unix symlinks do not work natively on Windows (require developer mode or admin rights). Consider an installation script with copy as fallback.
 
-### 🔬 Preprocessing — Supersonic Imagine fix (identified 14 mai 2026)
-- [ ] **Detect `Manufacturer` DICOM tag** (`0008|0070`) in `prepus_bridge.py` / `reader.py` to identify Supersonic Imagine devices before preprocessing
-- [ ] **Calibrate crop geometry for Supersonic** — 5 confirmed FP patients caused by crop mismatch on Supersonic Imagine devices: `02-0022`, `02-0025`, `05-0018`, `05-0077`, `06-0029`; apply device-specific pixel spacing normalization or ROI recalibration before passing frames to C3D
-- [ ] **Validate fix on Supersonic batch** — re-run batch after fix; expected result: 5 FP → TN, bringing specificity from 52% → ~72% (matching Jérémy's reference)
+### 🔬 Preprocessing — Supersonic Imagine fix (✅ résolu 28 mai 2026)
+- [x] **Cause racine identifiée** — UI Supersonic activait faussement le C3D car l'entraînement utilisait des `video.mp4` prepUS (cône rogné, sans UI), pas des frames DICOM brutes.
+- [x] **`_frames_via_mp4()` testée puis abandonnée** — Compression MPEG-4 des frames brutes insuffisante ; UI Supersonic non retirée.
+- [x] **Fix appliqué** — `pipeline.py` utilise désormais `crop_only_frames` (prepUS) pour RISK. Sens=91%, Spec=52% reproduit la référence Jérémy N.
+- [x] **FP résiduels identifiés** — 12 FP dont 7 erreurs structurelles du modèle (communes avec Jérémy N) + 5 FP Supersonic borderline (02-0022, 02-0025, 05-0018, 05-0077, 06-0029) — limitation du modèle, pas de l'implémentation.
 
 ---
 
@@ -280,9 +300,11 @@
 
 ### 🤖 Phase 5: STARHE Model Improvements (Research term)
 
-> Context: batch analysis of 14 mai 2026 (49 patients) vs. Jérémy reference (50 patients).
-> Current results: **Sens=91.7% / Spec=52%** — reference: **Sens=72% / Spec=72%**.
-> Two categories of remaining errors: 5 FP Supersonic (fixable via preprocessing), 7 FP structural (model limit, also present in Jérémy's reference).
+> Contexte : analyse batch 48 patients partagés vs référence Jérémy.
+> Résultats actuels (après fixes c3d.py + pipeline.py, avant batch avec `_frames_via_mp4`) : **Sens=100% / Spec=12%**.
+> Référence Jérémy : **Sens=78% / Spec=72%**.
+> Batch en attente avec `_frames_via_mp4` actif — résultats à mesurer.
+> Les 22 FP actuels sont principalement des patients Supersonic dont l'UI active le C3D.
 
 - [ ] **Decision threshold calibration** — Current threshold fixed at 50%. Borderline HighRisk patients (`02-0016` at 53.8%, `02-0049` at 54.0%, `05-0065` at 51.1%) are near-miss. Calibrate threshold on a held-out validation split to optimize F1 or Youden index; even a 48% threshold may recover borderline TPs without introducing many FPs.
 

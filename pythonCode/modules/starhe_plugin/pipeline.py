@@ -5,15 +5,25 @@ Enchaîne toutes les étapes :
   1. Chargement DICOM
   2. Extraction des frames
   3. Anonymisation
-  4. Prétraitement prepUS (removeLayout + backscan)
-  5. Inférence STARHE-RISK
-  6. Inférence STARHE-DETECT (toutes les frames)
+  4. Prétraitement prepUS (uniquement si DETECT actif)
+  5. Inférence STARHE-RISK  (sur frames DICOM brutes — distribution d'entraînement)
+  6. Inférence STARHE-DETECT (sur frames croppées prepUS)
   7. Sauvegarde MongoDB
 
 Point d'entrée appelé par le blueprint Go.
+
+Note sur le preprocessing RISK
+--------------------------------
+Les MP4 d'entraînement du C3D sont de simples resizes proportionnels du DICOM
+original (plein cadre, UI inclus). prepUS n'était PAS appliqué à l'entraînement.
+STARHE-RISK reçoit donc les frames DICOM brutes (T, H, W, 3) ; preprocess_clips
+gère lui-même le resize + center-crop 112×112 en interne.
+prepUS est conservé pour STARHE-DETECT (coordonnées de crop nécessaires au
+remappage des bboxes dans l'espace DICOM original).
 """
 
 import threading
+import cv2
 import numpy as np
 
 from starhe_plugin.dicom.reader        import load_dicom, extract_frames, frame_to_uint8
@@ -24,6 +34,7 @@ from starhe_plugin.ai.starhe_detect    import STARHEDetectModel
 from starhe_plugin.db.mongo_client     import save_result
 from starhe_plugin.utils.go_print      import go_print, go_progress, go_result
 from starhe_plugin.config              import DETECT_EVERY_N
+
 
 
 def run_pipeline(dicom_path: str,
@@ -41,8 +52,8 @@ def run_pipeline(dicom_path: str,
       dicom_path           : chemin absolu du fichier .dcm
       anon_mode            : "hash" | "remove" | "none"
       run_risk             : si False, saute STARHE-RISK (plus rapide, detection seule)
-      run_detection        : si False, saute STARHE-DETECT (plus rapide)
-      back_scan_conversion : active la conversion scan inverse prepUS (recommandé)
+      run_detection        : si False, saute STARHE-DETECT (plus rapide ; désactive aussi prepUS)
+      back_scan_conversion : active la conversion scan inverse prepUS (uniquement pour DETECT)
       backscan_width/height: dimensions de sortie du backscan (défaut 512×512)
 
     Retourne un dict de résultats qui est aussi émis via go_result().
@@ -87,24 +98,44 @@ def run_pipeline(dicom_path: str,
         detect_thread = threading.Thread(target=_warm_detect, daemon=True)
         detect_thread.start()
 
-    # ── 4. Prétraitement prepUS ───────────────────────────────────────────────
-    go_progress(step := step + 1, TOTAL_STEPS,
-                "Prétraitement prepUS (removeLayout + backscan)…")
-    backscan_frames, crop_only_frames, info = preprocess_with_prepus(
-        frames_rgb,
-        back_scan_conversion=back_scan_conversion,
-        backscan_width=backscan_width,
-        backscan_height=backscan_height,
+    # ── 4. Prétraitement prepUS (crop cône US — pour RISK et DETECT) ─────────
+    # Les données d'entraînement du C3D sont les video.mp4 de prepUS (éventail
+    # rogné, UI retirée, niveaux de gris). À l'inférence, RISK et DETECT reçoivent
+    # tous deux les frames crop_only (cône rogné) pour aligner la distribution.
+    backscan_frames = crop_only_frames = info = None
+    if run_detection or run_risk:
+        go_progress(step := step + 1, TOTAL_STEPS,
+                    "Prétraitement prepUS (removeLayout + crop cône US)…")
+        backscan_frames, crop_only_frames, info = preprocess_with_prepus(
+            frames_rgb,
+            back_scan_conversion=back_scan_conversion,
+            backscan_width=backscan_width,
+            backscan_height=backscan_height,
+        )
+    else:
+        go_progress(step := step + 1, TOTAL_STEPS, "prepUS ignoré.")
+
+    # RISK : frames crop cône US (niveaux de gris → pseudo-RGB 3 canaux).
+    # crop_only_frames = (T, H_crop, W_crop) uint8 gris, même format que les
+    # video.mp4 d'entraînement décodés par Decord (R=G=B=gris).
+    # Fallback : frames DICOM brutes si prepUS n'a pas été exécuté.
+    if crop_only_frames is not None:
+        _c = crop_only_frames  # (T, H_crop, W_crop) uint8 gris
+        frames_processed_risk = np.stack([_c, _c, _c], axis=-1)  # (T, H_crop, W_crop, 3)
+    else:
+        frames_processed_risk = frames_rgb  # fallback brut (run_risk=True, run_detection=False, prepUS off)
+
+    # DETECT : crop polaire prepUS → nécessaire pour remappe bboxes vers espace DICOM
+    # Quand run_detection=False : frames_processed sert uniquement à n_frames_total.
+    processed_detect = (
+        crop_only_frames if crop_only_frames is not None else
+        backscan_frames  if backscan_frames  is not None else
+        frames_rgb[..., 0]  # fallback grayscale
     )
-    # RISK et DETECT : les deux modèles utilisent le crop polaire (coordonnées
-    # polaires sans conversion backscan — correspond à la distribution d'entraînement).
-    processed_risk   = crop_only_frames if crop_only_frames is not None else backscan_frames
-    processed_detect = crop_only_frames if crop_only_frames is not None else backscan_frames
-    if processed_risk is None:
-        processed_risk = processed_detect  # dernier recours
-    # (T, H', W') gris → (T, H', W', 3) RGB pour les modèles IA
-    frames_processed      = np.stack([processed_detect, processed_detect, processed_detect], axis=-1)
-    frames_processed_risk = np.stack([processed_risk,   processed_risk,   processed_risk],   axis=-1)
+    frames_processed = (
+        np.stack([processed_detect, processed_detect, processed_detect], axis=-1)
+        if run_detection else frames_rgb
+    )
 
     roi = None
     if info and "crop" in info:

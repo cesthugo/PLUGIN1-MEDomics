@@ -19,6 +19,7 @@ Référence :
   Networks", ICCV 2015.
 """
 
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
@@ -177,7 +178,10 @@ NUM_CLIPS   = 10   # clips de test → moyenne des probas (average_clips='prob')
 
 def _sample_clips(total: int) -> np.ndarray:
     """
-    Équivalent de SampleFrames(clip_len=16, num_clips=10, test_mode=True).
+    Reproduit exactement SampleFrames(clip_len=16, num_clips=10, test_mode=True)
+    de mmaction2 (_get_test_clips) :
+      avg_interval = (total - clip_len + 1) / num_clips   # +1
+      offsets      = base * avg + avg/2 - 0.5             # -0.5
     Retourne (NUM_CLIPS, CLIP_LEN) indices de frames dans [0, total).
     """
     if total <= 0:
@@ -187,9 +191,12 @@ def _sample_clips(total: int) -> np.ndarray:
         base = np.arange(CLIP_LEN) % total
         return np.tile(base, (NUM_CLIPS, 1))
 
-    avg_interval = max((total - CLIP_LEN) / float(NUM_CLIPS), 1.0)
-    offsets = (np.arange(NUM_CLIPS) * avg_interval
-               + avg_interval / 2.0).astype(int)
+    avg_interval = (total - CLIP_LEN + 1) / float(NUM_CLIPS)  # +1 vs ancienne formule
+    if avg_interval > 0:
+        offsets = (np.arange(NUM_CLIPS) * avg_interval
+                   + avg_interval / 2.0 - 0.5).astype(int)    # -0.5 vs ancienne formule
+    else:
+        offsets = np.zeros(NUM_CLIPS, dtype=int)
     offsets = np.clip(offsets, 0, total - CLIP_LEN)
     return np.stack([np.arange(o, o + CLIP_LEN) for o in offsets])
 
@@ -197,25 +204,18 @@ def _sample_clips(total: int) -> np.ndarray:
 def _resize_shortest(frame: np.ndarray, use_double: bool = False) -> np.ndarray:
     """Redimensionne pour que le côté court soit RESIZE_SIZE px.
 
-    Utilise F.interpolate (noyau C++ identique sur toutes les plateformes)
-    au lieu de cv2.resize dont l'implémentation SIMD diffère entre
-    x86 (AVX2, Windows) et ARM NEON (macOS Apple Silicon).
-
-    use_double=True : convertit le frame en float64 AVANT F.interpolate.
-    Les quelques ULP de différence que F.interpolate float32 introduit entre
-    x86-AVX2 et ARM-NEON disparaissent complètement en float64.
+    Identique à mmcv Resize(scale=(-1, 128)) : cv2.resize sur uint8 avec
+    INTER_LINEAR, conforme au pipeline d'entraînement mmaction2.
+    Le paramètre use_double est ignoré pour le resize (conservé pour
+    compatibilité de signature) ; la conversion float a lieu dans
+    preprocess_clips lors de la soustraction de la moyenne.
     """
     h, w = frame.shape[:2]
     if h <= w:
         nh, nw = RESIZE_SIZE, max(1, round(w * RESIZE_SIZE / h))
     else:
         nh, nw = max(1, round(h * RESIZE_SIZE / w)), RESIZE_SIZE
-    np_dtype = np.float64 if use_double else np.float32
-    t = torch.from_numpy(
-        np.ascontiguousarray(frame, dtype=np_dtype)
-    ).permute(2, 0, 1).unsqueeze(0)                    # (1, 3, H, W)
-    t = F.interpolate(t, size=(nh, nw), mode='bilinear', align_corners=False)
-    return t.squeeze(0).permute(1, 2, 0).numpy()       # (nh, nw, 3)
+    return cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
 
 
 def preprocess_clips(frames: np.ndarray, use_double: bool = False) -> torch.Tensor:
