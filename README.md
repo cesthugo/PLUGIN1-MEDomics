@@ -1,9 +1,9 @@
-﻿# STARHE Plugin — MEDomics
+# STARHE Plugin — MEDomics
 
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.5.0` — Last updated: 11 mai 2026*
+*Version `0.6.0` — Last updated: 26 mai 2026*
 
 ---
 
@@ -34,8 +34,10 @@ Two AI models are used:
 | Python | 3.13 | tkinter included; 3.14 incompatible (tkinter broken). On macOS Homebrew: `brew install python@3.13 python-tk@3.13` |
 | MongoDB | 4.x+ | Local service on port **54017** (non-standard) |
 | Go | 1.21+ | Required for the REST/SSE server |
-| Node.js | 18+ | Required for the React UI (`react_ui/`) |
+| Node.js | 18+ | Required for the React UI (`react_ui/`). `node_modules/` is **not** in the repository — installed automatically by `npm ci` on first launch |
 | CUDA (optional) | 11.8+ | GPU inference; CPU used if absent |
+
+> **DICOM compressed formats**: JPEG Baseline, JPEG Lossless, and JPEG 2000 (lossless/lossy) are all supported via `pylibjpeg` (installed automatically with `requirements.txt`). No additional system library is needed.
 
 > **AI model weights**: the `.pth` checkpoint files (~200 MB each) are **not included** in the repository. They are downloaded automatically by `run_tkinter.sh` / `run_tkinter.ps1` from the [GitHub Release STARHE_MODELS](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/STARHE_MODELS). To download them manually: `python download_models.py`.
 >
@@ -65,23 +67,67 @@ Two AI models are used:
 
 > **All commands below assume you are in the project root directory** (`PLUGIN1-MEDomics/`).
 
+### Quick Start — Double-click launchers (no terminal required)
+
+Two sets of double-clickable launchers are available at the project root. They auto-configure every dependency (venv, Go binary, React build) on first run.
+
+#### Plugin standalone — React UI + Go server (without MEDomics)
+
+| File | Platform | What it launches |
+|---|---|---|
+| `launch_plugin.command` | macOS — double-click in Finder | MongoDB `:54017` · Go server `:8082` · Vite dev server `:5173` · opens browser automatically |
+| `launch_plugin.bat` | Windows — double-click in Explorer | Same (each service opens in its own CMD window) |
+
+Both scripts: verify Python 3.13 / Node.js / Go, create the venv if absent, install Python dependencies and AI weights, compile the Go binary if absent, install React `node_modules` if absent, find and start MongoDB, then open `http://localhost:5173`. **Ctrl+C** stops all services cleanly (macOS); close the individual service windows (Windows).
+
+#### MEDomics + Plugin — Full Electron app
+
+| File | Platform | What it launches |
+|---|---|---|
+| `launch_medomics.command` | macOS — double-click in Finder | MEDomics Electron app (MongoDB + Go MEDomics + Go STARHE `:8082`) |
+| `launch_medomics.bat` | Windows — double-click in Explorer | Same |
+
+Requires the `MEDomics/` directory as a sibling of `PLUGIN1-MEDomics/`. Builds the Go binary if absent, runs `npm install` in MEDomics if absent, builds and deploys the React UI bundle if `dist/` is absent, then launches `npm run dev` in the MEDomics directory (nextron → Electron, which auto-starts MongoDB, MEDomics Go server, and the STARHE Go server).
+
+---
+
 ### 1. Launch the React UI (primary interface)
 
+**macOS / Linux:**
 ```bash
-# macOS / Linux
+# Recommended: one-command launcher (auto port detection + Go + Vite)
 ./start_react.sh
-
-# Windows PowerShell
-.\start_react.ps1
+# Go server starts on the first free port ≥ 8082 (env var STARHE_PORT)
+# Vite dev server starts on http://localhost:5173
 ```
 
-The launcher builds and starts the Go server on `http://localhost:8082`, then starts the React/Vite UI on `http://localhost:5173`.
-Logs are written to `logs/go_server.log`, `logs/react_ui.log`, and `logs/starhe_dev.log`.
+**Windows (PowerShell):**
+```powershell
+.\start_react.ps1
+# Go server starts on the first free port ≥ 8082 (env var STARHE_PORT)
+# Vite dev server starts on http://localhost:5173
+```
+
+Or manually:
+```bash
+# 1. Start the Go server
+cd go_server
+go build -o go_server . && ./go_server
+# Listening on http://localhost:8082
+
+# 2. In a separate terminal: start the Vite dev server
+cd react_ui
+npm ci    # first time only (installs from package-lock.json)
+npm run dev
+# Open http://localhost:5173
+```
 
 > **Production build**: `cd react_ui && npm run build` — outputs to `react_ui/dist/`.  
 > The `dist/` folder can be served statically by any HTTP server or embedded in an Electron shell.
 
 The React UI auto-proxies all `/starhe/*` calls to `http://localhost:8082` (configured in `vite.config.ts`). In production or Electron, set `window.__STARHE_API_BASE__ = 'http://localhost:8082'`.
+
+> **Port auto-detection**: `start_react.sh` / `start_react.ps1` auto-detects the first free TCP port ≥ 8082 and exports it as `STARHE_PORT`. Override before launching: `STARHE_PORT=9000 ./start_react.sh` (macOS/Linux) or `$env:STARHE_PORT=9000; .\start_react.ps1` (Windows).
 
 ### 2. Launch the Tkinter prototype (legacy development)
 
@@ -174,7 +220,7 @@ cd pythonCode/modules
 ```bash
 cd go_server
 go run .
-# Listens on http://localhost:8082 (PORT configurable via environment variable)
+# Listens on http://localhost:8080 (PORT configurable via environment variable)
 ```
 
 Python paths are detected **automatically** by `config.go` from the `go_server/` directory (relative path `../pythonCode/modules/…`). No environment variables are necessary if the venv was created in step 1 and the server is launched from `go_server/`.
@@ -183,7 +229,7 @@ Go server environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` / `STARHE_PORT` | `8082` | HTTP server port — `start_react.sh` auto-detects the first free port ≥ 8082 and exports it as `STARHE_PORT` |
+| `PORT` | `8082` | HTTP server port (also readable via `STARHE_PORT`) |
 | `STARHE_PYTHON_EXE` | absolute path in `config.go` | Python 3.13 from venv |
 | `STARHE_PYTHON_PATH` | absolute path in `config.go` | Root directory of Python modules |
 | `MONGO_URI` | `mongodb://localhost:54017/` | MongoDB URI |
@@ -216,18 +262,19 @@ react_ui/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
     components/
       Sidebar.tsx             → left sidebar 270 px: DICOM controls, nav, AI, results, metadata
       DicomCanvas.tsx         → main DICOM canvas (frames, bboxes, measures, brightness/contrast)
+      DicomUploader.tsx       → DICOM upload component (drag-and-drop, file picker, path input)
       DetectionGallery.tsx    → right panel 190 px: detected frames with thumbnails + SVG bboxes
       ConsolePanel.tsx        → collapsible log console at the bottom
       AdjustDialog.tsx        → floating contrast / brightness slider dialogs
       ContextMenu.tsx         → right-click context menu
       SettingsPanel.tsx       → settings overlay (font, colors, analysis mode, console toggle)
       LiveModal.tsx           → live analysis modal (C-STORE / folder / HDMI)
-      BatchModal.tsx          → batch analysis modal (multi-file, JSON/CSV export-import, open-in-tab with pre-injected bboxes)
+      BatchModal.tsx          → batch analysis modal (multi-file, export/import JSON+CSV, open-in-tab)
         │ HTTP + SSE (proxied by Vite dev server → port 8082 in dev)
         ▼
-  Go Server (port 8082)
+  Go Server (port 8082, default — auto-detected by start_react.sh / start_react.ps1 via STARHE_PORT)
   go_server/main.go           → HTTP routing + CORS middleware
-  go_server/handlers.go       → /starhe/analyze SSE, /starhe/results CRUD
+  go_server/handlers.go       → /starhe/analyze SSE, /starhe/results CRUD, /starhe/live/* (live analysis)
   go_server/handlers_dicom.go → /starhe/dicom/load (path), /starhe/dicom/upload (file), /starhe/dicom/delete
   go_server/config.go         → absolute paths via os.Executable(), env var overrides
         │ subprocess os/exec  (stdout pipe, line by line)
@@ -243,6 +290,8 @@ react_ui/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
         │       └── ai/models/_rtmdet_runner.py  (secondary subprocess)
         ├── db/mongo_client.py     → MongoDB persistence (pymongo)
         └── utils/go_print.py      → stdout protocol to Go
+  starhe_plugin/ai/run_live.py → live analysis entry point (folder / HDMI / C-STORE)
+        └── ai/live_pipeline.py   → LiveRingBuffer + LivePipeline (frame-by-frame inference)
 ```
 
 ```
@@ -252,38 +301,7 @@ Tkinter UI
   starhe_plugin/pipeline.py (same engine, run in a thread)
 ```
 
-### MEDomics integrated mode — iframe
-
-The React UI production build (`react_ui/dist/`) is deployed as a **static bundle** inside the MEDomics renderer:
-
-```
-MEDomics/renderer/public/starhe-ui/   ← cp -r react_ui/dist/. here
-MEDomics/app/starhe-ui/               ← cp -r react_ui/dist/. here (Electron main process)
-```
-
-`MEDomics/renderer/components/mainPages/starhe.jsx` renders an `<iframe src="/starhe-ui/index.html">` and, once loaded, sends a `postMessage` to configure the API base URL:
-
-```js
-// starhe.jsx
-const STARHE_API_BASE = 'http://localhost:8082'
-iframeRef.current.contentWindow.postMessage(
-  { type: 'STARHE_INIT', apiBase: STARHE_API_BASE }, '*'
-)
-```
-
-`react_ui/src/main.tsx` listens for `STARHE_INIT` and sets `window.__STARHE_API_BASE__` before mounting. All `api.ts` calls use this value at runtime, so the build is environment-agnostic.
-
-> **Why hardcoded?** The STARHE Go server always runs on port 8082. It is independent of the MEDomics main server (port 54288). Using `WorkspaceContext.port` (the MEDomics server port) caused "Failed to fetch" errors.
-
-**After any React change, redeploy:**
-```bash
-cd react_ui && npm run build
-cp -r dist/. ../MEDomics/renderer/public/starhe-ui/
-cp -r dist/. ../MEDomics/app/starhe-ui/
-cd ../MEDomics/renderer && npx next build
-```
-
-### MEDomics integrated mode — Go blueprint
+### MEDomics integrated mode
 
 ```
 MEDomics Frontend (Electron / React)
@@ -349,9 +367,7 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 | Feature | Description |
 |---|---|
 | **Multi-tab / multi-file** | Load N DICOM files concurrently; each tab stores its own independent state (frames, zoom, measures, contrast, analysis results…); analysis results are injected into the tab that launched the analysis, regardless of which tab is active when results arrive |
-| **Multi-panel split view** | Drag a tab or thumbnail card into the viewer → opens that file in a new side-by-side panel; click a panel to focus it (blue outline); sidebar and gallery target the focused panel’s file; `×` removes a panel; CSS grid auto-layout (1/2/3/4 columns); empty state shows a drag hint; patient isolation — switching to a different patient automatically removes the previous patient’s panels; splitter-drift bug fixed (render override during resize + `onPanReset` prop resets all panels) |
-| **DICOM loading** | Via absolute path (Electron / MEDomics), file picker (browser), or **folder picker** |
-| **Folder loading** | "📁 Charger un dossier DICOM" button in the sidebar — browser folder picker (`webkitdirectory`); auto-detects `.dcm`, `.dicom`, and extension-less files; loads all files sequentially |
+| **DICOM loading** | Via absolute path (Electron / MEDomics) or file upload drag-and-drop / file picker (`DicomUploader.tsx` component) |
 | **Frame viewer** | Hardware-accelerated canvas, `letter-box` fit, smooth scroll / keyboard navigation |
 | **Playback** | Variable-speed loop (0.25×→3.0×) calibrated from DICOM `FrameTime` |
 | **Pan / Zoom** | Mouse wheel zoom, middle-click drag, Ctrl+0/+/- shortcuts |
@@ -363,22 +379,31 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 | **DetectionGallery** | Right panel (190 px): scrollable list of detected frames with thumbnail + SVG bbox overlay; click to navigate |
 | **Console panel** | Collapsible log console; toggled from Settings or keyboard shortcut |
 | **Settings panel** | Font scale, font family, text/sidebar/bg colors, analysis mode, console toggle — persisted to `localStorage` |
-| **Live analysis modal** | Full port of `live_tab.py`: 3 sources (C-STORE, folder, HDMI), real-time RTMDet overlay, risk score |
+| **Live analysis modal** | 3 sources (C-STORE, folder, HDMI), real-time RTMDet overlay, risk score; backed by `run_live.py` subprocess launched by the Go server; preview frames streamed before inference → surveillance-camera behaviour |
 | **MongoDB cache** | Cached results restored instantly on re-open; "Réinitialiser l'analyse" clears the server cache |
-| **Batch analysis modal** | Multi-file sequential analysis; results table with risk score + bbox count per file; **JSON export** (full `detections_per_frame` — reloadable); **JSON import** — reload previous results without re-running inference; **CSV export**; checkboxes to open one, several, or all files in viewer tabs with detections pre-injected; fallback file picker when temp file has expired |
+| **Batch analysis modal** | Multi-file sequential analysis; results table with risk score + bbox count per file; export to JSON (with full `detections_per_frame`) or CSV; import a previous JSON to reload results without re-running inference; checkboxes to open one, several, or all files directly in viewer tabs with detections pre-injected |
+| **Folder loading** | "📁 Charger un dossier DICOM" — `webkitdirectory` picker; auto-detects `.dcm`, `.dicom`, and extension-less files |
 | **Theme** | Dark theme by default; sidebar and background colors fully configurable from Settings |
 | **Keyboard shortcuts** | Space (play/pause), ←/→ (±1 frame), Shift+←/→ (±10), Home, P/M/S/R/C/L, `+`/`-` (±speed without modifier), `Cmd+`/`Cmd-`/`Cmd+0` (zoom only), B (loop), Ctrl+Tab / Ctrl+W |
 
 ### Development workflow
 
 ```bash
-# Start Go + React together (Go is rebuilt automatically)
+# macOS / Linux — recommended one-command launch (auto port detection)
 ./start_react.sh
+```
+```powershell
+# Windows — equivalent
+.\start_react.ps1
+```
+```bash
+# Or manually (macOS / Linux):
+lsof -ti :8082 | xargs kill -9 2>/dev/null
+cd go_server && go build -o go_server . && ./go_server &
+cd react_ui && npm run dev
 
-# Type-check + production build + deploy to MEDomics
+# Type-check + production build
 cd react_ui && npm run build
-cp -r dist/. ../MEDomics/renderer/public/starhe-ui/
-cp -r dist/. ../MEDomics/app/starhe-ui/
 ```
 
 ### API surface (Go server → React)
@@ -393,6 +418,9 @@ cp -r dist/. ../MEDomics/app/starhe-ui/
 | `GET` | `/starhe/results/{id}` | One result by ObjectId |
 | `DELETE` | `/starhe/results/{id}` | Delete cached result (reset) |
 | `GET` | `/health` | Healthcheck |
+| `POST` | `/starhe/live/start` | Launch `run_live.py` subprocess → SSE stream of preview frames + detections |
+| `POST` | `/starhe/live/stop` | Stop the running live subprocess |
+| `GET` | `/starhe/live/stream` | SSE: live preview frames (base64) + detection + risk score events |
 
 ### `POST /starhe/analyze` request body
 
@@ -425,10 +453,58 @@ Steps in order:
 2. **Anonymization** — mode `"hash"` (truncated SHA-256) or `"remove"`. The 16 sensitive DICOM tags are defined in `config.DICOM_SENSITIVE_TAGS`. Anonymization is reversible on the UI side (original values are saved in memory before anonymization).
 3. **Frame Extraction** — `extract_frames()` returns `(T, H, W)` or `(T, H, W, 3)` in `uint8`.  
    At this point, the **RTMDet subprocess is launched in a background thread** so its model loading (~4 s) overlaps with the next two steps.
-4. **prepUS Preprocessing** — see dedicated section below.
-5. **STARHE-RISK** — C3D inference on the full clip.
+4. **prepUS Preprocessing** — executed whenever `run_risk=True` or `run_detection=True`. Crops the US cone and removes static UI overlays. The `crop_only_frames` output feeds STARHE-RISK; `backscan_frames` is computed in parallel for optional visualization. See dedicated section below.
+5. **STARHE-RISK** — C3D inference on `crop_only_frames` (fan-shaped sector crop, grayscale → pseudo-RGB R=G=B). This matches the training distribution: the C3D was trained on `video.mp4` files produced by prepUS (fan-shaped crop, grayscale, mp4v codec, read by Decord). See [STARHE-RISK C3D Preprocessing](#starhe-risk-c3d-preprocessing-aimodelsc3dpy) below.
 6. **STARHE-DETECT** — RTMDet frame-by-frame inference (with temporal subsampling). The subprocess is already warm by the time steps 4–5 finish.
 7. **MongoDB Save** — upsert on `file_path`.
+
+---
+
+## STARHE-RISK C3D Preprocessing (`ai/models/c3d.py`)
+
+### Training distribution alignment
+
+The C3D model (`best_acc_mean_cls_f1_epoch_14.pth`) was trained by Jérémy N on Jean Zay (IDRIS cluster) using the following pipeline:
+
+```
+DICOM → initial MP4 → prepUS.removeLayoutFile → video.mp4 (fan crop, grayscale, mp4v)
+     → Decord decode → mmaction2 preprocessing → C3D
+```
+
+The training data files (`./DATA/STARHE/CLIPS/videos/`) are the `video.mp4` outputs from prepUS:
+- Fan-shaped (sector scan, polar coordinates preserved — **not** Cartesian backscan)
+- Grayscale (single channel, `isColor=False` in OpenCV)
+- Codec: `mp4v` (MPEG-4 Part 2, via `cv2.VideoWriter`)
+- Static UI elements (text, scale bars, TGC) removed by prepUS temporal variability mask
+
+The mmaction2 config (`configs_mmaction/recognition/c3d/c3d_starhe.py`) used:
+- `SampleFrames(clip_len=16, num_clips=10, test_mode=True)` — test clip sampling
+- `Resize(scale=(-1, 128))` — proportional resize, shortest side = 128 px
+- `CenterCrop(112)` — center crop 112×112
+- `ActionDataPreprocessor(mean=[104, 117, 128], std=[1, 1, 1])` — mean subtraction
+
+At inference, `pipeline.py` therefore passes `crop_only_frames` (fan-shaped sector crop, uint8 grayscale stacked into 3 identical channels R=G=B) to the C3D — exactly what Decord produces when reading a grayscale `video.mp4`.
+
+### Fixes applied (27–28 mai 2026)
+
+Three corrections in `c3d.py` and one correction in `pipeline.py` were implemented:
+
+| Fix | Before | After |
+|---|---|---|
+| **`_sample_clips` formula** | `avg = (T−16) / 10` | `avg = (T−16+1) / 10` (mmaction2 exact: `+1`) |
+| **`_sample_clips` offset** | `base × avg + avg/2` | `base × avg + avg/2 − 0.5` (mmaction2: `−0.5`) |
+| **`_resize_shortest`** | `F.interpolate(float32, align_corners=False)` | `cv2.resize(uint8, INTER_LINEAR)` (mmaction2 exact) |
+| **RISK input** | Raw DICOM frames (full frame, UI included) | `crop_only_frames` from prepUS (fan crop, grayscale→pseudo-RGB) |
+
+### Validated results (48 patients, threshold = 50 %)
+
+| Configuration | Sens | Spec | Notes |
+|---|---|---|---|
+| Jérémy N (référence) | **91 %** (21/23) | **52 %** (13/25) | Training pipeline |
+| Notre implémentation (Batch 4, 28/05/2026) | **91 %** (21/23) | **52 %** (13/25) | ✅ Identique |
+
+2 FN persistants : 02-0019 (23 %) et 03-0038 (36 %) — probablement dans les FN de Jérémy N également.  
+12 FP : 7 erreurs structurelles du modèle (communes avec Jérémy N) + 5 FP Supersonic borderline (02-0022, 02-0025, 05-0018, 05-0077, 06-0029).
 
 ---
 
@@ -454,8 +530,8 @@ backscan_frames, crop_only_frames, info = preprocess_with_prepus(
 ```
 
 Returns a tuple `(backscan, crop_only, info_dict)`:
-- `backscan`: `(T, 512, 512)` uint8 grayscale — used for AI inference
-- `crop_only`: `(T, H_crop, W_crop)` uint8 grayscale — used for visualization
+- `backscan`: `(T, 512, 512)` uint8 grayscale — inverse scan conversion (not used for inference)
+- `crop_only`: `(T, H_crop, W_crop)` uint8 grayscale — used for AI inference (C3D and RTMDet) and visualization
 - `info_dict`: keys `crop` (xmin/ymin/xmax/ymax), backscan parameters
 
 ### Internal implementation
@@ -680,9 +756,11 @@ Defined in `ai/models/_dino_runner.py`. No server mode — each frame launches a
 
 ---
 
-## Live Streaming Pipeline (`ai/live_pipeline.py`)
+## Live Streaming Pipeline (`ai/live_pipeline.py` + `ai/run_live.py`)
 
 The live pipeline performs frame-by-frame inference on a continuous video stream. It is designed to run completely locally — no data leaves the machine.
+
+`run_live.py` is the CLI entry point launched by the Go server as a subprocess. It handles the three input sources and feeds frames into `LivePipeline`. Results are emitted over stdout using the same `GO_PRINT|level|{json}` protocol as `pipeline.py`. Preview frames are emitted immediately (before inference), so the UI can display the live feed independently of the inference rate.
 
 ### Architecture
 
@@ -893,7 +971,7 @@ delete_result(file_path)  # → bool
 | File | Role |
 |---|---|
 | `main.go` | HTTP routing, CORS middleware (`withCORS`), server startup |
-| `handlers.go` | `POST /starhe/analyze` — launches `pipeline.py`, SSE streaming of `GO_PRINT|…` lines |
+| `handlers.go` | `POST /starhe/analyze` — launches `pipeline.py`, SSE streaming of `GO_PRINT|…` lines; `POST /starhe/live/start` — launches `run_live.py`, `POST /starhe/live/stop`, `GET /starhe/live/stream` (SSE) |
 | `handlers_dicom.go` | DICOM load (path), upload (multipart), delete cache reference |
 | `config.go` | Absolute paths via `os.Executable()`, env var overrides (`STARHE_PYTHON_EXE`, `STARHE_PYTHON_PATH`, etc.) |
 
@@ -1053,6 +1131,7 @@ PLUGIN1-MEDomics/
         │   ├── starhe_risk.py        # C3D wrapper: loading + inference
         │   ├── starhe_detect.py      # RTMDet/DINO wrapper: subprocess server
         │   ├── live_pipeline.py      # Live streaming: LiveRingBuffer + LivePipeline
+        │   ├── run_live.py           # CLI entry point for live analysis (launched by Go server)
         │   └── models/
         │       ├── c3d.py            # C3D architecture in pure PyTorch (without mmaction2)
         │       ├── _rtmdet_runner.py # RTMDet runner (image mode + server mode)
@@ -1132,6 +1211,7 @@ Live streaming parameters:
 - **Tab switch during analysis**: the analysis runs in a separate thread and continues even if the source tab is closed. Results are lost if the tab is closed before completion.
 - **prepUS and backscan**: backscan only works on sector images (standard B-mode). Linear images (superficial vessels) may produce a degraded backscan — use `back_scan_conversion=False` in that case.
 - **GPU**: STARHE-RISK automatically switches to CUDA if available. STARHE-DETECT (RTMDet in subprocess) uses CPU by default; add `--device cuda` in the `_start_server()` cmd to enable GPU.
+- **RISK borderline patients**: 5 CHC− patients score between 51–68 % despite correct prepUS preprocessing (02-0022, 02-0025, 05-0018, 05-0077, 06-0029). These are structural model errors — Jérémy N's reference implementation produces the same result.
 
 ---
 

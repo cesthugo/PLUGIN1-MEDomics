@@ -12,14 +12,15 @@ Enchaîne toutes les étapes :
 
 Point d'entrée appelé par le blueprint Go.
 
-Note sur le preprocessing RISK
---------------------------------
-Les MP4 d'entraînement du C3D sont de simples resizes proportionnels du DICOM
-original (plein cadre, UI inclus). prepUS n'était PAS appliqué à l'entraînement.
-STARHE-RISK reçoit donc les frames DICOM brutes (T, H, W, 3) ; preprocess_clips
-gère lui-même le resize + center-crop 112×112 en interne.
-prepUS est conservé pour STARHE-DETECT (coordonnées de crop nécessaires au
-remappage des bboxes dans l'espace DICOM original).
+Notes sur le preprocessing
+--------------------------
+STARHE-RISK (C3D) : entraîné sur les video.mp4 de prepUS = éventail rogné,
+niveaux de gris, codec mp4v. → reçoit crop_only_frames (T, H_crop, W_crop, 3)
+avec R=G=B=gris.
+
+STARHE-DETECT (RTMDet) : entraîné sur les backscan (512×512 Cartésien) de
+prepUS. → reçoit backscan_frames (T, 512, 512, 3). Si back_scan_conversion=False,
+fallback sur crop_only_frames avec remappage simple (offset xmin/ymin).
 """
 
 import threading
@@ -125,11 +126,11 @@ def run_pipeline(dicom_path: str,
     else:
         frames_processed_risk = frames_rgb  # fallback brut (run_risk=True, run_detection=False, prepUS off)
 
-    # DETECT : crop polaire prepUS → nécessaire pour remappe bboxes vers espace DICOM
-    # Quand run_detection=False : frames_processed sert uniquement à n_frames_total.
+    # DETECT : RTMDet a été entraîné sur les frames backscan (512×512 Cartésien).
+    # Fallback sur crop_only si le backscan est désactivé (back_scan_conversion=False).
     processed_detect = (
-        crop_only_frames if crop_only_frames is not None else
         backscan_frames  if backscan_frames  is not None else
+        crop_only_frames if crop_only_frames is not None else
         frames_rgb[..., 0]  # fallback grayscale
     )
     frames_processed = (
@@ -204,16 +205,16 @@ def run_pipeline(dicom_path: str,
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")
 
-    # ── 7. Remappage crop → espace DICOM original ─────────────────────────────
-    # RTMDet reçoit les frames crop_only (espace polaire rogné) : ses bboxes sont
-    # dans cet espace. Il faut ajouter l'offset de crop (xmin, ymin) pour obtenir
-    # les coordonnées dans l'image DICOM originale affichée.
-    # On passe un info réduit à "crop" pour forcer le décalage simple (pas l'inversion
-    # polaire, qui s'appliquerait si la clé "backscan" était présente).
-    crop_only_info = {"crop": info["crop"]} if info and "crop" in info else info
+    # ── 7. Remappage backscan → espace DICOM original ────────────────────────
+    # Si RTMDet a reçu des frames backscan (512×512 Cartésien), ses bboxes sont dans
+    # l'espace backscan → transformation polaire inverse complète (info avec "backscan").
+    # Si fallback crop_only (back_scan_conversion=False), simple offset (xmin, ymin).
+    detect_remap_info = info if backscan_frames is not None else (
+        {"crop": info["crop"]} if info and "crop" in info else info
+    )
     detections_per_frame = map_detections_to_dicom_coords(
         detections_per_frame,
-        crop_only_info,
+        detect_remap_info,
         bsc_w=backscan_width,
         bsc_h=backscan_height,
     )
