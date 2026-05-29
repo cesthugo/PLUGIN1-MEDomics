@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_DIR="$SCRIPT_DIR/pythonCode/modules/starhe_plugin/.venv"
 PYTHON="$VENV_DIR/bin/python"
 MODULES="$SCRIPT_DIR/pythonCode/modules"

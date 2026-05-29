@@ -12,7 +12,7 @@
 $ErrorActionPreference = "Stop"
 
 
-$RootDir  = $PSScriptRoot
+$RootDir  = Split-Path -Parent $PSScriptRoot
 $LogDir   = Join-Path $RootDir "logs"
 $GoLog    = Join-Path $LogDir "go_server.log"
 $GoErrLog = Join-Path $LogDir "go_server.err.log"
@@ -76,7 +76,7 @@ Write-DevLog "npm trouvé : $NpmExe"
 $VenvPython = Join-Path $RootDir "pythonCode\modules\starhe_plugin\.venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
     Write-DevLog "Venv Python introuvable — lancement du setup..."
-    & "$RootDir\setup.ps1"
+    & "$RootDir\scripts\setup.ps1"
     if (-not (Test-Path $VenvPython)) {
         Write-DevLog "ERREUR: setup.ps1 n'a pas créé le venv. Consulte les logs."
         exit 1

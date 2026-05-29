@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.6.0` — Last updated: 26 mai 2026*
+*Version `0.6.0` — Last updated: 29 mai 2026*
 
 ---
 
@@ -14,7 +14,7 @@ The plug-in analyzes abdominal ultrasound DICOM cine-clips to screen for hepatoc
 | Mode | Description |
 |---|---|
 | **React UI (standalone)** | React 18 / TypeScript frontend (`react_ui/`) built with Vite, served by a standalone Go server (`go_server/`). Full DICOM viewer, AI pipeline, multi-tab, live analysis. **Current primary UI.** |
-| **Tkinter prototype** | Legacy Tkinter UI (`ui/prototype_tkinter.py`). Used for early validation before porting to React. Launched via `run_tkinter.sh`. |
+| **Tkinter prototype** | Legacy Tkinter UI (`ui/prototype_tkinter.py`). Used for early validation before porting to React. Launched via `scripts/run_tkinter.sh`. |
 | **MEDomics Integrated** | Integrates into the MEDomics platform as a *Standard Plugin*. An adapter (`run_starhe.py`) translates the `GO_PRINT|…` protocol to the MEDomics protocol (`progress*_*` / `response-ready*_*`). A Go blueprint (`starhe_blueprint.go`) registers routes in the MEDomics server. |
 | **Live Streaming** | Real-time frame-by-frame inference on a live ultrasound feed. The `LivePipeline` (`ai/live_pipeline.py`) processes incoming frames in a background thread. Three input sources: C-STORE DICOM (pynetdicom SCP), local folder watcher, USB HDMI capture card. Live modal available in the React UI. |
 
@@ -39,7 +39,7 @@ Two AI models are used:
 
 > **DICOM compressed formats**: JPEG Baseline, JPEG Lossless, and JPEG 2000 (lossless/lossy) are all supported via `pylibjpeg` (installed automatically with `requirements.txt`). No additional system library is needed.
 
-> **AI model weights**: the `.pth` checkpoint files (~200 MB each) are **not included** in the repository. They are downloaded automatically by `run_tkinter.sh` / `run_tkinter.ps1` from the [GitHub Release STARHE_MODELS](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/STARHE_MODELS). To download them manually: `python download_models.py`.
+> **AI model weights**: the `.pth` checkpoint files (~200 MB each) are **not included** in the repository. They are downloaded automatically by `scripts/run_tkinter.sh` / `scripts/run_tkinter.ps1` from the [GitHub Release STARHE_MODELS](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/STARHE_MODELS). To download them manually: `python scripts/download_models.py`.
 >
 > **Private repo — GitHub token required**: since this repository is private, downloading the weights requires a GitHub Personal Access Token.
 >
@@ -57,7 +57,7 @@ Two AI models are used:
 >    ```bash
 >    python download_models.py
 >    ```
->    Or let `run_tkinter.sh` / `run_tkinter.ps1` handle it automatically on first launch.
+>    Or let `scripts/run_tkinter.sh` / `scripts/run_tkinter.ps1` handle it automatically on first launch.
 
 > **MongoDB port 54017**: MEDomics deliberately uses a non-standard port to avoid conflicts with system MongoDB instances. This port is hardcoded in `config.py` AND in `go_server/config.go`.
 
@@ -96,14 +96,14 @@ Requires the `MEDomics/` directory as a sibling of `PLUGIN1-MEDomics/`. Builds t
 **macOS / Linux:**
 ```bash
 # Recommended: one-command launcher (auto port detection + Go + Vite)
-./start_react.sh
+./scripts/start_react.sh   # or: make react
 # Go server starts on the first free port ≥ 8082 (env var STARHE_PORT)
 # Vite dev server starts on http://localhost:5173
 ```
 
 **Windows (PowerShell):**
 ```powershell
-.\start_react.ps1
+.\scripts\start_react.ps1   # or: make react
 # Go server starts on the first free port ≥ 8082 (env var STARHE_PORT)
 # Vite dev server starts on http://localhost:5173
 ```
@@ -127,7 +127,7 @@ npm run dev
 
 The React UI auto-proxies all `/starhe/*` calls to `http://localhost:8082` (configured in `vite.config.ts`). In production or Electron, set `window.__STARHE_API_BASE__ = 'http://localhost:8082'`.
 
-> **Port auto-detection**: `start_react.sh` / `start_react.ps1` auto-detects the first free TCP port ≥ 8082 and exports it as `STARHE_PORT`. Override before launching: `STARHE_PORT=9000 ./start_react.sh` (macOS/Linux) or `$env:STARHE_PORT=9000; .\start_react.ps1` (Windows).
+> **Port auto-detection**: `scripts/start_react.sh` / `scripts/start_react.ps1` auto-detects the first free TCP port ≥ 8082 and exports it as `STARHE_PORT`. Override before launching: `STARHE_PORT=9000 ./scripts/start_react.sh` (macOS/Linux) or `$env:STARHE_PORT=9000; .\scripts\start_react.ps1` (Windows).
 
 ### 2. Launch the Tkinter prototype (legacy development)
 
@@ -142,7 +142,7 @@ Both scripts are **self-contained**: they detect Python 3.13, create the venv if
 > Then, from the project root:
 
 ```powershell
-.\run_tkinter.ps1
+.\scripts\run_tkinter.ps1   # or: make tkinter
 ```
 
 The script detects Python 3.13 on the system (via `py -3.13`, `python3.13`, or `python`), checks that tkinter is available, creates the venv if absent, installs dependencies, downloads the AI weights if absent, then launches the UI.
@@ -153,10 +153,10 @@ The script detects Python 3.13 on the system (via `py -3.13`, `python3.13`, or `
 # One-time prerequisite (macOS Homebrew only)
 brew install python@3.13 python-tk@3.13
 # Then launch the prototype from the project root (everything else is automatic)
-./run_tkinter.sh
+./scripts/run_tkinter.sh   # or: make tkinter
 ```
 
-The `run_tkinter.sh` script checks that Python 3.13 and tkinter are present, creates the venv and installs dependencies if absent, installs prepUS, downloads the AI weights if absent, then launches the UI.
+The `scripts/run_tkinter.sh` script checks that Python 3.13 and tkinter are present, creates the venv and installs dependencies if absent, installs prepUS, downloads the AI weights if absent, then launches the UI.
 
 > **macOS (Homebrew)**: Homebrew **does not include tkinter by default** — `brew install python-tk@3.13` is mandatory, otherwise the UI will fail with `ModuleNotFoundError: No module named '_tkinter'`. Verify with: `python3.13 -c "import tkinter"`.
 
@@ -272,7 +272,7 @@ react_ui/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
       BatchModal.tsx          → batch analysis modal (multi-file, export/import JSON+CSV, open-in-tab)
         │ HTTP + SSE (proxied by Vite dev server → port 8082 in dev)
         ▼
-  Go Server (port 8082, default — auto-detected by start_react.sh / start_react.ps1 via STARHE_PORT)
+  Go Server (port 8082, default — auto-detected by scripts/start_react.sh / scripts/start_react.ps1 via STARHE_PORT)
   go_server/main.go           → HTTP routing + CORS middleware
   go_server/handlers.go       → /starhe/analyze SSE, /starhe/results CRUD, /starhe/live/* (live analysis)
   go_server/handlers_dicom.go → /starhe/dicom/load (path), /starhe/dicom/upload (file), /starhe/dicom/delete
@@ -390,11 +390,11 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 
 ```bash
 # macOS / Linux — recommended one-command launch (auto port detection)
-./start_react.sh
+./scripts/start_react.sh   # or: make react
 ```
 ```powershell
 # Windows — equivalent
-.\start_react.ps1
+.\scripts\start_react.ps1   # or: make react
 ```
 ```bash
 # Or manually (macOS / Linux):
@@ -453,9 +453,9 @@ Steps in order:
 2. **Anonymization** — mode `"hash"` (truncated SHA-256) or `"remove"`. The 16 sensitive DICOM tags are defined in `config.DICOM_SENSITIVE_TAGS`. Anonymization is reversible on the UI side (original values are saved in memory before anonymization).
 3. **Frame Extraction** — `extract_frames()` returns `(T, H, W)` or `(T, H, W, 3)` in `uint8`.  
    At this point, the **RTMDet subprocess is launched in a background thread** so its model loading (~4 s) overlaps with the next two steps.
-4. **prepUS Preprocessing** — executed whenever `run_risk=True` or `run_detection=True`. Crops the US cone and removes static UI overlays. The `crop_only_frames` output feeds STARHE-RISK; `backscan_frames` is computed in parallel for optional visualization. See dedicated section below.
+4. **prepUS Preprocessing** — executed whenever `run_risk=True` or `run_detection=True`. Crops the US cone and removes static UI overlays. Both STARHE-RISK and STARHE-DETECT receive `crop_only_frames` (same distribution as training data for both models); `backscan_frames` is computed in parallel for optional visualization only. See dedicated section below.
 5. **STARHE-RISK** — C3D inference on `crop_only_frames` (fan-shaped sector crop, grayscale → pseudo-RGB R=G=B). This matches the training distribution: the C3D was trained on `video.mp4` files produced by prepUS (fan-shaped crop, grayscale, mp4v codec, read by Decord). See [STARHE-RISK C3D Preprocessing](#starhe-risk-c3d-preprocessing-aimodelsc3dpy) below.
-6. **STARHE-DETECT** — RTMDet frame-by-frame inference (with temporal subsampling). The subprocess is already warm by the time steps 4–5 finish.
+6. **STARHE-DETECT** — RTMDet inference on `crop_only_frames` (the model was trained on `cropped_videos` — fan-shaped crop, not Cartesian backscan; confirmed by `train_dataloader.data_prefix = "cropped_videos"` in `rtmdet_starhe.py`). Temporal subsampling at stride `DETECT_EVERY_N`. Bounding boxes are remapped from crop space to DICOM coordinates via simple offset (`xmin`/`ymin`). The subprocess is already warm by the time steps 4–5 finish.
 7. **MongoDB Save** — upsert on `file_path`.
 
 ---
@@ -1092,15 +1092,21 @@ This patch is applied after mmdet is imported (patch 6 in the runner), so it has
 ```
 PLUGIN1-MEDomics/
 │
-├── run_tkinter.ps1                   # Windows UI prototype launcher (auto-installs prepUS)
-├── run_tkinter.sh                    # macOS/Linux UI prototype launcher (auto-installs prepUS)
-├── setup.sh                          # macOS/Linux venv + dependencies setup (without UI)
-├── setup.ps1                         # Windows venv + dependencies setup (without UI)
+├── Makefile                          # Task runner (make setup / tkinter / react / build / help)
 ├── plugin.json                       # Plugin manifest (standalone config + MEDomics integration)
 ├── README.md                         # This file
 ├── READMEUtilisateur.md              # Tkinter interface user guide
 ├── TODOLIST.md                       # Logbook / roadmap
 ├── MEDomicsLab_LOGO.png              # Logo displayed in the UI
+│
+├── scripts/                          # Launcher and setup scripts
+│   ├── setup.sh                      # macOS/Linux venv + dependencies setup (without UI)
+│   ├── setup.ps1                     # Windows venv + dependencies setup (without UI)
+│   ├── run_tkinter.sh                # macOS/Linux UI prototype launcher (auto-installs prepUS)
+│   ├── run_tkinter.ps1               # Windows UI prototype launcher (auto-installs prepUS)
+│   ├── start_react.sh                # macOS/Linux Go + React dev launcher (auto port detection)
+│   ├── start_react.ps1               # Windows Go + React dev launcher (auto port detection)
+│   └── download_models.py            # AI weights download from GitHub Release
 │
 ├── go_server/                        # Standalone Go server (standalone mode)
 │   ├── main.go                       # HTTP routing + MongoDB init

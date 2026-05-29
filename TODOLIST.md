@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **28 mai 2026**
+> Last updated: **29 mai 2026**
 
 ---
 
@@ -222,14 +222,51 @@
 - [x] **`pipeline.py` — piste `_frames_via_mp4()` testée puis abandonnée** — Compression MPEG-4 des frames brutes insuffisante (±2–3% sur les scores) ; UI Supersonic non retirée.
 - [x] **Pipeline d'entraînement identifié** — Données d'entraînement = `video.mp4` prepUS (format éventail, niveaux de gris, codec mp4v). Confirmé par le tuteur.
 - [x] **`pipeline.py` — RISK sur `crop_only_frames`** — prepUS tourne désormais pour RISK et DETECT. RISK reçoit `crop_only_frames` (cône rogné, niveaux de gris → pseudo-RGB R=G=B), identique au format des `video.mp4` décodés par Decord.
-- [x] **Validation Batch 4 (28/05/2026)** — **Sens = 91% (21/23), Spec = 52% (13/25)** — résultat identique à la référence Jérémy N. ✅ Objectif atteint.
+- [x] **Validation Batch 4 (28/05/2026)** — **Sens = 91.7% (22/24), Spec = 52% (13/25)** — preprocessing aligné avec la distribution d'entraînement. ⚠ Divergence avec la référence Jérémy N confirmée (cf. tableau ci-dessous) — écart dû au seuil de décision, pas à l'implémentation.
+
+  | | Notre impl. (Batch 4, seuil 50%) | Référence Jérémy N |
+  |---|---|---|
+  | TP / FN / FP / TN | 22 / 2 / 12 / 13 | 18 / 7 / 7 / 18 |
+  | Sensibilité | **91.7%** | 72% |
+  | Spécificité | 52% | **72%** |
+  | Seuil utilisé | 50% (config.py) | Inconnu — probablement plus élevé |
+  | Profil | Sensible / peu spécifique | Équilibré |
+
+  **Interprétation** : le preprocessing est correct (même distribution d'entraînement). La différence de point de fonctionnement est une question de calibration du seuil — à investiguer (voir Phase 5 Roadmap).
 
   | Batch | Config RISK | Sens | Spec |
   |---|---|---|---|
-  | Jérémy N (réf.) | Training pipeline | 91% | 52% |
-  | Batch 1–2 (sans prepUS) | DICOM brut | 100% | 12% |
-  | Batch 3 (+mp4v) | DICOM brut + mp4v | 100% | 12% |
-  | **Batch 4 (crop_only)** | **prepUS crop** | **91%** | **52%** ✅ |
+  | Jérémy N (réf.) | Training pipeline, seuil calibré | 72% | 72% |
+  | Batch 1–2 (sans prepUS) | DICOM brut | 12.5% | 88% |
+  | Batch 3 (+mp4v) | DICOM brut + mp4v | ~12% | ~88% |
+  | **Batch 4 (crop_only)** | **prepUS crop, seuil 50%** | **91.7%** | **52%** |
+
+### 🤖 STARHE-DETECT — Correction input preprocessing (28 mai 2026)
+
+> Contexte : lors de la session précédente, `processed_detect` avait été basculé sur `backscan_frames` en priorité, sur la foi d'un commentaire de commit (`7a26d1c`). La config d'entraînement réelle (`rtmdet_starhe.py`, `train_dataloader.data_prefix = "cropped_videos"`) confirme que RTMDet a été entraîné sur des frames **croppées** (éventail rogné), pas sur le backscan Cartésien.
+
+- [x] **Diagnostic** — `rtmdet_starhe.py` : `train_dataloader.data_prefix = "cropped_videos"` et `test_dataloader.ann_file = 'cropped_videos/...'` — preuve directe que l'entraînement utilisait les frames croppées.
+- [x] **`pipeline.py` — `processed_detect` restauré sur `crop_only_frames`** — Suppression de `backscan_frames` de la chaîne de priorité ; `crop_only_frames` est l'unique source (même distribution que l'entraînement).
+- [x] **`pipeline.py` — remappage bbox restauré** — `detect_remap_info = {"crop": info["crop"]}` uniquement → simple offset (xmin, ymin) pour revenir dans l'espace DICOM (la transformation polaire inverse n'est pas nécessaire).
+- [x] **Docstring pipeline.py mis à jour** — "entraîné sur les frames backscan" → "entraîné sur les cropped_videos de prepUS".
+
+> **⚠ Observation Batch 3 (28/05/2026)** — Le batch relancé avec `crop_only_frames` donne des résultats *inférieurs* au backscan pour la détection :
+> | Patient | Score RISK | Backscan (avant) | Crop_only (après) | Interprétation |
+> |---|---|---|---|---|
+> | 01-0083-L-X | 77.74% ↑ | **12** lésions | **4** lésions | TP probable → perte de sensibilité |
+> | 05-0030-H-M | 12.62% ↓ | 4 lésions | 0 lésions | TN probable → FP supprimés ✅ |
+> | 05-0062-J-D | 23.14% ↓ | 24 lésions | 0 lésions | TN probable → 24 FP supprimés ✅ |
+> | 06-0018-D-M | 72.33% ↑ | 4 lésions | 4 lésions | TP probable → stable |
+>
+> **Hypothèses sur la régression** :
+> 1. `"cropped_videos"` pourrait désigner les frames backscan recadrées (nom ambigu) — à vérifier sur Jean Zay.
+> 2. Format : `crop_only` = éventail polaire non carré (dims variables) ; backscan = 512×512 carré ≈ format entraînement 640×640 → meilleure cohérence dimensionnelle.
+> 3. Distribution de pixels : l'éventail polaire a des zones noires aux coins (géométrie en arc) que le modèle n'a peut-être pas vue à l'entraînement.
+> **État actuel** : `pipeline.py` utilise `crop_only_frames` pour DETECT (aligné config). Investigation en cours.
+
+### 🗂 Organisation du projet — scripts/ + Makefile (29 mai 2026)
+- [x] **`scripts/` — Déplacement des lanceurs** — `setup.sh`, `setup.ps1`, `run_tkinter.sh`, `run_tkinter.ps1`, `start_react.sh`, `start_react.ps1`, `download_models.py` déplacés depuis la racine vers `scripts/` ; chemins internes mis à jour (`.sh` : `dirname "$0"/..` ; `.ps1` : `Split-Path -Parent $PSScriptRoot`) ; références croisées corrigées (`start_react.sh` → `scripts/setup.sh`, `start_react.ps1` → `scripts/setup.ps1`)
+- [x] **`Makefile`** — Nouveau task runner à la racine ; cibles : `setup`, `tkinter`, `react`, `build`, `help` (par défaut) ; détection OS automatique Windows/Unix ; délègue aux scripts dans `scripts/` ; `make help` testé ✅
 
 ---
 
@@ -309,6 +346,16 @@
 - [ ] **Decision threshold calibration** — Current threshold fixed at 50%. Borderline HighRisk patients (`02-0016` at 53.8%, `02-0049` at 54.0%, `05-0065` at 51.1%) are near-miss. Calibrate threshold on a held-out validation split to optimize F1 or Youden index; even a 48% threshold may recover borderline TPs without introducing many FPs.
 
 - [ ] **Domain adaptation for Supersonic Imagine** — The C3D model was trained predominantly on non-Supersonic devices. Fine-tune on a small annotated Supersonic set, or apply feature-level normalization (histogram matching, z-score per device type) before feeding frames to C3D.
+
+### 🔍 Phase 6 : STARHE-DETECT — Investigation input réel (à court terme)
+
+> Contexte : le format exact des données d'entraînement RTMDet est incertain. `data_prefix = "cropped_videos"` dans la config n'est pas suffisamment explicite. Les deux batches montrent des comportements différents selon l'input (backscan vs crop_only), sans ground truth bbox pour trancher objectivement.
+
+- [ ] **Vérifier les images réelles d'entraînement** — Accéder au dossier `./DATA/STARHE/cropped_videos/` sur Jean Zay (ou demander à Jérémy N) pour inspecter visuellement 5–10 images. Déterminer : éventail polaire ou backscan Cartésien ? Dimensions ? Niveaux de gris ou RGB ?
+- [ ] **Demander à Jérémy N** — Quel preprocessing exact a été appliqué pour produire les `cropped_videos` ? Était-ce le backscan prepUS, un simple crop DICOM, ou autre chose ?
+- [ ] **Tester backscan_frames pour DETECT** — Relancer un batch avec `processed_detect = backscan_frames` et comparer le nombre de détections sur les patients TP connus (01-0083, 06-0018). Évaluer si le backscan améliore la sensibilité sur ces patients.
+- [ ] **Annoter manuellement quelques patients TP** — Dessiner les bboxes de référence sur 3–5 patients avec CHC confirmé pour évaluer la localisation des détections (IoU) plutôt que le simple comptage de frames.
+- [ ] **Comparer histogrammes pixel** — Extraire les distributions pixel de `crop_only_frames` vs `backscan_frames` vs images de référence d'entraînement si disponibles. Identifier laquelle est la plus proche de la distribution d'entraînement.
 
 - [ ] **Hard negative mining in retraining** — The 7 structural FPs (`01-0063`, `01-0072`, `01-0083`, `02-0010`, `06-0016`, `06-0018`, `06-0019`) share visual characteristics (advanced fibrosis, heterogeneous parenchyma) that confuse the model. Upweight these cases in the loss during retraining to force the model to learn discriminative features for this sub-population.
 

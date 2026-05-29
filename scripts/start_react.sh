@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$ROOT_DIR/logs"
 GO_LOG="$LOG_DIR/go_server.log"
 REACT_LOG="$LOG_DIR/react_ui.log"
@@ -62,7 +62,7 @@ fi
 # ── Vérification venv Python ─────────────────────────────────────────────────
 if [[ ! -f "$VENV_PYTHON" ]]; then
   log "Venv Python introuvable — lancement du setup..."
-  bash "$ROOT_DIR/setup.sh"
+  bash "$ROOT_DIR/scripts/setup.sh"
   if [[ ! -f "$VENV_PYTHON" ]]; then
     log "ERREUR: setup.sh n'a pas créé le venv. Consulte les logs."
     exit 1

@@ -18,9 +18,9 @@ STARHE-RISK (C3D) : entraîné sur les video.mp4 de prepUS = éventail rogné,
 niveaux de gris, codec mp4v. → reçoit crop_only_frames (T, H_crop, W_crop, 3)
 avec R=G=B=gris.
 
-STARHE-DETECT (RTMDet) : entraîné sur les backscan (512×512 Cartésien) de
-prepUS. → reçoit backscan_frames (T, 512, 512, 3). Si back_scan_conversion=False,
-fallback sur crop_only_frames avec remappage simple (offset xmin/ymin).
+STARHE-DETECT (RTMDet) : entraîné sur les cropped_videos de prepUS (éventail
+rogné, UI retirée). → reçoit crop_only_frames (T, H_crop, W_crop, 3).
+Remappage : simple offset (xmin/ymin) pour revenir dans l'espace DICOM.
 """
 
 import threading
@@ -126,10 +126,9 @@ def run_pipeline(dicom_path: str,
     else:
         frames_processed_risk = frames_rgb  # fallback brut (run_risk=True, run_detection=False, prepUS off)
 
-    # DETECT : RTMDet a été entraîné sur les frames backscan (512×512 Cartésien).
-    # Fallback sur crop_only si le backscan est désactivé (back_scan_conversion=False).
+    # DETECT : RTMDet a été entraîné sur les frames crop (cropped_videos de prepUS).
+    # Utilise crop_only_frames, identique à la distribution d'entraînement.
     processed_detect = (
-        backscan_frames  if backscan_frames  is not None else
         crop_only_frames if crop_only_frames is not None else
         frames_rgb[..., 0]  # fallback grayscale
     )
@@ -205,13 +204,9 @@ def run_pipeline(dicom_path: str,
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")
 
-    # ── 7. Remappage backscan → espace DICOM original ────────────────────────
-    # Si RTMDet a reçu des frames backscan (512×512 Cartésien), ses bboxes sont dans
-    # l'espace backscan → transformation polaire inverse complète (info avec "backscan").
-    # Si fallback crop_only (back_scan_conversion=False), simple offset (xmin, ymin).
-    detect_remap_info = info if backscan_frames is not None else (
-        {"crop": info["crop"]} if info and "crop" in info else info
-    )
+    # ── 7. Remappage crop → espace DICOM original ──────────────────────────────
+    # RTMDet prédit des bboxes dans l'espace crop_only → simple offset (xmin, ymin).
+    detect_remap_info = {"crop": info["crop"]} if info and "crop" in info else info
     detections_per_frame = map_detections_to_dicom_coords(
         detections_per_frame,
         detect_remap_info,

@@ -3,11 +3,12 @@
 # installe les dependances et prepUS, puis lance l interface.
 # Aucune configuration manuelle requise apres avoir installe Python 3.13.
 
-$VENV_DIR     = "$PSScriptRoot\pythonCode\modules\starhe_plugin\.venv"
+$ROOT          = Split-Path -Parent $PSScriptRoot
+$VENV_DIR     = "$ROOT\pythonCode\modules\starhe_plugin\.venv"
 $PYTHON       = "$VENV_DIR\Scripts\python.exe"
-$MODULES      = "$PSScriptRoot\pythonCode\modules"
-$PREPUS       = "$PSScriptRoot\third_party\prepUS"
-$REQUIREMENTS = "$PSScriptRoot\pythonCode\modules\starhe_plugin\requirements.txt"
+$MODULES      = "$ROOT\pythonCode\modules"
+$PREPUS       = "$ROOT\third_party\prepUS"
+$REQUIREMENTS = "$ROOT\pythonCode\modules\starhe_plugin\requirements.txt"
 
 # -- 1. Trouver Python 3.13 sur le systeme ------------------------------------
 # On stocke l executable et ses arguments separement pour eviter les problemes
@@ -114,12 +115,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # -- 5. Telecharger les poids IA si absents -----------------------------------
-$MODELS_DIR = "$PSScriptRoot\pythonCode\modules\starhe_plugin\models"
+$MODELS_DIR = "$ROOT\pythonCode\modules\starhe_plugin\models"
 $RISK_PTH   = "$MODELS_DIR\best_acc_mean_cls_f1_epoch_14.pth"
 $DET_PTH    = "$MODELS_DIR\best_coco_bbox_mAP_50_iter_2100.pth"
 if (-not (Test-Path $RISK_PTH) -or -not (Test-Path $DET_PTH)) {
     Write-Host "Poids IA manquants - telechargement depuis GitHub Releases..."
-    & $PYTHON "$PSScriptRoot\download_models.py"
+    & $PYTHON "$ROOT\download_models.py"
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Echec du telechargement des poids IA."
         exit 1

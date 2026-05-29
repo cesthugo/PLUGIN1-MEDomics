@@ -11,11 +11,12 @@
 
 $ErrorActionPreference = "Stop"
 
-$VENV_DIR     = "$PSScriptRoot\pythonCode\modules\starhe_plugin\.venv"
+$ROOT         = Split-Path -Parent $PSScriptRoot
+$VENV_DIR     = "$ROOT\pythonCode\modules\starhe_plugin\.venv"
 $PYTHON       = "$VENV_DIR\Scripts\python.exe"
 $PIP          = "$VENV_DIR\Scripts\pip.exe"
-$REQUIREMENTS = "$PSScriptRoot\pythonCode\modules\starhe_plugin\requirements.txt"
-$PREPUS       = "$PSScriptRoot\third_party\prepUS"
+$REQUIREMENTS = "$ROOT\pythonCode\modules\starhe_plugin\requirements.txt"
+$PREPUS       = "$ROOT\third_party\prepUS"
 
 # -- 1. Trouver Python 3.13 ---------------------------------------------------
 $PYTHON_SYS_EXE  = $null
