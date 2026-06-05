@@ -101,6 +101,20 @@ DETERMINISTIC_INFERENCE: bool = True
 #         le chemin d'entraînement de Jérémy sur la même plateforme.
 PREPUS_BYPASS_MP4: bool = False
 
+# ── Décodage DICOM via weasis-dcm2png ────────────────────────────────────────
+# `pydicom.pixel_array` n'applique ni la Modality LUT ni la VOI LUT du DICOM,
+# alors que le pipeline d'entraînement de Jérémy passait par Weasis (LUT
+# appliquées) → PNG → ffmpeg → prepUS. Activer ce flag reproduit la phase
+# Weasis (LUT) pour réduire la divergence avec la distribution d'entraînement.
+#
+# True  : DICOM → java -jar weasis-dcm2png → PNG → numpy. Nécessite Java sur
+#         le PATH + le JAR vendorisé (third_party/weasis-dcm2png/dist/).
+#         Fallback automatique vers pydicom si Java/JAR absent ou si weasis
+#         échoue (ex. JPEG 2000 non supporté par le JAR actuel).
+# False : pydicom direct via extract_frames(ds) — comportement historique,
+#         pas de LUT appliquée, pas de sous-processus Java.
+USE_WEASIS_EXPORT: bool = True
+
 # ── Seuil de décision STARHE-RISK ────────────────────────────────────────────
 # Probabilité minimale (classe 1 = risque élevé) pour qualifier un patient
 # de « Risque élevé ».

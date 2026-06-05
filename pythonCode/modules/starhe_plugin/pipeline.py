@@ -27,9 +27,10 @@ import threading
 import cv2
 import numpy as np
 
-from starhe_plugin.dicom.reader        import load_dicom, extract_frames, frame_to_uint8
-from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus, preprocess_with_prepus_inmem, map_detections_to_dicom_coords
-from starhe_plugin.config import PREPUS_BYPASS_MP4
+from starhe_plugin.dicom.reader         import load_dicom, extract_frames, frame_to_uint8
+from starhe_plugin.dicom.weasis_bridge  import weasis_available, frames_via_weasis
+from starhe_plugin.dicom.prepus_bridge  import preprocess_with_prepus, preprocess_with_prepus_inmem, map_detections_to_dicom_coords
+from starhe_plugin.config import PREPUS_BYPASS_MP4, USE_WEASIS_EXPORT
 from starhe_plugin.dicom.anonymizer    import anonymize
 from starhe_plugin.ai.starhe_risk      import STARHERiskModel
 from starhe_plugin.ai.starhe_detect    import STARHEDetectModel
@@ -81,14 +82,29 @@ def run_pipeline(dicom_path: str,
 
     # ── 3. Extraction des frames ──────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Extraction des frames…")
-    frames_raw = extract_frames(ds)   # (T, H, W) ou (T, H, W, 3)
 
-    # Normalise → (T, H, W, 3) uint8 RGB (format attendu par preprocess_with_prepus)
-    frames_norm = np.stack([frame_to_uint8(f) for f in frames_raw])   # (T, H, W) uint8
-    if frames_norm.ndim == 3:
-        frames_rgb = np.stack([frames_norm] * 3, axis=-1)   # (T, H, W, 3)
-    else:
-        frames_rgb = frames_norm   # (T, H, W, 3)
+    frames_rgb: np.ndarray | None = None
+
+    # Chemin préféré : weasis-dcm2png (Modality LUT + VOI LUT comme à
+    # l'entraînement). Fallback automatique vers pydicom si JAR/JVM absent
+    # ou si la transfer syntax n'est pas supportée par weasis (ex. JPEG 2000).
+    if USE_WEASIS_EXPORT and weasis_available():
+        try:
+            frames_rgb, weasis_fps = frames_via_weasis(dicom_path)
+            if weasis_fps > 0:
+                dicom_fps = weasis_fps   # privilégier la valeur lue par weasis
+        except Exception as exc:
+            go_print("warning",
+                     f"weasis-dcm2png a échoué ({exc}) — fallback pydicom")
+            frames_rgb = None
+
+    if frames_rgb is None:
+        frames_raw  = extract_frames(ds)   # (T, H, W) ou (T, H, W, 3)
+        frames_norm = np.stack([frame_to_uint8(f) for f in frames_raw])
+        if frames_norm.ndim == 3:
+            frames_rgb = np.stack([frames_norm] * 3, axis=-1)   # (T, H, W, 3)
+        else:
+            frames_rgb = frames_norm   # (T, H, W, 3)
 
     # ── Préchauffage DETECT en arrière-plan ───────────────────────────────────
     # Le subprocess RTMDet charge le modèle (~3-5 s). On le démarre dès maintenant

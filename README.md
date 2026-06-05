@@ -35,6 +35,7 @@ Two AI models are used:
 | MongoDB | 4.x+ | Local service on port **54017** (non-standard) |
 | Go | 1.21+ | Required for the REST/SSE server |
 | Node.js | 18+ | Required for the React UI (`react_ui/`). `node_modules/` is **not** in the repository — installed automatically by `npm ci` on first launch |
+| Java (optional) | 17+ | Activates the `weasis-dcm2png` path (DICOM → PNG with Modality/VOI LUT applied, aligned with training distribution). Without Java, the pipeline falls back to `pydicom` transparently. macOS: `brew install openjdk@17`. |
 | CUDA (optional) | 11.8+ | GPU inference; CPU used if absent |
 
 > **DICOM compressed formats**: JPEG Baseline, JPEG Lossless, and JPEG 2000 (lossless/lossy) are all supported via `pylibjpeg` (installed automatically with `requirements.txt`). No additional system library is needed.
@@ -451,7 +452,7 @@ Steps in order:
 
 1. **DICOM Loading** — `load_dicom()` with `pydicom force=True` (supports files without extension).
 2. **Anonymization** — mode `"hash"` (truncated SHA-256) or `"remove"`. The 16 sensitive DICOM tags are defined in `config.DICOM_SENSITIVE_TAGS`. Anonymization is reversible on the UI side (original values are saved in memory before anonymization).
-3. **Frame Extraction** — `extract_frames()` returns `(T, H, W)` or `(T, H, W, 3)` in `uint8`.  
+3. **Frame Extraction** — preferred path: `frames_via_weasis()` (subprocess Java → PNG with Modality + VOI LUT, controlled by `USE_WEASIS_EXPORT` flag). Automatic fallback to `extract_frames()` (pydicom) if Java/JAR absent or transfer syntax unsupported by Weasis (notably JPEG 2000). Output: `(T, H, W, 3)` uint8 RGB.  
    At this point, the **RTMDet subprocess is launched in a background thread** so its model loading (~4 s) overlaps with the next two steps.
 4. **prepUS Preprocessing** — executed whenever `run_risk=True` or `run_detection=True`. Crops the US cone and removes static UI overlays. Both STARHE-RISK and STARHE-DETECT receive `crop_frames` (fan-shaped sector crop, same distribution as training data for both models). See dedicated section below.
 5. **STARHE-RISK** — C3D inference on `crop_only_frames` (fan-shaped sector crop, grayscale → pseudo-RGB R=G=B). This matches the training distribution: the C3D was trained on `video.mp4` files produced by prepUS (fan-shaped crop, grayscale, mp4v codec, read by Decord). See [STARHE-RISK C3D Preprocessing](#starhe-risk-c3d-preprocessing-aimodelsc3dpy) below.
@@ -601,16 +602,78 @@ Le mode B est strictement équivalent algorithmiquement à `removeLayoutFile(...
 
 > **Warning**: prepUS must be installed with `--no-deps` to avoid conflicts with the venv's OpenCV version. The `run_tkinter.ps1` script handles this automatically.
 
-### Automated DICOM pipeline (without Weasis)
+---
 
-`test_dicom_pipeline.py` at the project root implements the full pipeline from a raw DICOM file:
+## Décodage DICOM via weasis-dcm2png (`dicom/weasis_bridge.py`)
+
+### Pourquoi
+
+`pydicom.pixel_array` ne dépose **ni la Modality LUT, ni la VOI LUT** du fichier DICOM. Le pipeline d'entraînement de Jérémy passait par **Weasis** (viewer DICOM clinique open-source), qui applique ces deux LUT — exactement comme un radiologue voit l'image sur sa console. Faire la même chose à l'inférence rapproche la distribution d'entrée de celle vue à l'entraînement.
+
+### Comment
+
+Un mini-projet Java **vendorisé** dans [third_party/weasis-dcm2png/](third_party/weasis-dcm2png/) (pom.xml + `Dcm2Png.java` + JAR + libs natives OpenCV/DCM4CHE) expose un CLI headless :
+
+```bash
+java -Djava.library.path=third_party/weasis-dcm2png/dist/native \
+     --enable-native-access=ALL-UNNAMED \
+     -jar third_party/weasis-dcm2png/dist/weasis-dcm2png.jar \
+     /path/to/file.dcm /out/dir/
+# stdout: fps=<float> / frames=<int>
+# /out/dir/ : un PNG par frame, LUT appliquées
+```
+
+Le bridge Python [dicom/weasis_bridge.py](pythonCode/modules/starhe_plugin/dicom/weasis_bridge.py) expose :
+
+| Fonction | Rôle |
+|---|---|
+| `weasis_available() -> bool` | Vérifie présence du JAR + JVM fonctionnelle (`java -version`) |
+| `export_dicom_to_pngs_weasis(dicom, out_dir) -> (fps, n_frames)` | Subprocess Java, parse stdout |
+| `frames_via_weasis(dicom, work_dir=None) -> (frames_rgb, fps)` | DICOM → PNG → numpy `(T, H, W, 3)` uint8, cleanup auto |
+
+### Branchement dans le pipeline
+
+L'étape 3 de [pipeline.py](pythonCode/modules/starhe_plugin/pipeline.py) tente Weasis en premier puis retombe automatiquement sur pydicom :
+
+```python
+if USE_WEASIS_EXPORT and weasis_available():
+    try:
+        frames_rgb, weasis_fps = frames_via_weasis(dicom_path)
+        if weasis_fps > 0:
+            dicom_fps = weasis_fps      # privilégier la valeur reportée par Weasis
+    except Exception as exc:
+        go_print("warning", f"weasis-dcm2png échoué ({exc}) — fallback pydicom")
+        frames_rgb = None
+
+if frames_rgb is None:
+    # Chemin historique : extract_frames(ds) + frame_to_uint8
+    ...
+```
+
+Flag dans `config.py` :
+
+| Constante | Défaut | Effet |
+|---|---|---|
+| `USE_WEASIS_EXPORT` | `True` | Active la chaîne Weasis avec fallback pydicom automatique |
+
+**Cas de fallback** :
+- Java absent du PATH (`shutil.which("java")` retourne `None`)
+- JVM non fonctionnelle (sur macOS, `/usr/bin/java` est un stub installeur → installer une vraie JVM, ex. `brew install openjdk@17`)
+- Transfer syntax non supportée par le JAR (notamment **JPEG 2000** — pris en charge par pydicom via pylibjpeg)
+- Subprocess Java exit ≠ 0 ou stdout vide
+
+Le fallback est silencieux côté UI (warning dans la console SSE) et conserve le comportement antérieur bit-à-bit. Le flag est conservateur (par défaut `True` mais aucune régression si Java manque).
+
+### Script de validation hors UI (`test_dicom_pipeline.py`)
+
+`test_dicom_pipeline.py` à la racine du projet exécute la chaîne complète DICOM → Weasis → ffmpeg MP4 → prepUS → C3D + RTMDet hors React/Go, utile pour reproduire un cas et comparer le score de risque à celui du runtime :
 
 ```bash
 python test_dicom_pipeline.py /path/to/file.dcm            # RISK + DETECT
-python test_dicom_pipeline.py /path/to/file.dcm --no-detect  # RISK only
+python test_dicom_pipeline.py /path/to/file.dcm --no-detect  # RISK seul
 ```
 
-Steps: `pydicom` → PNG export → `ffmpeg` MP4 (fps from `FrameTime` tag) → `prepUS` → STARHE C3D + RTMDet. This is the programmatic equivalent of the manual Weasis PNG export workflow (Weasis has no headless REST API for PNG/MP4 export).
+Si le JAR ou Java manque, le script bascule lui aussi sur le chemin pydicom (mêmes règles que `pipeline.py`).
 
 ---
 

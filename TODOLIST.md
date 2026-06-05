@@ -333,7 +333,20 @@
 - [x] **`react_ui/src/StarhePlugin/index.tsx`** — imports `OrthancBrowser` + `OrthancLoadedResult`, state `showOrthanc`, prop `onOpenOrthanc` sur `<Sidebar>`, bloc modal complet (~40 lignes) retirés
 - [x] **`react_ui/src/StarhePlugin/components/Sidebar.tsx`** — prop `onOpenOrthanc` (déclaration + destructuration + bouton `🏥 Navigateur Orthanc PACS`) retirée ; padding du bouton Batch (devenu dernier de la section) promu à `10px`
 - [x] **Vérifications** — `go build ./...` 0 erreur ; aucune nouvelle erreur TS sur les fichiers touchés ; `TODOLIST.md` section Orthanc marquée `❌ retiré (5 juin 2026)` avec justification
-- [ ] **À venir** — intégration `weasis-dcm2png` pour la conversion DICOM → PNG/MP4 (un script `test_weasis_pipeline.py` existe déjà à la racine comme point de départ)
+- [x] **Intégration `weasis-dcm2png` runtime (5 juin 2026)** — voir section dédiée ci-dessous
+
+### 🔬 Intégration `weasis-dcm2png` dans le pipeline runtime (5 juin 2026)
+
+> Contexte : `pydicom.pixel_array` n'applique ni Modality LUT ni VOI LUT, alors que le pipeline d'entraînement de Jérémy passait par Weasis (LUT appliquées). On câble la même chaîne DICOM → PNG (LUT) → numpy au runtime, avec fallback automatique sur pydicom si Java/JAR absent ou si la transfer syntax n'est pas supportée par le JAR (ex. JPEG 2000).
+
+- [x] **Mini-projet Java vendorisé** — `third_party/weasis-dcm2png/` : `pom.xml` + `src/main/java/org/starhe/Dcm2Png.java` + `dist/weasis-dcm2png.jar` (~2.6 MB) + `dist/native/libopencv_java4130.dylib` (~15 MB). Build Maven (`mvn package`) déjà effectué, artefacts commités → pas de Maven requis côté utilisateur.
+- [x] **`dicom/weasis_bridge.py`** — Nouveau bridge Python : `weasis_available()` (test JAR + `java -version`), `export_dicom_to_pngs_weasis(dicom, out_dir) -> (fps, n_frames)` (subprocess Java avec `-Djava.library.path=…/native` + `--enable-native-access=ALL-UNNAMED`, parse `fps=…` / `frames=…` sur stdout), `frames_via_weasis(dicom, work_dir=None) -> (frames_rgb (T,H,W,3) uint8, fps)` (lit les PNG via PIL, dossier temp auto-nettoyé via `tempfile.mkdtemp` + `shutil.rmtree`).
+- [x] **`config.py` — flag `USE_WEASIS_EXPORT`** — défaut `True`, avec commentaire FR multi-lignes (modèle `PREPUS_BYPASS_MP4`) : décrit le trade-off LUT vs Java prérequis et le fallback pydicom automatique.
+- [x] **`pipeline.py` — branchement étape 3** — `if USE_WEASIS_EXPORT and weasis_available(): try frames_via_weasis(dicom_path)` ; en cas de succès, `dicom_fps` est écrasé par la valeur reportée par Weasis (plus fiable que le tag `FrameTime` quand Weasis lit le DICOM directement) ; en cas d'échec (subprocess exit ≠ 0, ou exception Python), `go_print('warning', …)` puis chemin pydicom historique (`extract_frames` + `frame_to_uint8` + stack RGB).
+- [x] **`dicom/__init__.py`** — exports ajoutés : `weasis_available`, `frames_via_weasis`.
+- [x] **README.md — prérequis Java** — nouvelle ligne dans le tableau (Java 17+, optionnel, `brew install openjdk@17` sur macOS) ; section dédiée « Décodage DICOM via weasis-dcm2png » avec le tableau d'API du bridge et les 4 cas de fallback documentés (Java absent, JVM stub macOS, JPEG 2000, subprocess exit ≠ 0).
+- [x] **Smoke test** — imports OK ; sur la machine actuelle `weasis_available() == False` car `/usr/bin/java` est le stub installeur macOS → fallback pydicom actif comme attendu, pipeline fonctionne normalement. Vérifié : `from starhe_plugin.pipeline import run_pipeline` n'introduit aucune régression.
+- [x] **`loader_cli.py` non modifié** — la route `/starhe/dicom/load` (display-only, pas d'inférence en aval) reste sur pydicom : pas besoin de la LUT pour l'affichage et coût d'un subprocess Java évité à chaque chargement UI.
 
 ---
 ### �🗂 Organisation du projet — scripts/ + Makefile (29 mai 2026)
@@ -369,7 +382,9 @@
 ### � Décisions en attente (5 juin 2026)
 
 - [ ] **Basculer `PREPUS_BYPASS_MP4 = True` par défaut dans `config.py`** — Le mode bypass est strictement meilleur sur les 3 métriques mesurées (MAE 0.122 → 0.103, accord 85.7 % → 89.8 %, accuracy 63.3 % → 67.3 %) et élimine la non-portabilité cross-OS de `cv2.VideoWriter(mp4v)`. En attente de la validation explicite de l'utilisateur pour modifier le défaut.
-- [ ] **Intégration `weasis-dcm2png`** — Remplace la pile Orthanc retirée le 5 juin. Un script d'amorce `test_weasis_pipeline.py` existe déjà à la racine. À câbler ensuite dans le flux Go (équivalent de l'ancien `/starhe/orthanc/load`) et/ou en tant qu'étape amont de `test_dicom_pipeline.py` pour les DICOM Weasis-natifs.
+- [x] **Intégration `weasis-dcm2png` runtime** — ✅ fait le 5 juin 2026 : bridge Python + flag `USE_WEASIS_EXPORT` + branchement `pipeline.py` étape 3 avec fallback pydicom automatique. Voir section dédiée plus haut.
+- [ ] **Installer une JVM réelle sur les postes de prod** — Le smoke test du 5 juin montre que `/usr/bin/java` sur macOS est un stub installeur → le pipeline tombe en fallback pydicom. `brew install openjdk@17` (macOS) ou paquet OpenJDK 17+ (Linux/Windows) activera le chemin Weasis et alignera la distribution d'entrée avec celle d'entraînement (LUT appliquées).
+- [ ] **Mesurer le gain Weasis vs pydicom** — Une fois Java installé, refaire la comparaison MAE/accuracy sur les 49 patients de Jérémy avec `USE_WEASIS_EXPORT=True` vs `False`. Hypothèse : gain incrémental sur les DICOM dont la VOI LUT n'est pas l'identité (typiquement Supersonic / Canon).
 
 ### �🔬 Phase 1: Backend Validation (Short term)
 

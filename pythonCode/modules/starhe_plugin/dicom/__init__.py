@@ -4,6 +4,7 @@ from starhe_plugin.dicom.crop            import (detect_ultrasound_roi,
                                                   detect_ultrasound_roi_temporal,
                                                   crop_frame, crop_clip)
 from starhe_plugin.dicom.prepus_bridge   import preprocess_with_prepus, preprocess_with_prepus_inmem
+from starhe_plugin.dicom.weasis_bridge   import weasis_available, frames_via_weasis
 from starhe_plugin.dicom.anonymizer      import anonymize, remove_pixel_burnin
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "detect_ultrasound_roi", "detect_ultrasound_roi_temporal", "crop_frame", "crop_clip",
     "preprocess_with_prepus",
     "preprocess_with_prepus_inmem",
+    "weasis_available", "frames_via_weasis",
     "anonymize", "anonymize_file", "remove_pixel_burnin",
 ]
