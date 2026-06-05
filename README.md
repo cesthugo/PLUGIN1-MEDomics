@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.6.0` — Last updated: 29 mai 2026*
+*Version `0.6.0` — Last updated: 2 juin 2026*
 
 ---
 
@@ -453,7 +453,7 @@ Steps in order:
 2. **Anonymization** — mode `"hash"` (truncated SHA-256) or `"remove"`. The 16 sensitive DICOM tags are defined in `config.DICOM_SENSITIVE_TAGS`. Anonymization is reversible on the UI side (original values are saved in memory before anonymization).
 3. **Frame Extraction** — `extract_frames()` returns `(T, H, W)` or `(T, H, W, 3)` in `uint8`.  
    At this point, the **RTMDet subprocess is launched in a background thread** so its model loading (~4 s) overlaps with the next two steps.
-4. **prepUS Preprocessing** — executed whenever `run_risk=True` or `run_detection=True`. Crops the US cone and removes static UI overlays. Both STARHE-RISK and STARHE-DETECT receive `crop_only_frames` (same distribution as training data for both models); `backscan_frames` is computed in parallel for optional visualization only. See dedicated section below.
+4. **prepUS Preprocessing** — executed whenever `run_risk=True` or `run_detection=True`. Crops the US cone and removes static UI overlays. Both STARHE-RISK and STARHE-DETECT receive `crop_frames` (fan-shaped sector crop, same distribution as training data for both models). See dedicated section below.
 5. **STARHE-RISK** — C3D inference on `crop_only_frames` (fan-shaped sector crop, grayscale → pseudo-RGB R=G=B). This matches the training distribution: the C3D was trained on `video.mp4` files produced by prepUS (fan-shaped crop, grayscale, mp4v codec, read by Decord). See [STARHE-RISK C3D Preprocessing](#starhe-risk-c3d-preprocessing-aimodelsc3dpy) below.
 6. **STARHE-DETECT** — RTMDet inference on `crop_only_frames` (the model was trained on `cropped_videos` — fan-shaped crop, not Cartesian backscan; confirmed by `train_dataloader.data_prefix = "cropped_videos"` in `rtmdet_starhe.py`). Temporal subsampling at stride `DETECT_EVERY_N`. Bounding boxes are remapped from crop space to DICOM coordinates via simple offset (`xmin`/`ymin`). The subprocess is already warm by the time steps 4–5 finish.
 7. **MongoDB Save** — upsert on `file_path`.
@@ -506,6 +506,24 @@ Three corrections in `c3d.py` and one correction in `pipeline.py` were implement
 2 FN persistants : 02-0019 (23 %) et 03-0038 (36 %) — probablement dans les FN de Jérémy N également.  
 12 FP : 7 erreurs structurelles du modèle (communes avec Jérémy N) + 5 FP Supersonic borderline (02-0022, 02-0025, 05-0018, 05-0077, 06-0029).
 
+### Validation du port C3D — comparaison contre mmaction2 (3 juin 2026)
+
+Pour isoler le C3D du reste de la chaîne (lecture DICOM → prepUS → décodage MP4 → preprocessing → modèle), on a :
+
+1. **Pré-généré 49 crops `video.mp4` une seule fois** (déterministe) avec `prepUS.removeLayoutFile` à partir des MP4 d'entraînement de Jérémy (`VIDEO TESTING BATCH MP4/`) → `/tmp/crops_fixed/<PID>/video.mp4`.
+2. **Exécuté la référence mmaction2** (`init_recognizer` + `inference_recognizer`) avec la config et le checkpoint d'origine de Jérémy, dans un venv Python 3.10 dédié (`/tmp/mmaction_env/`: torch 2.1.2 + mmcv-lite 2.1.0 + mmaction2 1.2.0 + eva-decord).
+3. **Exécuté notre C3D PyTorch pur** sur exactement les mêmes `video.mp4`.
+
+Résultats (`/tmp/ref_scores.json` vs `/tmp/ours_scores.json`, score "high risk", N=49) :
+
+| Comparaison | Mean Δ | MAE | Max\|Δ\| | Accord label (seuil 0.5) |
+|---|---|---|---|---|
+| **Nous vs Ref mmaction2** (mêmes crops) | −0.0003 | **0.013** | 0.052 | **47/49 (96 %)** |
+| Ref mmaction2 vs Jérémy (cached preds) | +0.036 | 0.111 | 0.531 | 43/49 |
+| Nous vs Jérémy | +0.036 | 0.109 | 0.529 | 43/49 |
+
+**Conclusion** : notre port pytorch du C3D est validé bit-near du C3D mmaction2 de référence (MAE 1.3 %, biais ≈ 0). Les 4 % de divergence restants proviennent du décodage vidéo (cv2 vs Decord du même `video.mp4`). Les 6 patients en désaccord avec Jérémy (`01-0096`, `02-0049`, `03-0022`, `05-0009`, `05-0021`, `05-0077`) **sont également en désaccord avec la référence mmaction2 sur les mêmes crops** : le résidu vient donc des crops prepUS (non-déterminisme entre les crops actuels et ceux générés à l'entraînement de Jérémy), pas du modèle.
+
 ---
 
 ## prepUS Preprocessing (`dicom/prepus_bridge.py`)
@@ -521,29 +539,40 @@ prepUS is the ultrasound image preprocessor from MEDomics. It is **vendored** in
 ### Code usage
 
 ```python
-backscan_frames, crop_only_frames, info = preprocess_with_prepus(
-    frames_rgb,                 # (T, H, W, 3) uint8 RGB
-    back_scan_conversion=True,
+crop_frames, info = preprocess_with_prepus(
+    frames_rgb,          # (T, H, W, 3) uint8 RGB
+    fps=dicom_fps,
     backscan_width=512,
     backscan_height=512,
 )
 ```
 
-Returns a tuple `(backscan, crop_only, info_dict)`:
-- `backscan`: `(T, 512, 512)` uint8 grayscale — inverse scan conversion (not used for inference)
-- `crop_only`: `(T, H_crop, W_crop)` uint8 grayscale — used for AI inference (C3D and RTMDet) and visualization
-- `info_dict`: keys `crop` (xmin/ymin/xmax/ymax), backscan parameters
+Returns a 2-tuple `(crop_frames, info_dict)`:
+- `crop_frames`: `(T, H_crop, W_crop)` uint8 grayscale — fan-shaped sector crop (`video.mp4` from prepUS), used for both C3D and RTMDet inference
+- `info_dict`: keys `crop` (xmin/ymin/xmax/ymax) — used to remap RTMDet bboxes back to DICOM coordinates
+
+> **Note** : the backscan (Cartesian 512×512 reconstruction) is no longer computed. Both models were trained on fan-shaped crop data (`video.mp4` / `cropped_videos`), not on Cartesian backscan. Removing the backscan step simplifies the bridge without affecting inference quality.
 
 ### Internal implementation
 
-1. Export numpy frames → temporary MP4 (OpenCV `VideoWriter`)
+1. Export numpy frames → temporary MP4 (OpenCV `VideoWriter`, codec `mp4v`, grayscale)
 2. Call `prepUS.cli.removeLayoutFile(mp4, out_dir, back_scan_conversion=True, ...)`
-3. Read `out_dir/backscan_video.mp4` → numpy
-4. Read `out_dir/video.mp4` (crop without backscan) → numpy
-5. Read `out_dir/infos.json` → ROI dict
-6. Cleanup of temporary directory
+3. Read `out_dir/video.mp4` (fan-shaped crop) → numpy `(T, H_crop, W_crop)`
+4. Read `out_dir/info.json` → ROI dict
+5. Cleanup of temporary directory
 
 > **Warning**: prepUS must be installed with `--no-deps` to avoid conflicts with the venv's OpenCV version. The `run_tkinter.ps1` script handles this automatically.
+
+### Automated DICOM pipeline (without Weasis)
+
+`test_dicom_pipeline.py` at the project root implements the full pipeline from a raw DICOM file:
+
+```bash
+python test_dicom_pipeline.py /path/to/file.dcm            # RISK + DETECT
+python test_dicom_pipeline.py /path/to/file.dcm --no-detect  # RISK only
+```
+
+Steps: `pydicom` → PNG export → `ffmpeg` MP4 (fps from `FrameTime` tag) → `prepUS` → STARHE C3D + RTMDet. This is the programmatic equivalent of the manual Weasis PNG export workflow (Weasis has no headless REST API for PNG/MP4 export).
 
 ---
 

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="maven-antrun-" default="main">
+  <target name="main">
+    <mkdir dir="/Users/hugo/Desktop/STAGE/PLUGIN1-MEDomics/third_party/weasis-dcm2png/dist/native" />
+    <copy file="/Users/hugo/Desktop/STAGE/PLUGIN1-MEDomics/third_party/weasis-dcm2png/target/weasis-dcm2png.jar" todir="/Users/hugo/Desktop/STAGE/PLUGIN1-MEDomics/third_party/weasis-dcm2png/dist" overwrite="true" />
+    <copy todir="/Users/hugo/Desktop/STAGE/PLUGIN1-MEDomics/third_party/weasis-dcm2png/dist/native" overwrite="true">
+      <fileset dir="/Users/hugo/Desktop/STAGE/PLUGIN1-MEDomics/third_party/weasis-dcm2png/target/native" />
+    </copy>
+    <exec failonerror="false" dir="/Users/hugo/Desktop/STAGE/PLUGIN1-MEDomics/third_party/weasis-dcm2png/dist/native" executable="ln" osfamily="unix">
+      <arg value="-sf" />
+      <arg value="libopencv_java4130.dylib" />
+      <arg value="libopencv_java.dylib" />
+    </exec>
+  </target>
+</project>

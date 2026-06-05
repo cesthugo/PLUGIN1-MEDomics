@@ -152,6 +152,8 @@ export interface SidebarProps {
   onLoadDicom:      () => void;
   /** Sélection manuelle de fichiers DICOM individuels */
   onLoadDicomFiles: () => void;
+  /** Chargement direct d'un fichier MP4 */
+  onLoadMp4?:       () => void;
   /** Chargement direct par chemin absolu (mode dev navigateur, hors Electron) */
   onLoadPath:       (path: string) => void;
   onPrevFrame:      () => void;
@@ -166,6 +168,7 @@ export interface SidebarProps {
   onResetAnalysis:  () => void;
   onOpenLive:       () => void;
   onOpenBatch:      () => void;
+  onOpenOrthanc:    () => void;
   onGotoFrame:      (idx: number) => void;
   onToggleTheme:    () => void;
 }
@@ -181,6 +184,7 @@ export function Sidebar({
   onAnalysisModeChange,
   onLoadDicom,
   onLoadDicomFiles,
+  onLoadMp4,
   onLoadPath,
   onPrevFrame,
   onNextFrame,
@@ -194,6 +198,7 @@ export function Sidebar({
   onResetAnalysis,
   onOpenLive,
   onOpenBatch,
+  onOpenOrthanc,
   onGotoFrame,
   onToggleTheme,
 }: SidebarProps) {
@@ -266,6 +271,26 @@ export function Sidebar({
             <span style={{ fontSize: 9, color: '#475569', flex: 1, textAlign: 'center' }}>Dossier entier</span>
             <span style={{ fontSize: 9, color: '#475569', width: 36, textAlign: 'center' }}>Fichiers</span>
           </div>
+          {/* Bouton MP4 */}
+          {onLoadMp4 && (
+            <div style={{ marginTop: 5 }}>
+              <button
+                onClick={onLoadMp4}
+                title="Charger un fichier MP4 directement (sans DICOM)"
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 6,
+                  background: '#141e14', border: '1px solid #1e3d1e',
+                  borderRadius: 5, color: '#7ed87e', fontSize: 12, fontWeight: 600,
+                  padding: '6px 10px', cursor: 'pointer',
+                  transition: 'background 0.12s, border-color 0.12s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#1a3020'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#22c55e'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#141e14'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#1e3d1e'; }}
+              >
+                <span style={{ fontSize: 14 }}>📹</span> Charger MP4
+              </button>
+            </div>
+          )}
         </div>
         {/* Saisie chemin direct — visible uniquement hors Electron (dev navigateur) */}
         {!isElectron && (
@@ -462,8 +487,11 @@ export function Sidebar({
         <div style={{ padding: '0 10px 4px' }}>
           <SBtn onClick={onOpenLive} accent>📡   Analyse en direct</SBtn>
         </div>
-        <div style={{ padding: '0 10px 10px' }}>
+        <div style={{ padding: '0 10px 4px' }}>
           <SBtn onClick={onOpenBatch} accent>📋   Analyse en lot (batch)</SBtn>
+        </div>
+        <div style={{ padding: '0 10px 10px' }}>
+          <SBtn onClick={onOpenOrthanc} accent>🏥   Navigateur Orthanc PACS</SBtn>
         </div>
 
         {/* RÉSULTATS */}

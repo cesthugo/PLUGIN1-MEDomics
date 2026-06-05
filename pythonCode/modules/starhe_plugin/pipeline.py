@@ -28,7 +28,8 @@ import cv2
 import numpy as np
 
 from starhe_plugin.dicom.reader        import load_dicom, extract_frames, frame_to_uint8
-from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus, map_detections_to_dicom_coords
+from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus, preprocess_with_prepus_inmem, map_detections_to_dicom_coords
+from starhe_plugin.config import PREPUS_BYPASS_MP4
 from starhe_plugin.dicom.anonymizer    import anonymize
 from starhe_plugin.ai.starhe_risk      import STARHERiskModel
 from starhe_plugin.ai.starhe_detect    import STARHEDetectModel
@@ -66,6 +67,13 @@ def run_pipeline(dicom_path: str,
     go_progress(step := step + 1, TOTAL_STEPS, "Chargement DICOM…")
     ds = load_dicom(dicom_path)
 
+    # Extraire le FPS réel depuis le tag FrameTime (0018,1063) en ms/frame.
+    # Utilisé pour l'export MP4 intermédiaire passé à prepUS, afin d'aligner
+    # la temporalité du clip avec le pipeline d'entraînement (Weasis → ffmpeg).
+    _frame_time_ms = float(getattr(ds, "FrameTime", 0.0))
+    dicom_fps = (1000.0 / _frame_time_ms) if _frame_time_ms > 0 else 22.0
+    go_print("info", f"FPS DICOM : {dicom_fps:.2f} fps (FrameTime={_frame_time_ms} ms)")
+
     # ── 2. Anonymisation ──────────────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Anonymisation des métadonnées…")
     if anon_mode != "none":
@@ -100,42 +108,30 @@ def run_pipeline(dicom_path: str,
         detect_thread.start()
 
     # ── 4. Prétraitement prepUS (crop cône US — pour RISK et DETECT) ─────────
-    # Les données d'entraînement du C3D sont les video.mp4 de prepUS (éventail
-    # rogné, UI retirée, niveaux de gris). À l'inférence, RISK et DETECT reçoivent
-    # tous deux les frames crop_only (cône rogné) pour aligner la distribution.
-    backscan_frames = crop_only_frames = info = None
+    crop_only_frames = info = None
     if run_detection or run_risk:
+        _prepus_fn = preprocess_with_prepus_inmem if PREPUS_BYPASS_MP4 else preprocess_with_prepus
+        _mode_tag  = "in-mem numpy" if PREPUS_BYPASS_MP4 else "MP4 roundtrip"
         go_progress(step := step + 1, TOTAL_STEPS,
-                    "Prétraitement prepUS (removeLayout + crop cône US)…")
-        backscan_frames, crop_only_frames, info = preprocess_with_prepus(
+                    f"Prétraitement prepUS (removeLayout + crop cône US — {_mode_tag})…")
+        crop_only_frames, info = _prepus_fn(
             frames_rgb,
-            back_scan_conversion=back_scan_conversion,
+            fps=dicom_fps,
             backscan_width=backscan_width,
             backscan_height=backscan_height,
         )
     else:
         go_progress(step := step + 1, TOTAL_STEPS, "prepUS ignoré.")
 
-    # RISK : frames crop cône US (niveaux de gris → pseudo-RGB 3 canaux).
-    # crop_only_frames = (T, H_crop, W_crop) uint8 gris, même format que les
-    # video.mp4 d'entraînement décodés par Decord (R=G=B=gris).
-    # Fallback : frames DICOM brutes si prepUS n'a pas été exécuté.
+    # RISK et DETECT : frames crop cône US (niveaux de gris → pseudo-RGB 3 canaux).
+    # Identique aux video.mp4 d'entraînement décodés par Decord (R=G=B=gris).
     if crop_only_frames is not None:
         _c = crop_only_frames  # (T, H_crop, W_crop) uint8 gris
         frames_processed_risk = np.stack([_c, _c, _c], axis=-1)  # (T, H_crop, W_crop, 3)
     else:
-        frames_processed_risk = frames_rgb  # fallback brut (run_risk=True, run_detection=False, prepUS off)
+        frames_processed_risk = frames_rgb
 
-    # DETECT : RTMDet a été entraîné sur les frames crop (cropped_videos de prepUS).
-    # Utilise crop_only_frames, identique à la distribution d'entraînement.
-    processed_detect = (
-        crop_only_frames if crop_only_frames is not None else
-        frames_rgb[..., 0]  # fallback grayscale
-    )
-    frames_processed = (
-        np.stack([processed_detect, processed_detect, processed_detect], axis=-1)
-        if run_detection else frames_rgb
-    )
+    frames_processed = frames_processed_risk
 
     roi = None
     if info and "crop" in info:
@@ -206,12 +202,9 @@ def run_pipeline(dicom_path: str,
 
     # ── 7. Remappage crop → espace DICOM original ──────────────────────────────
     # RTMDet prédit des bboxes dans l'espace crop_only → simple offset (xmin, ymin).
-    detect_remap_info = {"crop": info["crop"]} if info and "crop" in info else info
     detections_per_frame = map_detections_to_dicom_coords(
         detections_per_frame,
-        detect_remap_info,
-        bsc_w=backscan_width,
-        bsc_h=backscan_height,
+        info,
     )
     if any(d for d in detections_per_frame):
         go_print("info", "Détections remappées vers l'espace original.")

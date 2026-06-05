@@ -10,7 +10,7 @@
 //  - Actions : addTab, openBatchResultAsTab, switchTab, closeTab, updateActiveTab
 
 import { useCallback, useRef, useState } from 'react';
-import { loadDicom, loadDicomFile, makeTabLabel } from '../api';
+import { loadDicom, loadDicomFile, loadMp4, loadMp4File, makeTabLabel } from '../api';
 import type { TabState, Patient, DicomData, LogLevel } from '../types';
 import type { BatchResultToOpen } from '../components/BatchModal';
 import { nextTabId } from '../utils';
@@ -59,6 +59,7 @@ export interface TabManagerResult {
   activePatientIdx:  number;
   // Actions
   addTab:               (displayName: string, dicomPath: string, data: DicomData) => void;
+  addMp4Tab:            (displayName: string, serverPath: string, data: DicomData) => void;
   openBatchResultAsTab: (result: BatchResultToOpen) => Promise<number>;
   switchTab:            (tabId: number) => void;
   closeTab:             (tabId: number) => void;
@@ -126,9 +127,64 @@ export function useTabManager({
     addLog(`DICOM chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
-  /** Charge un DICOM depuis un résultat batch et retourne l'ID du nouvel onglet */
+  const addMp4Tab = useCallback((
+    displayName: string,
+    serverPath:  string,
+    data:        DicomData,
+  ) => {
+    const label = displayName.replace(/\.[^.]+$/, '').slice(0, 20);
+    const newTab: TabState = { ...makeDefaultTab(), label, patientName: 'Vidéo MP4', dicomPath: serverPath, isMp4: true, data };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+    setPatients(prev => upsertPatient(prev, 'Vidéo MP4', newTab.id));
+    setActivePatientName('Vidéo MP4');
+    addLog(`MP4 chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
+  }, [addLog]);
+
+  /** Charge un fichier (DICOM ou MP4) depuis un résultat batch et retourne l'ID du nouvel onglet */
   const openBatchResultAsTab = useCallback(async (result: BatchResultToOpen): Promise<number> => {
     addLog(`Chargement : ${result.name}`, 'info');
+
+    if (result.isMp4) {
+      // ── Cas MP4 ────────────────────────────────────────────────────────────
+      let data: Awaited<ReturnType<typeof loadMp4>>;
+      try {
+        data = await loadMp4(result.serverPath);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (result.file && /introuvable|not found|no such file/i.test(msg)) {
+          addLog(`Fichier temporaire MP4 expiré — re-upload de ${result.name}…`, 'info');
+          data = await loadMp4File(result.file);
+        } else {
+          throw err;
+        }
+      }
+      const label = result.name.replace(/\.mp4$/i, '').slice(0, 20);
+      const newTab: TabState = {
+        ...makeDefaultTab(),
+        label,
+        patientName: 'Vidéo MP4',
+        dicomPath:   result.serverPath,
+        isMp4:       true,
+        data,
+        detectionsBy: result.detections?.length ? { original: result.detections } : {},
+        resultsBy: result.risk ? {
+          original: {
+            riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
+            riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
+            detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lésion(s)`,
+            detFg:    '#facc15',
+          },
+        } : {},
+      };
+      setTabs(prev => [...prev, newTab]);
+      setPatients(prev => upsertPatient(prev, 'Vidéo MP4', newTab.id));
+      setActivePatientName('Vidéo MP4');
+      addLog(`MP4 chargé avec résultats — ${data.frameCount} frame(s).`, 'success');
+      return newTab.id;
+    }
+
+    // ── Cas DICOM ─────────────────────────────────────────────────────────────
     let data: Awaited<ReturnType<typeof loadDicom>>;
     try {
       data = await loadDicom(result.serverPath);
@@ -214,7 +270,7 @@ export function useTabManager({
   return {
     tabs, activeTabId, patients, activePatientName,
     activeTab, activeTabIdx, activePatientIdx,
-    addTab, openBatchResultAsTab,
+    addTab, addMp4Tab, openBatchResultAsTab,
     switchTab, closeTab, updateActiveTab, updateTabById,
     setActiveTabId, setActivePatientName,
   };

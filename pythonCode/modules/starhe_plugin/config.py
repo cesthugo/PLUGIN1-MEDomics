@@ -88,6 +88,19 @@ INFERENCE_DEVICE = "auto"
 # Coût : ~2–3× plus lent sur CPU.  Désactiver (False) pour la prod rapide.
 DETERMINISTIC_INFERENCE: bool = True
 
+# ── Bypass roundtrip MP4 dans prepUS ─────────────────────────────────────────
+# `cv2.VideoWriter(mp4v)` produit un bitstream dépendant du binaire FFmpeg lié
+# à OpenCV (macOS ARM Homebrew ≠ Linux ≠ Windows). Le pipeline standard écrit
+# `input.mp4` puis relit `video.mp4`, ce qui rend les crops C3D non-portables
+# entre OS pour le MÊME DICOM d'entrée.
+#
+# True  : calcul prepUS 100 % numpy (preprocess_with_prepus_inmem). Sortie
+#         identique bit-à-bit cross-plateforme. Léger écart vs distribution
+#         d'entraînement (qui a vu des crops avec artefacts mp4v).
+# False : pipeline historique (preprocess_with_prepus) — reproduit exactement
+#         le chemin d'entraînement de Jérémy sur la même plateforme.
+PREPUS_BYPASS_MP4: bool = False
+
 # ── Seuil de décision STARHE-RISK ────────────────────────────────────────────
 # Probabilité minimale (classe 1 = risque élevé) pour qualifier un patient
 # de « Risque élevé ».

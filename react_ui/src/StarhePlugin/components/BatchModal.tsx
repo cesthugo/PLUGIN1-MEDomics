@@ -9,7 +9,7 @@
 // À la fin, un tableau récapitulatif affiche risk score + nb lésions / fichier.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { loadDicom, loadDicomFile, streamAnalysis } from '../api';
+import { loadDicom, loadDicomFile, loadMp4File, streamAnalysis } from '../api';
 import type { AnalyzeRequest } from '../api';
 import type { Detection } from '../types';
 import {
@@ -44,6 +44,8 @@ interface BatchItem {
   numFrames?:  number;
   /** ROI crop retourné par le pipeline */
   roi?:        unknown;
+  /** true si ce fichier est un MP4 (pas un DICOM) */
+  isMp4?:      boolean;
 }
 
 let _id = 1;
@@ -136,6 +138,8 @@ export interface BatchResultToOpen {
   roi?:        unknown;
   /** Objet File original du navigateur — permet de re-uploader si le fichier temp a expiré */
   file?:       File;
+  /** true si ce résultat provient d'un fichier MP4 (pas DICOM) */
+  isMp4?:      boolean;
 }
 
 export interface BatchModalProps {
@@ -172,25 +176,40 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     const lname = f.name.toLowerCase();
     return lname.endsWith('.dcm') || lname.endsWith('.dicom') || !lname.includes('.');
   };
+  const isMp4File = (f: File) => f.name.toLowerCase().endsWith('.mp4');
 
   // ── Ajout de fichiers (upload navigateur) ──────────────────────────────────
   const onFileDrop = useCallback((files: FileList | null) => {
     if (!files) return;
-    const dicomFiles = Array.from(files).filter(isDicomFile);
-    const skipped = Array.from(files).length - dicomFiles.length;
-    const newItems: BatchItem[] = dicomFiles.map(f => ({
-      id: uid(), name: f.name, serverPath: '', file: f,
-      status: 'waiting' as ItemStatus, progress: 'En attente',
-    }));
-    if (skipped > 0 && dicomFiles.length === 0) {
-      // tous les fichiers ont été ignorés — feedback visuel géré par le compteur
-    }
+    const all = Array.from(files);
+    const dicomFiles = all.filter(isDicomFile);
+    const mp4Files   = all.filter(isMp4File);
+    const newItems: BatchItem[] = [
+      ...dicomFiles.map(f => ({
+        id: uid(), name: f.name, serverPath: '', file: f, isMp4: false,
+        status: 'waiting' as ItemStatus, progress: 'En attente',
+      })),
+      ...mp4Files.map(f => ({
+        id: uid(), name: f.name, serverPath: '', file: f, isMp4: true,
+        status: 'waiting' as ItemStatus, progress: 'En attente',
+      })),
+    ];
     setItems(prev => [
       ...prev,
       ...newItems.filter(ni => !prev.some(ex => ex.name === ni.name)),
     ]);
     setDone(false);
   }, []);
+
+  // ── Sélection de fichiers MP4 ──────────────────────────────────────────────
+  const onPickMp4Files = useCallback(() => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.multiple = true;
+    inp.accept = '.mp4,video/mp4';
+    inp.onchange = () => onFileDrop(inp.files);
+    inp.click();
+  }, [onFileDrop]);
 
   // ── Ajout d'un dossier entier (navigateur) ────────────────────────────────
   const onPickFolder = useCallback(() => {
@@ -224,11 +243,16 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
   const processItem = useCallback(async (item: BatchItem, batchModeSnap: typeof batchMode) => {
     if (cancelledRef.current) return;
 
-    // 1. Chargement DICOM
-    update(item.id, { status: 'loading', progress: 'Chargement DICOM…' });
+    // 1. Chargement du fichier
+    update(item.id, { status: 'loading', progress: item.isMp4 ? 'Chargement MP4…' : 'Chargement DICOM…' });
     let serverPath = item.serverPath;
     try {
-      if (item.file) {
+      if (item.isMp4) {
+        if (!item.file) throw new Error('fichier MP4 manquant (upload requis)');
+        const data = await loadMp4File(item.file);
+        serverPath = data.serverPath || item.name;
+        update(item.id, { serverPath });
+      } else if (item.file) {
         const data = await loadDicomFile(item.file);
         serverPath = data.serverPath || item.name;
         update(item.id, { serverPath });
@@ -245,13 +269,20 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
 
     // 2. Analyse SSE
     update(item.id, { status: 'analyzing', progress: 'Démarrage de l\'analyse…' });
-    const req: AnalyzeRequest = {
-      dicomPath:          serverPath,
-      anonMode:           'hash',
-      runRisk:            batchModeSnap !== 'detect_only',
-      runDetection:       batchModeSnap !== 'risk_only',
-      backScanConversion: true,
-    };
+    const req: AnalyzeRequest = item.isMp4
+      ? {
+          mp4Path:            serverPath,
+          runRisk:            batchModeSnap !== 'detect_only',
+          runDetection:       batchModeSnap !== 'risk_only',
+          backScanConversion: true,
+        }
+      : {
+          dicomPath:          serverPath,
+          anonMode:           'hash',
+          runRisk:            batchModeSnap !== 'detect_only',
+          runDetection:       batchModeSnap !== 'risk_only',
+          backScanConversion: true,
+        };
 
     await new Promise<void>((resolve) => {
       let riskScore:  number | undefined;
@@ -575,22 +606,33 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
               inp.click();
             }}
           >
-            📂  Glisser-déposer des fichiers DICOM ici, ou cliquer pour sélectionner
+            📂  Glisser-déposer des fichiers DICOM ou MP4 ici, ou cliquer pour sélectionner
             <div style={{ fontSize: 11, marginTop: 4, color: '#4a5568' }}>
-              Accepte : <code>.dcm</code> · <code>.dicom</code> · fichiers sans extension (ex : A0000)
+              Accepte : <code>.dcm</code> · <code>.dicom</code> · fichiers sans extension (ex : A0000) · <code>.mp4</code>
             </div>
           </div>
-          <div style={{ marginBottom: 10 }}>
+          <div style={{ marginBottom: 10, display: 'flex', gap: 6 }}>
             <button
               onClick={onPickFolder}
               style={{
-                width: '100%', background: '#0a0e18',
+                flex: 1, background: '#0a0e18',
                 border: `1px dashed ${CARD_BORDER}`, borderRadius: 6,
                 padding: '7px 16px', color: SBAR_MUTED, fontSize: 12,
                 cursor: 'pointer', textAlign: 'center',
               }}
             >
-              📁  Charger un dossier entier — détecte automatiquement tous les fichiers DICOM
+              📁  Charger un dossier DICOM
+            </button>
+            <button
+              onClick={onPickMp4Files}
+              style={{
+                flex: 1, background: '#0a0e18',
+                border: `1px dashed ${CARD_BORDER}`, borderRadius: 6,
+                padding: '7px 16px', color: SBAR_MUTED, fontSize: 12,
+                cursor: 'pointer', textAlign: 'center',
+              }}
+            >
+              📹  Charger des MP4
             </button>
           </div>
 
@@ -750,7 +792,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                   detections: it.detections,
                   risk: it.riskScore !== undefined ? { score: it.riskScore, label: it.riskLabel ?? '' } : undefined,
                   numFrames: it.numFrames, roi: it.roi,
-                  file: it.file,
+                  file: it.file, isMp4: it.isMp4,
                 });
                 const openAll = () => {
                   const results = doneItems.map(toResult);

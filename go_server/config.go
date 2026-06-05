@@ -25,6 +25,11 @@ type appConfig struct {
 	MongoURI        string
 	MongoDatabase   string
 	MongoCollection string
+
+	// Orthanc PACS (optionnel)
+	OrthancURL      string // URL de base du serveur Orthanc (ex : http://localhost:8042)
+	OrthancUser     string // Identifiant pour l'authentification basique (vide = désactivée)
+	OrthancPassword string // Mot de passe pour l'authentification basique
 }
 
 // serverDir renvoie le répertoire absolu de l'exécutable Go (go_server/).
@@ -56,6 +61,10 @@ var cfg = appConfig{
 	MongoURI:        envOr("MONGO_URI", "mongodb://localhost:54017/"),
 	MongoDatabase:   envOr("MONGO_DB", "medomics"),
 	MongoCollection: envOr("MONGO_COLL", "starhe_results"),
+
+	OrthancURL:      envOr("ORTHANC_URL", "http://localhost:8042"),
+	OrthancUser:     envOr("ORTHANC_USER", ""),
+	OrthancPassword: envOr("ORTHANC_PASSWORD", ""),
 }
 
 func envOr(key, fallback string) string {

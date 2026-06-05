@@ -107,7 +107,62 @@ function mapDicomResponse(json: DicomLoadResponse): DicomData {
   };
 }
 
+/**
+ * Charge un fichier MP4 depuis un objet File (navigateur standard).
+ * Upload les octets en multipart/form-data → le serveur Go écrit un fichier
+ * temporaire et retourne les frames encodées JPEG base64.
+ */
+export async function loadMp4File(
+  file:    File,
+  quality = 70,
+  maxDim  = 640,
+): Promise<DicomData> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('quality', String(quality));
+  form.append('max_dim', String(maxDim));
+
+  const res = await fetch(`${getApiBase()}/starhe/mp4/load`, {
+    method: 'POST',
+    body:   form,
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(txt);
+  }
+
+  const json: DicomLoadResponse = await res.json();
+  if (json.error) throw new Error(json.error);
+
+  return mapDicomResponse(json);
+}
+
 // ── Suppression du cache MongoDB ──────────────────────────────────────────────
+
+/** Recharge un MP4 déjà présent sur le serveur à partir de son chemin absolu.
+ *  Utilisé par openBatchResultAsTab pour rouvrir un résultat d'analyse MP4. */
+export async function loadMp4(
+  mp4Path: string,
+  quality = 70,
+  maxDim  = 640,
+): Promise<DicomData> {
+  const res = await fetch(`${getApiBase()}/starhe/mp4/load`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ mp4_path: mp4Path, quality, max_dim: maxDim }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(txt);
+  }
+
+  const json: DicomLoadResponse = await res.json();
+  if (json.error) throw new Error(json.error);
+
+  return mapDicomResponse(json);
+}
 
 export async function deleteCache(dicomPath: string): Promise<{ deleted: number }> {
   const res = await fetch(
@@ -124,7 +179,9 @@ export async function deleteCache(dicomPath: string): Promise<{ deleted: number 
 // ── Analyse SSE (pipeline STARHE) ────────────────────────────────────────────
 
 export interface AnalyzeRequest {
-  dicomPath:          string;
+  dicomPath?:          string;
+  /** Chemin serveur d'un fichier MP4 temporaire — utilise /starhe/mp4/analyze */
+  mp4Path?:            string;
   anonMode?:          string;
   runRisk?:           boolean;
   runDetection?:      boolean;
@@ -151,18 +208,32 @@ export function streamAnalysis(
 
   (async () => {
     try {
-      const res = await fetch(`${getApiBase()}/starhe/analyze`, {
+      const isMp4 = !!req.mp4Path;
+      const url   = isMp4
+        ? `${getApiBase()}/starhe/mp4/analyze`
+        : `${getApiBase()}/starhe/analyze`;
+      const body  = isMp4
+        ? JSON.stringify({
+            mp4_path:             req.mp4Path,
+            run_risk:             req.runRisk ?? true,
+            run_detection:        req.runDetection ?? true,
+            back_scan_conversion: req.backScanConversion ?? true,
+            backscan_width:       req.backscanWidth ?? 512,
+            backscan_height:      req.backscanHeight ?? 512,
+          })
+        : JSON.stringify({
+            dicom_path:           req.dicomPath,
+            anon_mode:            req.anonMode ?? 'hash',
+            run_risk:             req.runRisk ?? true,
+            run_detection:        req.runDetection ?? true,
+            back_scan_conversion: req.backScanConversion ?? true,
+            backscan_width:       req.backscanWidth ?? 512,
+            backscan_height:      req.backscanHeight ?? 512,
+          });
+      const res = await fetch(url, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          dicom_path:          req.dicomPath,
-          anon_mode:           req.anonMode ?? 'hash',
-          run_risk:            req.runRisk ?? true,
-          run_detection:       req.runDetection ?? true,
-          back_scan_conversion: req.backScanConversion ?? true,
-          backscan_width:      req.backscanWidth ?? 512,
-          backscan_height:     req.backscanHeight ?? 512,
-        }),
+        body,
         signal:  ctrl.signal,
       });
 

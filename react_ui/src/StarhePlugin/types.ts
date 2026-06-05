@@ -70,6 +70,8 @@ export interface TabState {
   label: string;           // libellé affiché dans la barre d'onglets
   patientName: string;
   dicomPath: string;
+  /** true si cet onglet contient une vidéo MP4 (pas un DICOM) */
+  isMp4?: boolean;
   data: DicomData | null;  // null si chargement en cours
 
   frameIdx: number;

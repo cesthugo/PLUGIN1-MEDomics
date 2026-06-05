@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.starhe</groupId>
+  <artifactId>weasis-dcm2png</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <name>STARHE — Weasis DICOM-to-PNG CLI</name>
+  <description>
+    Thin CLI wrapper around weasis-dicom-tools Transcoder.dcm2image.
+    Exports each frame of a multi-frame DICOM as a PNG, applying Modality LUT
+    and VOI LUT (Window/Level) exactly as Weasis would display it.
+  </description>
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- weasis-dicom-tools release — tracks the underlying dcm4che release -->
+    <weasis.tools.version>5.34.3</weasis.tools.version>
+    <!-- OpenCV native library version (must match the weasis-core-img release) -->
+    <opencv.version>4.13.0-dcm</opencv.version>
+  </properties>
+
+  <!-- GitHub-hosted Maven repository for nroduit artefacts -->
+  <repositories>
+    <repository>
+      <id>nroduit-mvn-repo</id>
+      <url>https://raw.githubusercontent.com/nroduit/mvn-repo/master/</url>
+    </repository>
+  </repositories>
+
+  <dependencies>
+    <!--
+      weasis-dicom-tools brings in transitively:
+        - weasis-core-img (OpenCV wrapper)
+        - dcm4che3-core / dcm4che3-imageio / dcm4che3-dict / …
+        - SLF4J
+    -->
+    <dependency>
+      <groupId>org.weasis</groupId>
+      <artifactId>weasis-dicom-tools</artifactId>
+      <version>${weasis.tools.version}</version>
+    </dependency>
+
+    <!--
+      Native OpenCV shared library — needed at runtime by weasis-core-img.
+      Declared "provided" so it is NOT included in the fat JAR, but it IS
+      available to the maven-dependency-plugin unpack goal below.
+      The active OS/arch profile selects the right classifier.
+    -->
+    <dependency>
+      <groupId>org.weasis.thirdparty.org.opencv</groupId>
+      <artifactId>libopencv_java</artifactId>
+      <version>${opencv.version}</version>
+      <type>${opencv.lib.type}</type>
+      <classifier>${opencv.classifier}</classifier>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+
+      <!-- 1. Build a self-contained fat JAR (all Java deps merged) -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.5.1</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <finalName>weasis-dcm2png</finalName>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <transformers>
+                <!-- Set main class in MANIFEST.MF -->
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>org.starhe.Dcm2Png</mainClass>
+                </transformer>
+                <!-- Merge META-INF/services/* (needed for ImageIO SPI registration) -->
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+              </transformers>
+              <!-- Suppress "module-info.class already present" warnings -->
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>module-info.class</exclude>
+                    <exclude>META-INF/MANIFEST.MF</exclude>
+                    <exclude>META-INF/LICENSE*</exclude>
+                    <exclude>META-INF/NOTICE*</exclude>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- 2. Extract the platform-specific native OpenCV lib into target/native/ -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.6.1</version>
+        <executions>
+          <execution>
+            <id>unpack-native-opencv</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.weasis.thirdparty.org.opencv</groupId>
+                  <artifactId>libopencv_java</artifactId>
+                  <version>${opencv.version}</version>
+                  <type>${opencv.lib.type}</type>
+                  <classifier>${opencv.classifier}</classifier>
+                  <overWrite>true</overWrite>
+                  <outputDirectory>${project.build.directory}/native</outputDirectory>
+                  <destFileName>libopencv_java4130.${opencv.lib.type}</destFileName>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- 3. Copy JAR + native/ into dist/ after package -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <id>copy-to-dist</id>
+            <phase>package</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <target>
+                <mkdir dir="${project.basedir}/dist/native"/>
+                <copy file="${project.build.directory}/weasis-dcm2png.jar"
+                      todir="${project.basedir}/dist"
+                      overwrite="true"/>
+                <copy todir="${project.basedir}/dist/native" overwrite="true">
+                  <fileset dir="${project.build.directory}/native"/>
+                </copy>
+                <!-- Create libopencv_java.dylib symlink (weasis-core-img NativeLibrary looks for this name) -->
+                <exec executable="ln" dir="${project.basedir}/dist/native"
+                      failonerror="false" osfamily="unix">
+                  <arg value="-sf"/>
+                  <arg value="libopencv_java4130.dylib"/>
+                  <arg value="libopencv_java.dylib"/>
+                </exec>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+    </plugins>
+  </build>
+
+  <!-- ── OS / arch profiles ─────────────────────────────────────────────────── -->
+  <profiles>
+
+    <profile>
+      <id>macosx-aarch64</id>
+      <activation>
+        <os>
+          <family>mac</family>
+          <arch>aarch64</arch>
+        </os>
+      </activation>
+      <properties>
+        <opencv.classifier>macosx-aarch64</opencv.classifier>
+        <opencv.lib.type>dylib</opencv.lib.type>
+      </properties>
+    </profile>
+
+    <profile>
+      <id>macosx-x86_64</id>
+      <activation>
+        <os>
+          <family>mac</family>
+          <arch>x86_64</arch>
+        </os>
+      </activation>
+      <properties>
+        <opencv.classifier>macosx-x86-64</opencv.classifier>
+        <opencv.lib.type>dylib</opencv.lib.type>
+      </properties>
+    </profile>
+
+    <profile>
+      <id>linux-aarch64</id>
+      <activation>
+        <os>
+          <name>Linux</name>
+          <arch>aarch64</arch>
+        </os>
+      </activation>
+      <properties>
+        <opencv.classifier>linux-aarch64</opencv.classifier>
+        <opencv.lib.type>so</opencv.lib.type>
+      </properties>
+    </profile>
+
+    <profile>
+      <id>linux-x86_64</id>
+      <activation>
+        <os>
+          <name>Linux</name>
+          <arch>amd64</arch>
+        </os>
+      </activation>
+      <properties>
+        <opencv.classifier>linux-x86-64</opencv.classifier>
+        <opencv.lib.type>so</opencv.lib.type>
+      </properties>
+    </profile>
+
+    <profile>
+      <id>windows-x86_64</id>
+      <activation>
+        <os>
+          <family>windows</family>
+        </os>
+      </activation>
+      <properties>
+        <!-- Windows uses a different artifactId: opencv_java (no "lib" prefix) -->
+        <opencv.classifier>windows-x86-64</opencv.classifier>
+        <opencv.lib.type>dll</opencv.lib.type>
+      </properties>
+      <!-- Override the native dependency for Windows -->
+      <dependencies>
+        <dependency>
+          <groupId>org.weasis.thirdparty.org.opencv</groupId>
+          <artifactId>opencv_java</artifactId>
+          <version>${opencv.version}</version>
+          <type>dll</type>
+          <classifier>windows-x86-64</classifier>
+          <scope>provided</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+
+  </profiles>
+
+</project>

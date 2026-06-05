@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **29 mai 2026**
+> Last updated: **3 juin 2026**
 
 ---
 
@@ -264,7 +264,42 @@
 > 3. Distribution de pixels : l'éventail polaire a des zones noires aux coins (géométrie en arc) que le modèle n'a peut-être pas vue à l'entraînement.
 > **État actuel** : `pipeline.py` utilise `crop_only_frames` pour DETECT (aligné config). Investigation en cours.
 
-### 🗂 Organisation du projet — scripts/ + Makefile (29 mai 2026)
+### � prepus_bridge simplification + pipeline DICOM complet (2 juin 2026)
+
+- [x] **`prepus_bridge.py` simplifié** — 599 → 171 lignes. Suppression du backscan Cartésien (`_map_bbox_backscan_to_original`, `_compute_lossless_backscan_params`, `_crop_inmemory`). Nouvelle signature : `preprocess_with_prepus(frames, fps, thresh, backscan_width, backscan_height) → (crop_frames, info)` (2-tuple au lieu de 3-tuple). Les deux modèles étaient entraînés sur `video.mp4` / `cropped_videos` (éventail rogné), pas sur le backscan Cartésien : le backscan était inutile.
+- [x] **`pipeline.py` mis à jour** — Adapté à la nouvelle signature 2-tuple ; suppression de `backscan_frames` dans tout le flux ; `map_detections_to_dicom_coords` simplifié (plus de paramètres `bsc_w`/`bsc_h`).
+- [x] **`test_dicom_pipeline.py`** — Nouveau script (racine du projet) : pipeline complet depuis un fichier DICOM brut : `pydicom` → export PNG → `ffmpeg` MP4 (fps depuis tag `FrameTime`) → `prepUS` → STARHE RISK + DETECT. Équivalent programmatique de l'export manuel Weasis. Weasis n'expose pas d'API headless pour l'export PNG/MP4 (confirmé).
+### 🏥 Serveur alternatif Orthanc PACS (3 juin 2026)
+
+- [x] **`config.go` — Variables d'env Orthanc** — 3 nouveaux champs : `OrthancURL` (défaut `http://localhost:8042`), `OrthancUser`, `OrthancPassword` ; configurables via `ORTHANC_URL` / `ORTHANC_USER` / `ORTHANC_PASSWORD`
+- [x] **`handlers_orthanc.go`** — Proxy Orthanc complet (240 lignes) : `orthancDo` (requête HTTP authentifiée serveur-to-serveur), 7 handlers REST (`/starhe/orthanc/status`, `/patients`, `/patients/{id}`, `/studies/{id}`, `/series/{id}`, `/instances/{id}`, `POST /starhe/orthanc/load`) — `load` télécharge le DICOM, le stocke en temp SHA-256, le passe à `loader_cli.py`, retourne les frames JSON
+- [x] **`main.go` — Routes Orthanc** — 7 routes enregistrées dans le routeur Go (après `/starhe/cache`)
+- [x] **Go compilation** — `go build .` → succès (0 erreur)
+- [x] **`OrthancBrowser.tsx`** — Composant React modal (~450 lignes) : arborescence hiérarchique lazy-loading Patients → Studies → Series → Instances ; `StatusBadge` (point vert/rouge) ; bouton "Charger" par instance → `POST /starhe/orthanc/load` → mappe la réponse vers `DicomData` (incluant `serverPath`) → appelle `onLoaded({ data, serverPath })` ; thème sombre cohérent (couleurs de `colors.ts`) ; fermeture Escape / clic overlay
+- [x] **`Sidebar.tsx` — Bouton Orthanc** — Prop `onOpenOrthanc: () => void` ajoutée ; bouton `🏥 Navigateur Orthanc PACS` dans la section "Analyse IA"
+- [x] **`index.tsx` — Intégration complète** — Import `OrthancBrowser` + `OrthancLoadedResult` ; state `showOrthanc` ; prop `onOpenOrthanc` sur `<Sidebar>` ; modal `<OrthancBrowser>` avec `onLoaded` : crée un onglet, met à jour les patients, journalise ; TypeScript 0 erreur
+
+### 🔬 STARHE-RISK — Validation C3D contre mmaction2 de référence (3 juin 2026)
+
+> Contexte : malgré l'alignement preprocessing du 28 mai (`crop_only_frames`, `_sample_clips` exact, `_resize_shortest` cv2), il reste un biais résiduel d'environ +3.6 % sur les scores high-risk et 6 patients en désaccord avec la référence de Jérémy (`01-0096`, `02-0049`, `03-0022`, `05-0009`, `05-0021`, `05-0077`). Question : est-ce notre port pytorch pur du C3D qui dérive, ou les crops prepUS qui diffèrent de ceux utilisés à l'entraînement ?
+
+- [x] **Vérification `third_party/prepUS` vs référence** — diff complet : `prepUS` vendored est algorithmiquement identique à la version partagée par Jérémy. Seules différences fonctionnelles : `backscan.py:48` `b = np.array([rho1, rho2])` (bugfix 1D pour éviter un crash `int(np.round(x0))` sur tableau 0-d), `cli.py` ajoute `_NpEncoder` pour la sérialisation JSON numpy, `utils.py` retire `import fire`. Reste = whitespace / docstrings.
+- [x] **Crops déterministes pré-générés** — `/tmp/gen_crops_fixed.py` : un passage prepUS par fichier sur les 49 MP4 de Jérémy → `/tmp/crops_fixed/<PID>/video.mp4` (codec mp4v, niveaux de gris, éventail rogné). 49/49 crops produits.
+- [x] **Environnement mmaction2 de référence** — `pyenv install 3.10.14` + venv `/tmp/mmaction_env/` : `torch==2.1.2`, `torchvision==0.16.2`, `numpy<2`, `eva-decord` (fournit `decord 0.7.0`), `mmcv-lite==2.1.0` (mmcv-full ne compile pas sur ARM macOS sans pkg_resources), `mmaction2==1.2.0` installé `--no-deps` (la dépendance `decord>=0.4.1` est satisfaite par eva-decord), `opencv-contrib-python<4.12`, `importlib_metadata`. Patches : `mmaction/models/localizers/__init__.py` (suppression de l'import DRN absent du wheel 1.2.0) ; copie sanitizée de `c3d_starhe.py` dans `/tmp/cfg/c3d/` (suppression de `custom_imports = ['starhe.metrics.classification_metric']` et de `TensorboardVisBackend`).
+- [x] **Inférence mmaction2 de référence** — `/tmp/run_ref_mmaction.py` : `init_recognizer(cfg, checkpoint, device='cpu')` + `inference_recognizer(model, mp4_path)` sur les 49 crops → `/tmp/ref_scores.json` (49/49 scores `[low, high]`).
+- [x] **Inférence notre C3D sur les mêmes crops** — `/tmp/run_ours_on_crops.py` : lecture cv2 → niveaux de gris → pseudo-RGB (R=G=B) → `STARHERiskModel().predict()` → `/tmp/ours_scores.json` (49/49 scores).
+- [x] **Comparaison à trois voies** — `/tmp/cmp.py` : résultats finaux
+
+  | Comparaison | Mean Δ | MAE | Max\|Δ\| | Accord label (seuil 0.5) |
+  |---|---|---|---|---|
+  | **Nous vs Ref mmaction2** (mêmes crops) | −0.0003 | **0.013** | 0.052 | **47/49 (96 %)** |
+  | Ref mmaction2 vs Jérémy (cached preds) | +0.036 | 0.111 | 0.531 | 43/49 |
+  | Nous vs Jérémy | +0.036 | 0.109 | 0.529 | 43/49 |
+
+  **Conclusion** : notre port pytorch du C3D est validé bit-near du C3D mmaction2 (MAE 1.3 %, biais 0). Les 4 % de différences résiduelles proviennent du décodage vidéo (cv2 vs Decord du même `video.mp4`, codec mp4v + colorspace YUV→RGB non bit-exact). Les 6 mismatches de label vs Jérémy **sont également présents dans la référence mmaction2 sur nos crops** → le résidu vient des crops prepUS (non-déterminisme d'une exécution à l'autre, ou différence avec les crops produits à l'époque de l'entraînement), pas du modèle.
+
+---
+### �🗂 Organisation du projet — scripts/ + Makefile (29 mai 2026)
 - [x] **`scripts/` — Déplacement des lanceurs** — `setup.sh`, `setup.ps1`, `run_tkinter.sh`, `run_tkinter.ps1`, `start_react.sh`, `start_react.ps1`, `download_models.py` déplacés depuis la racine vers `scripts/` ; chemins internes mis à jour (`.sh` : `dirname "$0"/..` ; `.ps1` : `Split-Path -Parent $PSScriptRoot`) ; références croisées corrigées (`start_react.sh` → `scripts/setup.sh`, `start_react.ps1` → `scripts/setup.ps1`)
 - [x] **`Makefile`** — Nouveau task runner à la racine ; cibles : `setup`, `tkinter`, `react`, `build`, `help` (par défaut) ; détection OS automatique Windows/Unix ; délègue aux scripts dans `scripts/` ; `make help` testé ✅
 
@@ -384,11 +419,12 @@
 > ```
 
 ### 🧹 prepUS Preprocessing
-> `preprocess_with_prepus(frames, fps, thresh, back_scan_conversion, backscan_width, backscan_height)`
-> 1. Export numpy → temporary MP4 (OpenCV)
-> 2. `removeLayoutFile(mp4, out_dir, ...)` — static pixel detection + masking + crop
-> 3. Always called with `back_scan_conversion=True` → dual output in a single pass
-> 4. Returns `(backscan_array, crop_only_array, info_dict)` + tmp cleanup
+> `preprocess_with_prepus(frames, fps, thresh, backscan_width, backscan_height)`
+> 1. Export numpy → temporary MP4 (OpenCV `VideoWriter`, codec mp4v)
+> 2. `removeLayoutFile(mp4, out_dir, back_scan_conversion=True, ...)` — static pixel detection + masking + crop
+> 3. Reads `out_dir/video.mp4` (fan-shaped crop) → `(T, H_crop, W_crop)` uint8
+> 4. Reads `out_dir/info.json` → ROI dict
+> 5. Returns `(crop_frames, info_dict)` + tmp cleanup — **2-tuple** (backscan removed)
 > ⚠️ prepUS must be installed with `--no-deps` to avoid OpenCV conflicts
 
 ### 🐍 Persistent RTMDet Subprocess

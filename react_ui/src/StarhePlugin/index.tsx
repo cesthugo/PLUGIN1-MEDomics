@@ -27,7 +27,7 @@ import {
   SIDEBAR_BG, SIDEBAR_HOV, MAIN_BG, CARD_BG, CARD_BORDER, CARD_SHADOW,
   BLUE, BLUE_TEXT, SBAR_FG, SBAR_MUTED, BORDER, CANVAS_BG,
 } from './colors';
-import { loadDicom, loadDicomFile, deleteCache } from './api';
+import { loadDicom, loadDicomFile, loadMp4File, deleteCache } from './api';
 import medomicsLogo from '../assets/medomics_logo.png';
 import { usePipelineSSE } from './hooks/usePipelineSSE';
 import { usePlayback }    from './hooks/usePlayback';
@@ -80,7 +80,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const {
     tabs, activeTabId, patients, activePatientName,
     activeTab, activeTabIdx, activePatientIdx,
-    addTab, openBatchResultAsTab,
+    addTab, addMp4Tab, openBatchResultAsTab,
     switchTab, closeTab, updateActiveTab, updateTabById,
     setActiveTabId, setActivePatientName,
   } = useTabManager({ addLog, isPlaying, setIsPlaying });
@@ -169,6 +169,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // ── Fenêtre live ───────────────────────────────────────────────────────────
   const [showLive,  setShowLive]  = useState(false);
   const [showBatch, setShowBatch] = useState(false);
+  const [showOrthanc, setShowOrthanc] = useState(false);
 
   // ── Vue multi-panneaux ─────────────────────────────────────────────────────
   const [pendingLayoutOpen, setPendingLayoutOpen] = useState<BatchResultToOpen[] | null>(null);
@@ -260,6 +261,37 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     input.click();
   }, [doLoadFile]);
 
+  // Chargement MP4 — navigateur uniquement
+  const doLoadMp4File = useCallback(async (file: File) => {
+    if (loadingPaths.has(file.name)) return;
+    setLoadingPaths(prev => new Set([...prev, file.name]));
+    addLog(`Chargement MP4 : ${file.name}`, 'info');
+    try {
+      const data = await loadMp4File(file);
+      addMp4Tab(file.name, data.serverPath || file.name, data);
+    } catch (err: unknown) {
+      const msg = err instanceof Error
+        ? (err.message || err.name || 'Erreur inconnue')
+        : String(err);
+      const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
+      addLog(`ERREUR chargement MP4 ${file.name} : ${msg}${hint}`, 'error');
+    } finally {
+      setLoadingPaths(prev => { const next = new Set(prev); next.delete(file.name); return next; });
+    }
+  }, [addLog, addMp4Tab, loadingPaths]);
+
+  const onLoadMp4 = useCallback(() => {
+    const input    = document.createElement('input');
+    input.type     = 'file';
+    input.accept   = '.mp4,video/mp4';
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files ?? []);
+      for (const file of files) await doLoadMp4File(file);
+    };
+    input.click();
+  }, [doLoadMp4File]);
+
   // Chargement par chemin absolu tapé manuellement (mode dev / Electron avancé)
   const onLoadPath = useCallback((path: string) => {
     const name = path.split(/[\\/]/).pop() ?? path;
@@ -310,11 +342,19 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     if (analysisStatus === 'running') return;
     const mode = displaySettings.analysisMode;
     setAnalysisTargetTabId(activeTab.id);  // figer la cible avant le lancement
-    startAnalysis({
-      dicomPath:    activeTab.dicomPath,
-      runRisk:      mode !== 'detect_only',
-      runDetection: mode !== 'risk_only',
-    });
+    startAnalysis(
+      activeTab.isMp4
+        ? {
+            mp4Path:      activeTab.dicomPath,
+            runRisk:      mode !== 'detect_only',
+            runDetection: mode !== 'risk_only',
+          }
+        : {
+            dicomPath:    activeTab.dicomPath,
+            runRisk:      mode !== 'detect_only',
+            runDetection: mode !== 'risk_only',
+          }
+    );
   }, [activeTab, analysisStatus, startAnalysis, displaySettings.analysisMode]);
 
   const onResetAnalysis = useCallback(async () => {
@@ -510,6 +550,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           analysisMode={displaySettings.analysisMode}
           onLoadDicom={onLoadDicom}
           onLoadDicomFiles={onLoadDicomFiles}
+          onLoadMp4={onLoadMp4}
           onLoadPath={onLoadPath}
           onPrevFrame={onPrevFrame}
           onNextFrame={onNextFrame}
@@ -523,6 +564,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           onResetAnalysis={onResetAnalysis}
           onOpenLive={() => setShowLive(true)}
           onOpenBatch={() => setShowBatch(true)}
+          onOpenOrthanc={() => setShowOrthanc(true)}
           onGotoFrame={onGotoFrame}
           onToggleTheme={() => setDarkMode(d => !d)}
           onAnalysisModeChange={mode => updateSettings({ analysisMode: mode })}
