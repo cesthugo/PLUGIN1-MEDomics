@@ -44,15 +44,6 @@ func main() {
 	mux.HandleFunc("POST /starhe/mp4/analyze", mp4AnalyzeHandler)
 	mux.HandleFunc("DELETE /starhe/cache", deleteCacheHandler)
 
-	// Orthanc PACS
-	mux.HandleFunc("GET /starhe/orthanc/status", orthancStatusHandler)
-	mux.HandleFunc("GET /starhe/orthanc/patients", orthancListPatientsHandler)
-	mux.HandleFunc("GET /starhe/orthanc/patients/{id}", orthancPatientHandler)
-	mux.HandleFunc("GET /starhe/orthanc/studies/{id}", orthancStudyHandler)
-	mux.HandleFunc("GET /starhe/orthanc/series/{id}", orthancSeriesInstancesHandler)
-	mux.HandleFunc("GET /starhe/orthanc/instances/{id}", orthancInstanceHandler)
-	mux.HandleFunc("POST /starhe/orthanc/load", orthancLoadHandler)
-
 	addr := ":" + cfg.Port
 	log.Printf("STARHE Go server → http://localhost%s", addr)
 	log.Fatal(http.ListenAndServe(addr, withCORS(mux)))

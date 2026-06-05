@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **3 juin 2026**
+> Last updated: **5 juin 2026**
 
 ---
 
@@ -269,7 +269,9 @@
 - [x] **`prepus_bridge.py` simplifié** — 599 → 171 lignes. Suppression du backscan Cartésien (`_map_bbox_backscan_to_original`, `_compute_lossless_backscan_params`, `_crop_inmemory`). Nouvelle signature : `preprocess_with_prepus(frames, fps, thresh, backscan_width, backscan_height) → (crop_frames, info)` (2-tuple au lieu de 3-tuple). Les deux modèles étaient entraînés sur `video.mp4` / `cropped_videos` (éventail rogné), pas sur le backscan Cartésien : le backscan était inutile.
 - [x] **`pipeline.py` mis à jour** — Adapté à la nouvelle signature 2-tuple ; suppression de `backscan_frames` dans tout le flux ; `map_detections_to_dicom_coords` simplifié (plus de paramètres `bsc_w`/`bsc_h`).
 - [x] **`test_dicom_pipeline.py`** — Nouveau script (racine du projet) : pipeline complet depuis un fichier DICOM brut : `pydicom` → export PNG → `ffmpeg` MP4 (fps depuis tag `FrameTime`) → `prepUS` → STARHE RISK + DETECT. Équivalent programmatique de l'export manuel Weasis. Weasis n'expose pas d'API headless pour l'export PNG/MP4 (confirmé).
-### 🏥 Serveur alternatif Orthanc PACS (3 juin 2026)
+### 🏥 Serveur alternatif Orthanc PACS (3 juin 2026) — ❌ retiré (5 juin 2026)
+
+> **Retiré le 5 juin 2026.** Décision : on bascule sur la librairie `weasis-dcm2png` pour la conversion DICOM → image/MP4. Fichiers supprimés (`handlers_orthanc.go`, `OrthancBrowser.tsx`), routes/variables d'env/imports/boutons purgés de `config.go`, `main.go`, `index.tsx`, `Sidebar.tsx`. Historique conservé ci-dessous à titre d'archive.
 
 - [x] **`config.go` — Variables d'env Orthanc** — 3 nouveaux champs : `OrthancURL` (défaut `http://localhost:8042`), `OrthancUser`, `OrthancPassword` ; configurables via `ORTHANC_URL` / `ORTHANC_USER` / `ORTHANC_PASSWORD`
 - [x] **`handlers_orthanc.go`** — Proxy Orthanc complet (240 lignes) : `orthancDo` (requête HTTP authentifiée serveur-to-serveur), 7 handlers REST (`/starhe/orthanc/status`, `/patients`, `/patients/{id}`, `/studies/{id}`, `/series/{id}`, `/instances/{id}`, `POST /starhe/orthanc/load`) — `load` télécharge le DICOM, le stocke en temp SHA-256, le passe à `loader_cli.py`, retourne les frames JSON
@@ -297,6 +299,41 @@
   | Nous vs Jérémy | +0.036 | 0.109 | 0.529 | 43/49 |
 
   **Conclusion** : notre port pytorch du C3D est validé bit-near du C3D mmaction2 (MAE 1.3 %, biais 0). Les 4 % de différences résiduelles proviennent du décodage vidéo (cv2 vs Decord du même `video.mp4`, codec mp4v + colorspace YUV→RGB non bit-exact). Les 6 mismatches de label vs Jérémy **sont également présents dans la référence mmaction2 sur nos crops** → le résidu vient des crops prepUS (non-déterminisme d'une exécution à l'autre, ou différence avec les crops produits à l'époque de l'entraînement), pas du modèle.
+
+### 🔬 STARHE-RISK — Chaîne d'isolation finale + bypass MP4 (5 juin 2026)
+
+> Contexte : poursuite de la session du 3 juin pour identifier exactement la source du résidu de ~11 % vs Jérémy. Trois tests d'isolation puis un test décisif avec une variante in-memory de prepUS.
+
+- [x] **Décodage `video.mp4` — cv2 vs PyAV vs Decord** — `/tmp/decoder_diff.py` install `av 17.0.1` ; 3 chemins comparés (cv2 BGR→RGB, cv2 BGR→GRAY→stack, PyAV rgb24) sur 4 crops grayscale produits par prepUS → **MAE 0.000, 100 % pixels égaux** sur les 4 fichiers. Le décodeur n'est PAS la source du résidu.
+- [x] **Déterminisme prepUS local** — `/tmp/test_prepus_determinism.py` : 3 exécutions consécutives par fichier sur 4 MP4 → SHA-256 de `video.mp4` et `info.json` identiques sur les 3 runs pour les 4 fichiers. prepUS est **100 % déterministe sur une même machine**.
+- [x] **Cause racine identifiée** — La seule différence restante entre nos crops et ceux de Jérémy est l'**encodage MP4 par `cv2.VideoWriter(mp4v)`** (utilisé par `sonocrop.vid.savevideo` dans `prepUS/cli.py:198`). cv2 délègue au binaire FFmpeg lié à OpenCV, qui dépend de : OS, version `opencv-python`, version FFmpeg système. macOS ARM Homebrew (notre env) ≠ Linux Jean Zay (entraînement de Jérémy) → bitstream différent → pixels reconstruits différents après décodage → C3D voit des entrées légèrement différentes.
+- [x] **Email à Adrien (auteur prepUS + entraînement)** — demande des crops d'entraînement originaux et/ou des versions exactes `opencv-python` + FFmpeg utilisées sur Jean Zay. **Réponse reçue 5 juin 2026 : son environnement Jean Zay (dataset + versions) a été supprimé par erreur par un IT de l'IHU.** Aucune récupération possible. La voie "reproduire l'encodage d'origine" est définitivement fermée.
+- [x] **Mode bypass MP4 implémenté** — `dicom/prepus_bridge.py` : nouvelle fonction `preprocess_with_prepus_inmem` (~165 lignes) qui réimplémente `removeLayoutFile` strictement équivalente, en numpy pur, sans aucun `VideoWriter` / `VideoCapture` / dossier temporaire. Retry récursif sur `find_linear_fov` conservé à l'identique. Conversion RGB→GRAY via `cv2.cvtColor(RGB2GRAY)` (mêmes poids BT.601 que le chemin `BGR2GRAY` lu par `sonocrop.loadvideo`).
+- [x] **Flag de configuration** — `config.py` : ajout de `PREPUS_BYPASS_MP4: bool = False` (défaut conservateur). `pipeline.py` sélectionne `preprocess_with_prepus_inmem` quand le flag est `True`, `preprocess_with_prepus` sinon ; tag de mode logé dans la progression. Export ajouté dans `dicom/__init__.py`.
+- [x] **Validation 49 patients** — `/tmp/batch_bypass_vs_roundtrip.py` : exécute les 2 modes sur les 49 MP4 du test set de Jérémy, compare aux prédictions cachées `pred_test.pkl`.
+
+  | Métrique | Mode A (MP4 roundtrip) | **Mode B (bypass)** | Gain |
+  |---|---|---|---|
+  | MAE vs Jérémy | 0.1215 | **0.1025** | −16 % |
+  | Accord labels vs Jérémy | 42/49 (85.7 %) | **44/49 (89.8 %)** | +2 patients |
+  | Accuracy vs vérité terrain | 31/49 (63.3 %) | **33/49 (67.3 %)** | +2 patients |
+  | Bias − Jérémy | +0.044 | +0.037 | −16 % |
+  | Reproductibilité cross-OS | ❌ | ✅ bit-à-bit | — |
+
+  Le bypass est strictement meilleur sur les 3 métriques + élimine la dépendance à l'encodeur mp4v non-portable. Reste l'option de basculer le défaut à `True` (cf. roadmap).
+
+### 🗑️ Suppression du serveur Orthanc PACS (5 juin 2026)
+
+> Contexte : la pile Orthanc implémentée le 3 juin (~700 lignes Go + TS) est remplacée par la librairie `weasis-dcm2png` pour la conversion DICOM → image / MP4. La section archive de l'historique Orthanc est conservée plus haut, marquée "❌ retiré".
+
+- [x] **`go_server/handlers_orthanc.go`** — supprimé (240 lignes : `orthancDo`, 7 handlers REST)
+- [x] **`react_ui/src/StarhePlugin/components/OrthancBrowser.tsx`** — supprimé (~450 lignes)
+- [x] **`go_server/config.go`** — champs `OrthancURL` / `OrthancUser` / `OrthancPassword` + envs `ORTHANC_URL` / `ORTHANC_USER` / `ORTHANC_PASSWORD` retirés
+- [x] **`go_server/main.go`** — 7 routes `/starhe/orthanc/*` retirées
+- [x] **`react_ui/src/StarhePlugin/index.tsx`** — imports `OrthancBrowser` + `OrthancLoadedResult`, state `showOrthanc`, prop `onOpenOrthanc` sur `<Sidebar>`, bloc modal complet (~40 lignes) retirés
+- [x] **`react_ui/src/StarhePlugin/components/Sidebar.tsx`** — prop `onOpenOrthanc` (déclaration + destructuration + bouton `🏥 Navigateur Orthanc PACS`) retirée ; padding du bouton Batch (devenu dernier de la section) promu à `10px`
+- [x] **Vérifications** — `go build ./...` 0 erreur ; aucune nouvelle erreur TS sur les fichiers touchés ; `TODOLIST.md` section Orthanc marquée `❌ retiré (5 juin 2026)` avec justification
+- [ ] **À venir** — intégration `weasis-dcm2png` pour la conversion DICOM → PNG/MP4 (un script `test_weasis_pipeline.py` existe déjà à la racine comme point de départ)
 
 ---
 ### �🗂 Organisation du projet — scripts/ + Makefile (29 mai 2026)
@@ -329,7 +366,12 @@
 
 ## 📅 Roadmap — Next Steps
 
-### 🔬 Phase 1: Backend Validation (Short term)
+### � Décisions en attente (5 juin 2026)
+
+- [ ] **Basculer `PREPUS_BYPASS_MP4 = True` par défaut dans `config.py`** — Le mode bypass est strictement meilleur sur les 3 métriques mesurées (MAE 0.122 → 0.103, accord 85.7 % → 89.8 %, accuracy 63.3 % → 67.3 %) et élimine la non-portabilité cross-OS de `cv2.VideoWriter(mp4v)`. En attente de la validation explicite de l'utilisateur pour modifier le défaut.
+- [ ] **Intégration `weasis-dcm2png`** — Remplace la pile Orthanc retirée le 5 juin. Un script d'amorce `test_weasis_pipeline.py` existe déjà à la racine. À câbler ensuite dans le flux Go (équivalent de l'ancien `/starhe/orthanc/load`) et/ou en tant qu'étape amont de `test_dicom_pipeline.py` pour les DICOM Weasis-natifs.
+
+### �🔬 Phase 1: Backend Validation (Short term)
 
 - [ ] **Unit test development**
   - `reader.py`: loading, frame count, array shapes

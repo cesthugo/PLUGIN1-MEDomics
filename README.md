@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.6.0` — Last updated: 2 juin 2026*
+*Version `0.6.1` — Last updated: 5 juin 2026*
 
 ---
 
@@ -524,6 +524,32 @@ Résultats (`/tmp/ref_scores.json` vs `/tmp/ours_scores.json`, score "high risk"
 
 **Conclusion** : notre port pytorch du C3D est validé bit-near du C3D mmaction2 de référence (MAE 1.3 %, biais ≈ 0). Les 4 % de divergence restants proviennent du décodage vidéo (cv2 vs Decord du même `video.mp4`). Les 6 patients en désaccord avec Jérémy (`01-0096`, `02-0049`, `03-0022`, `05-0009`, `05-0021`, `05-0077`) **sont également en désaccord avec la référence mmaction2 sur les mêmes crops** : le résidu vient donc des crops prepUS (non-déterminisme entre les crops actuels et ceux générés à l'entraînement de Jérémy), pas du modèle.
 
+### Chaîne d'isolation finale du résidu prepUS (5 juin 2026)
+
+Après la validation C3D ci-dessus, trois tests complémentaires ont été menés pour cerner exactement la source du résidu de ~11 % vs Jérémy :
+
+| Test | Résultat | Conclusion |
+|---|---|---|
+| **Décodage `video.mp4`** — cv2(BGR→RGB/GRAY) vs PyAV(rgb24) vs Decord, sur 4 crops grayscale | MAE 0.000, 100 % pixels égaux | Le décodeur n'est pas en cause |
+| **Déterminisme prepUS local** — 3 exécutions consécutives, SHA-256 de `video.mp4` + `info.json` sur 4 MP4 | Hash identique sur les 3 runs pour les 4 fichiers | prepUS est déterministe sur une même machine |
+| **Reproductibilité cross-plateforme prepUS** | ❌ **Non reproductible** par construction : `sonocrop.vid.savevideo` écrit via `cv2.VideoWriter(mp4v)`, qui délègue à FFmpeg lié à OpenCV. Le bitstream produit dépend de l'OS, de la version `opencv-python` et de FFmpeg système — il diffère entre macOS ARM Homebrew (notre env) et Linux Jean Zay (entraînement de Jérémy). | Source unique du résidu — non corrigible sans les crops d'origine. Adrien (auteur prepUS + entraînement) a confirmé le 5 juin que son environnement Jean Zay a été supprimé par erreur (impossible de reconstituer les versions exactes ni les crops d'entraînement). |
+
+### Mode bypass MP4 (5 juin 2026)
+
+Pour neutraliser cette source de divergence, une variante 100 % numpy du bridge prepUS a été implémentée (`preprocess_with_prepus_inmem` dans `dicom/prepus_bridge.py`) et exposée via le flag `PREPUS_BYPASS_MP4` de `config.py`. Elle réimplémente `removeLayoutFile` directement sur les numpy arrays sans aucun `cv2.VideoWriter` / `cv2.VideoCapture` intermédiaire.
+
+**Mesure sur les 49 patients de Jérémy** (mode A = roundtrip MP4 existant, mode B = bypass) :
+
+| Métrique | Mode A (MP4 roundtrip) | **Mode B (bypass / `PREPUS_BYPASS_MP4=True`)** | Gain |
+|---|---|---|---|
+| MAE vs Jérémy | 0.122 | **0.103** | − 16 % |
+| Accord labels vs Jérémy | 42/49 (85.7 %) | **44/49 (89.8 %)** | + 2 patients |
+| Accuracy vs vérité terrain | 31/49 (63.3 %) | **33/49 (67.3 %)** | + 2 patients |
+| Bias modèle − Jérémy | + 0.044 | + 0.037 | − 16 % |
+| Reproductibilité cross-plateforme | ❌ dépend du FFmpeg lié à cv2 | ✅ bit-à-bit garanti sur tout OS | — |
+
+Le bypass est strictement meilleur sur les 3 métriques mesurées et élimine la dépendance à l'encodeur mp4v de cv2, qui n'est plus reproductible (env d'entraînement perdu).
+
 ---
 
 ## prepUS Preprocessing (`dicom/prepus_bridge.py`)
@@ -555,11 +581,23 @@ Returns a 2-tuple `(crop_frames, info_dict)`:
 
 ### Internal implementation
 
+Two backends are available, contrôlés par le flag `PREPUS_BYPASS_MP4` de `config.py` :
+
+**Mode A — MP4 roundtrip** (`preprocess_with_prepus`, légat) :
+
 1. Export numpy frames → temporary MP4 (OpenCV `VideoWriter`, codec `mp4v`, grayscale)
 2. Call `prepUS.cli.removeLayoutFile(mp4, out_dir, back_scan_conversion=True, ...)`
 3. Read `out_dir/video.mp4` (fan-shaped crop) → numpy `(T, H_crop, W_crop)`
 4. Read `out_dir/info.json` → ROI dict
 5. Cleanup of temporary directory
+
+**Mode B — bypass MP4** (`preprocess_with_prepus_inmem`, activable via `PREPUS_BYPASS_MP4=True`, recommandé depuis le 5 juin 2026) :
+
+1. Convert numpy RGB frames → grayscale (cv2.cvtColor `RGB2GRAY` — BT.601, identique au chemin lu par `loadvideo` sur un MP4 grayscale)
+2. Run the prepUS algorithm in-process on numpy : variability mask → morphological denoise → `crop_single_object` → `find_linear_fov` (avec retry récursif identique à la référence) → FOV mask → `applyMask`
+3. Return `(crop_frames, info)` directement — aucun `VideoWriter` / `VideoCapture` intermédiaire, aucun dossier temp
+
+Le mode B est strictement équivalent algorithmiquement à `removeLayoutFile(..., back_scan_conversion=True)` mais élimine la non-portabilité cross-OS de l'encodeur mp4v (cf. section validation C3D ci-dessus).
 
 > **Warning**: prepUS must be installed with `--no-deps` to avoid conflicts with the venv's OpenCV version. The `run_tkinter.ps1` script handles this automatically.
 

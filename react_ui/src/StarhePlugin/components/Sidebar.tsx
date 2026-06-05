@@ -168,7 +168,6 @@ export interface SidebarProps {
   onResetAnalysis:  () => void;
   onOpenLive:       () => void;
   onOpenBatch:      () => void;
-  onOpenOrthanc:    () => void;
   onGotoFrame:      (idx: number) => void;
   onToggleTheme:    () => void;
 }
@@ -198,7 +197,6 @@ export function Sidebar({
   onResetAnalysis,
   onOpenLive,
   onOpenBatch,
-  onOpenOrthanc,
   onGotoFrame,
   onToggleTheme,
 }: SidebarProps) {
@@ -487,11 +485,8 @@ export function Sidebar({
         <div style={{ padding: '0 10px 4px' }}>
           <SBtn onClick={onOpenLive} accent>📡   Analyse en direct</SBtn>
         </div>
-        <div style={{ padding: '0 10px 4px' }}>
-          <SBtn onClick={onOpenBatch} accent>📋   Analyse en lot (batch)</SBtn>
-        </div>
         <div style={{ padding: '0 10px 10px' }}>
-          <SBtn onClick={onOpenOrthanc} accent>🏥   Navigateur Orthanc PACS</SBtn>
+          <SBtn onClick={onOpenBatch} accent>📋   Analyse en lot (batch)</SBtn>
         </div>
 
         {/* RÉSULTATS */}
