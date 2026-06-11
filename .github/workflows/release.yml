@@ -16,13 +16,14 @@ permissions:
 
 env:
   PYTHON_VERSION: '3.13'
-  NODE_VERSION: '20'
+  NODE_VERSION: '22'
   GO_VERSION: '1.22'
 
 jobs:
   build:
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -100,7 +101,15 @@ jobs:
           python -m pip install -r pythonCode/modules/starhe_plugin/requirements.txt
 
       # ── Étape 3 : bundler le worker Python ───────────────────────────────────
+      - name: Cache PyInstaller worker bundle
+        id: cache-pyinstaller
+        uses: actions/cache@v4
+        with:
+          path: pythonCode/modules/dist
+          key: pyinstaller-${{ matrix.platform }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('pythonCode/modules/starhe_plugin/requirements.txt', 'scripts/starhe_worker.spec', 'pythonCode/modules/starhe_plugin/**/*.py') }}
+
       - name: Build PyInstaller worker
+        if: steps.cache-pyinstaller.outputs.cache-hit != 'true'
         working-directory: pythonCode/modules
         shell: bash
         run: |
