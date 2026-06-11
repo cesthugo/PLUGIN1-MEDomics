@@ -2,7 +2,12 @@
   "name": "starhe-plugin",
   "version": "0.6.2",
   "description": "STARHE — Plugin MEDomics (détection et évaluation du risque sur DICOM échographique hépatique)",
-  "author": "MEDomics-UdeS",
+  "author": {
+    "name": "MEDomics-UdeS",
+    "email": "medomics@usherbrooke.ca"
+  },
+  "homepage": "https://github.com/cesthugo/PLUGIN1-MEDomics",
+  "repository": "github:cesthugo/PLUGIN1-MEDomics",
   "private": true,
   "type": "module",
   "main": "electron-dist/main.js",
@@ -64,8 +69,8 @@
         { "from": "build-resources/jre-mac-${arch}", "to": "jre" }
       ],
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] },
-        { "target": "zip", "arch": ["arm64", "x64"] }
+        { "target": "dmg" },
+        { "target": "zip" }
       ]
     },
     "dmg": {
@@ -76,6 +81,7 @@
       "category": "Science",
       "icon": "build-resources/icon.png",
       "synopsis": "STARHE — Plugin MEDomics (DICOM hépatique)",
+      "maintainer": "MEDomics-UdeS <medomics@usherbrooke.ca>",
       "extraResources": [
         { "from": "../go_server/go_server", "to": "go_server/go_server" },
         { "from": "../pythonCode/modules/dist/starhe_worker", "to": "starhe_worker" },
