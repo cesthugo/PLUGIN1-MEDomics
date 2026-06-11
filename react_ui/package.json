@@ -65,16 +65,12 @@
       ],
       "target": [
         { "target": "dmg", "arch": ["arm64", "x64"] },
-        { "target": "pkg", "arch": ["arm64", "x64"] },
         { "target": "zip", "arch": ["arm64", "x64"] }
       ]
     },
     "dmg": {
       "artifactName": "STARHE-${version}-mac-${arch}.${ext}",
       "title": "STARHE ${version}"
-    },
-    "pkg": {
-      "artifactName": "STARHE-${version}-mac-${arch}.${ext}"
     },
     "linux": {
       "category": "Science",
@@ -86,8 +82,7 @@
         { "from": "build-resources/jre-linux-${arch}", "to": "jre" }
       ],
       "target": [
-        { "target": "deb", "arch": ["x64"] },
-        { "target": "AppImage", "arch": ["x64"] }
+        { "target": "deb", "arch": ["x64"] }
       ]
     },
     "win": {

@@ -124,6 +124,22 @@ jobs:
         working-directory: react_ui
         run: npm ci
 
+      # `third_party/weasis-dcm2png/dist/` est gitignored (règle `dist/` globale)
+      # mais référencé par `extraResources`. On le reconstruit depuis `target/`
+      # (artefacts Maven committés) avant chaque build electron-builder.
+      - name: Prepare weasis-dcm2png/dist
+        shell: bash
+        run: |
+          set -eux
+          src=third_party/weasis-dcm2png/target
+          dst=third_party/weasis-dcm2png/dist
+          mkdir -p "$dst/native"
+          cp "$src/weasis-dcm2png.jar" "$dst/"
+          if [ -d "$src/native" ]; then
+            cp -R "$src/native/." "$dst/native/"
+          fi
+          ls -la "$dst" "$dst/native"
+
       - name: Build renderer + Electron main
         working-directory: react_ui
         run: npm run build:electron
