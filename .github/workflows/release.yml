@@ -77,6 +77,14 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: go_server/go.sum
 
+      # ── Linux only: libérer l'espace disque (~25 GB) avant les gros téléchargements ──
+      - name: Free disk space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
+                      /usr/share/dotnet /usr/local/share/boost
+          df -h
+
       # ── Linux only: dépendances système pour electron-builder (deb/AppImage) ──
       - name: Install Linux build deps
         if: runner.os == 'Linux'
@@ -94,11 +102,18 @@ jobs:
           ls -la ${{ matrix.go_bin }}
 
       # ── Étape 2 : installer Python deps + PyInstaller ────────────────────────
+      # Sur Linux, on force torch CPU-only (~200 MB) au lieu de la roue CUDA+CPU
+      # par défaut (~2.5 GB), ce qui réduit drastiquement le temps PyInstaller.
+      # Les runners Ubuntu n'ont pas de GPU ; le bundle Linux sera CPU-only.
       - name: Install Python dependencies
         shell: bash
         run: |
           python -m pip install --upgrade pip wheel
           python -m pip install pyinstaller==6.20.0
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            python -m pip install torch torchvision \
+              --index-url https://download.pytorch.org/whl/cpu
+          fi
           python -m pip install -r pythonCode/modules/starhe_plugin/requirements.txt
 
       # ── Étape 3 : bundler le worker Python ───────────────────────────────────
