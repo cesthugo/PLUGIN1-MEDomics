@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -194,7 +193,6 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Construction des arguments subprocess
 	args := []string{
-		"-m", "starhe_plugin.pipeline",
 		req.DicomPath,
 		"--anon_mode", req.AnonMode,
 		"--backscan_width", strconv.Itoa(req.BackscanWidth),
@@ -211,12 +209,7 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, "--analysis_mode", analysisMode)
 
-	cmd := exec.CommandContext(r.Context(), cfg.PythonExe, args...)
-	cmd.Dir = cfg.PythonModPath
-	cmd.Env = append(os.Environ(),
-		"PYTHONPATH="+cfg.PythonModPath,
-		"PYTHONUTF8=1", // force UTF-8 sous Windows
-	)
+	cmd := pythonCmd(r.Context(), "pipeline", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -323,7 +316,6 @@ func liveHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Construction des arguments subprocess
 	args := []string{
-		"-m", "starhe_plugin.ai.run_live",
 		"--source", req.Source,
 	}
 	switch req.Source {
@@ -338,12 +330,7 @@ func liveHandler(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "--no_risk")
 	}
 
-	cmd := exec.CommandContext(r.Context(), cfg.PythonExe, args...)
-	cmd.Dir = cfg.PythonModPath
-	cmd.Env = append(os.Environ(),
-		"PYTHONPATH="+cfg.PythonModPath,
-		"PYTHONUTF8=1",
-	)
+	cmd := pythonCmd(r.Context(), "ai.run_live", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

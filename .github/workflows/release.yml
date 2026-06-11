@@ -1,0 +1,197 @@
+name: Release STARHE (multi-platform)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build artifacts but do not create a GitHub release"
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: '3.13'
+  NODE_VERSION: '20'
+  GO_VERSION: '1.22'
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac-arm64
+            eb_flags: '--mac --arm64'
+            go_bin: go_server
+            jre_script: scripts/fetch_jre.sh
+            jre_arg: mac-arm64
+          - os: macos-13
+            platform: mac-x64
+            eb_flags: '--mac --x64'
+            go_bin: go_server
+            jre_script: scripts/fetch_jre.sh
+            jre_arg: mac-x64
+          - os: ubuntu-latest
+            platform: linux-x64
+            eb_flags: '--linux --x64'
+            go_bin: go_server
+            jre_script: scripts/fetch_jre.sh
+            jre_arg: linux-x64
+          - os: windows-latest
+            platform: win-x64
+            eb_flags: '--win --x64'
+            go_bin: go_server.exe
+            jre_script: scripts/fetch_jre.ps1
+            jre_arg: win-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: react_ui/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: pythonCode/modules/starhe_plugin/requirements.txt
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go_server/go.sum
+
+      # ── Linux only: dépendances système pour electron-builder (deb/AppImage) ──
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fakeroot dpkg rpm libarchive-tools
+
+      # ── Étape 1 : compiler le serveur Go ──────────────────────────────────────
+      - name: Build Go server
+        working-directory: go_server
+        shell: bash
+        run: |
+          go build -trimpath -ldflags "-s -w" -o ${{ matrix.go_bin }} .
+          ls -la ${{ matrix.go_bin }}
+
+      # ── Étape 2 : installer Python deps + PyInstaller ────────────────────────
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install pyinstaller==6.20.0
+          python -m pip install -r pythonCode/modules/starhe_plugin/requirements.txt
+
+      # ── Étape 3 : bundler le worker Python ───────────────────────────────────
+      - name: Build PyInstaller worker
+        working-directory: pythonCode/modules
+        shell: bash
+        run: |
+          rm -rf build dist
+          pyinstaller ../../scripts/starhe_worker.spec --noconfirm
+          ls dist/starhe_worker | head -20
+
+      # ── Étape 4 : télécharger la JRE Temurin pour la plateforme ──────────────
+      - name: Fetch JRE (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash ${{ matrix.jre_script }} ${{ matrix.jre_arg }}
+
+      - name: Fetch JRE (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\${{ matrix.jre_script }} -Platform ${{ matrix.jre_arg }}
+
+      # ── Étape 5 : installer + builder l'app Electron ─────────────────────────
+      - name: Install npm dependencies
+        working-directory: react_ui
+        run: npm ci
+
+      - name: Build renderer + Electron main
+        working-directory: react_ui
+        run: npm run build:electron
+
+      - name: Run electron-builder
+        working-directory: react_ui
+        env:
+          # Évite que electron-builder essaie de signer/notariser sans certificats.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Token pour le téléchargement éventuel des binaires Electron derrière proxy.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          npx electron-builder ${{ matrix.eb_flags }} --publish never
+
+      # ── Étape 6 : remonter les artefacts (sans les blockmaps internes) ───────
+      - name: Collect artifacts
+        id: collect
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          cd react_ui/release
+          # On garde uniquement les installeurs/distribuables finaux.
+          shopt -s nullglob
+          for f in *.dmg *.pkg *.zip *.deb *.AppImage *.exe; do
+            cp "$f" ../../dist-artifacts/
+          done
+          cd ../..
+          ls -la dist-artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: starhe-${{ matrix.platform }}
+          path: dist-artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Job final : agréger les artefacts, calculer SHA256, créer la release ───
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: starhe-*
+          merge-multiple: true
+
+      - name: Compute SHA256SUMS.txt
+        run: |
+          cd artifacts
+          ls -la
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: STARHE ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*

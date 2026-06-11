@@ -349,7 +349,143 @@
 - [x] **`loader_cli.py` non modifié** — la route `/starhe/dicom/load` (display-only, pas d'inférence en aval) reste sur pydicom : pas besoin de la LUT pour l'affichage et coût d'un subprocess Java évité à chaque chargement UI.
 
 ---
-### �🗂 Organisation du projet — scripts/ + Makefile (29 mai 2026)
+### 📦 Distribution Electron — Phase 1 (10 juin 2026)
+
+> Contexte : reproduire la grille Releases de MEDomics (`.dmg`/`.pkg`/`.zip`/`.deb`/`.AppImage`/`.exe`) pour le plugin STARHE. Phase 1 = coquille Electron qui lance le Go server et affiche le React UI ; le Python n'est pas encore bundlé (Phase 2 à venir avec PyInstaller).
+
+- [x] **Réutilisation du scaffold Electron existant dans `react_ui/`** — Pas de nouveau dossier `electron_app/` créé (aurait dupliqué `main.ts`, `preload.ts`, config electron-builder, `node_modules`). Convention MEDomics : Electron + renderer dans le même `package.json`.
+- [x] **`react_ui/package.json`** — Version bumpée 0.1.0 → 0.6.2 (aligné projet) ; `productName` simplifié `STARHE` ; `artifactName` ajouté avec convention `STARHE-${version}-${os}-${arch}.${ext}` (identique MEDomics) ; targets ajoutées : mac `pkg`+`zip` (avant : `dmg` seul), linux `deb`+`AppImage` (avant : aucun), win `nsis` (conservé) ; `extraResources` ajoutées par plateforme pour `weasis-dcm2png/dist/` + binaire Go.
+- [x] **`react_ui/electron/main.ts`** — Splash screen ajouté (`createSplash` → fenêtre 480×280 frameless pendant le boot) ; healthcheck `waitForGoHealthy()` (ping `GET /health` toutes les 300 ms, timeout 30 s) avant d'afficher la fenêtre principale ; `bootSequence()` orchestre splash → spawn Go → wait healthy → main window ; dialog d'erreur "Réessayer / Quitter" si Go ne démarre pas (avec hint MongoDB) ; env `PORT=8082` + `STARHE_WEASIS_DIR` propagés au subprocess Go.
+- [x] **`react_ui/electron/splash.html`** — Splash statique : titre "STARHE", spinner CSS, fond `#0c1018`, copié dans `electron-dist/` par le script de build.
+- [x] **`react_ui/build-resources/`** — Nouveau dossier pour icônes electron-builder ; `icon.png` placeholder (copie logo MEDomics) ; `README.md` documente comment générer `.icns` (macOS) et `.ico` (Windows) ; `.icns`/`.ico` non encore générés → electron-builder loggue un warning mais build OK avec icône Electron par défaut.
+- [x] **Nettoyage code mort Orthanc** — 2 lignes résiduelles supprimées dans `src/StarhePlugin/index.tsx` (`const [showOrthanc, setShowOrthanc]` ligne 172 + prop `onOpenOrthanc` sur `<Sidebar>` ligne 567) qui faisaient échouer `tsc --noEmit`. Reste de la suppression Orthanc du 5 juin.
+- [x] **`.gitignore`** — `react_ui/electron-dist/` + `react_ui/release/` ajoutés (artefacts générés, jamais à commit).
+- [x] **Premier build `.dmg` validé** — `npx electron-builder --mac dmg --arm64` → `release/STARHE-0.6.2-mac-arm64.dmg` (111 MB). Contenu vérifié : `STARHE.app/Contents/Resources/go_server/go_server` (13 MB) + `STARHE.app/Contents/Resources/weasis-dcm2png/` (JAR 2.6 MB + libs natives OpenCV) bien embarqués.
+- [x] **README.md** — Nouvelle section "## Distribution — Builds Electron" : tableau des 9 cibles MEDomics-aligned, architecture du wrapper (4 fichiers electron/), tableau extraResources, prérequis build, commandes locales, limitation Python non embarqué, notes signature/notarisation.
+
+**À venir (Phase 5)** :
+- [x] **Phase 5 — CI GitHub Actions multi-plateformes** — ✅ livré ([.github/workflows/release.yml](.github/workflows/release.yml)). Voir la section dédiée Phase 5 plus bas.
+- [ ] **Icônes natives** — Générer `build-resources/icon.icns` (iconutil) et `icon.ico` (ImageMagick) à partir d'un PNG 1024×1024 de marque STARHE.
+- [ ] **Signature & notarisation** — Apple Developer ID + `xcrun notarytool` (macOS) ; EV Code Signing Cert (Windows) — requis pour un livrable clinique sans warning Gatekeeper/SmartScreen.
+
+---
+### 📦 Distribution Electron — Phase 3 (10 juin 2026)
+
+> Phase 3 = embarquer une JRE Temurin 17 dans le `.dmg` pour rendre `weasis-dcm2png` autonome. Sans Phase 3, l'utilisateur final devait installer manuellement OpenJDK 17 (sinon fallback pydicom silencieux → résultats potentiellement différents de l'entraînement, cf. note du 5 juin sur LUT VOI).
+
+- [x] **`scripts/fetch_jre.sh`** — Script bash qui télécharge la JRE Temurin (version paramétrable `JRE_VERSION`, défaut 17) depuis l'API Adoptium (`https://api.adoptium.net/v3/binary/latest/...`). Auto-détection plateforme via `uname -s` + `uname -m` (mac-arm64, mac-x64, linux-x64, linux-aarch64), surchargeable par 1er argument. Gère le bundle macOS (`Contents/Home/`) vs tarball Linux (extraction directe). Idempotent : skip si `bin/java` déjà présent. Sortie : `react_ui/build-resources/jre-<platform>/`.
+- [x] **`scripts/fetch_jre.ps1`** — Équivalent PowerShell pour Windows (zip via `Invoke-WebRequest` + `Expand-Archive`). Cible `win-x64` par défaut.
+- [x] **Test fetch_jre.sh mac-arm64** — Téléchargement OK ~30 s ; JRE Temurin **17.0.19+10** installée dans `react_ui/build-resources/jre-mac-arm64/` (129 MB). `bin/java -version` répond correctement.
+- [x] **`weasis_bridge.py`** — Refactor pour lire 2 variables d'environnement :
+  - `STARHE_WEASIS_DIR` (corrige un **bug latent Phase 1** : la var était définie par Electron mais jamais lue par Python) — pointe vers le dossier contenant `weasis-dcm2png.jar` + `native/` (mode dev : `third_party/weasis-dcm2png/dist/` ; mode packagé : `Resources/weasis-dcm2png/`).
+  - `STARHE_JAVA_BIN` (nouveau) — chemin absolu vers `java` ; nouveau helper `_java_bin()` résout dans l'ordre : env var → `shutil.which("java")` → `None`. Toutes les invocations `subprocess.run(["java", ...])` remplacées par `[_java_bin(), ...]` avec garde `RuntimeError` si introuvable.
+- [x] **Smoke test bridge** — `STARHE_JAVA_BIN=/path/to/jre/bin/java python -c "from starhe_plugin.dicom.weasis_bridge import weasis_available; print(weasis_available())"` → `True`. La JRE embarquée est bien détectée et exécutée.
+- [x] **`react_ui/package.json`** — `mac.extraResources` ajoute `{ "from": "build-resources/jre-mac-${arch}", "to": "jre" }`. La variable `${arch}` est résolue par electron-builder en `arm64` ou `x64` selon la cible — nommage du dossier source cohérent avec `fetch_jre.sh mac-arm64`/`mac-x64`. (Linux/Windows à ajouter quand les builds par OS seront faits via CI.)
+- [x] **`react_ui/electron/main.ts`** — Le spawn Go reçoit maintenant `STARHE_JAVA_BIN: path.join(process.resourcesPath, 'jre', 'bin', 'java')` en mode packagé (extension `.exe` sur Windows). En mode dev, la var n'est pas définie → bridge retombe sur `shutil.which("java")` du PATH. La var est héritée par le subprocess Python via `cmd.Env = append(os.Environ(), ...)` dans `pythonCmd()` (cf. `go_server/config.go`).
+- [x] **Rebuild PyInstaller worker** — Nécessaire car `weasis_bridge.py` a changé (le bundle PyInstaller compile les `.py` en `.pyc` dans `_internal/PYZ-00.pyz`). 47 s de rebuild, taille inchangée à 527 MB.
+- [x] **`.gitignore`** — Ajout `react_ui/build-resources/jre-*/` (JRE téléchargées par plateforme, ~130 MB chacune, jamais à commit ; régénérées par `fetch_jre.{sh,ps1}` dans la CI).
+- [x] **Build `.dmg` final** — `STARHE-0.6.2-mac-arm64.dmg` = **325 MB** (vs 284 MB Phase 2, +41 MB JRE compressée). Contenu `STARHE.app/Contents/Resources/` vérifié : `go_server/` (13 MB) + `weasis-dcm2png/` (18 MB JAR + OpenCV) + `starhe_worker/` (568 MB) + `jre/` (151 MB) = **750 MB extraits**. `jre/bin/java -version` répond Temurin 17.0.19.
+- [x] **README.md** — Section "## Distribution — Builds Electron" mise à jour : tableau extraResources + ligne `jre/`, prérequis `curl`/`tar`/PowerShell, étape 3 `fetch_jre.sh` dans "Builder localement", nouvelle sous-section "JRE Temurin embarquée (Phase 3)" avec tableau des 2 vars d'env.
+
+> **Validation bout-en-bout pendante** : analyser un `.dcm` Supersonic/Canon depuis le `.dmg` installé et vérifier que (a) `weasis_available()` retourne `True` (JRE embarquée fonctionne), (b) le bridge produit les PNG via Java (et non fallback pydicom — logs `[WEASIS] OK` vs `[WEASIS] fallback pydicom`), (c) les résultats matchent ceux du venv dev.
+
+---
+### 📦 Distribution Electron — Phase 2 (10 juin 2026)
+
+> Phase 2 = bundler le worker Python avec PyInstaller `--onedir` pour rendre l'installeur Electron réellement autonome (plus de dépendance au venv local).
+
+- [x] **`pythonCode/modules/starhe_plugin/starhe_worker.py`** — Dispatcher unique pour les 5 entry points Python. Whitelist `_ALLOWED` mappe `--module=X` vers un module qualifié (`pipeline`, `pipeline_mp4`, `ai.run_live`, `dicom.loader_cli`, `dicom.loader_mp4_cli`) puis appelle `runpy.run_module(name, run_name="__main__", alter_sys=True)`. Évite de produire 5 exécutables × 530 MB.
+- [x] **`scripts/starhe_worker.spec`** — Spec PyInstaller `--onedir` (démarrage ~5× plus rapide que `--onefile`). Stratégie : injection `sys.path.insert(0, SRC_ROOT)` AVANT `collect_submodules` (sinon `starhe_plugin` introuvable car non installé dans le venv) ; chemins absolus via `SPECPATH`+`SRC_ROOT` ; `collect_submodules('starhe_plugin')` et `collect_submodules('prepUS')` pour suivre les imports dynamiques via `runpy` ; liste manuelle des sous-modules `mmengine`/`mmcv`/`mmdet` (pas `collect_submodules` car `mmcv.ops` plante à l'analyse avec `mmcv-lite` qui n'a pas `mmcv._ext`) ; `collect_data_files` pour fichiers `.yml`/`.json` des configs mm* ; exclusions `tkinter`/`matplotlib`/`pandas`/`sklearn`/`tensorboard` (−150 MB).
+- [x] **Build PyInstaller validé** — `pyinstaller ../../scripts/starhe_worker.spec --noconfirm` produit `pythonCode/modules/dist/starhe_worker/` (527 MB, 1 EXE + 1 dossier `_internal/`) en ~52 s. Les 5 entry points testés via `--help` : tous dispatchent correctement vers le bon argparse.
+- [x] **`go_server/config.go`** — Nouveau champ `WorkerBin` lu depuis `STARHE_WORKER_BIN` ; nouveau helper `pythonCmd(ctx, module, args...)` qui retourne un `*exec.Cmd` configuré (Dir + Env `PYTHONPATH`/`PYTHONUTF8`). Si `WorkerBin != ""` → `starhe_worker --module X args...` ; sinon → `python -m starhe_plugin.X args...`.
+- [x] **`go_server/handlers*.go` refactor** — Les 6 spawn Python (`handlers.go` × 2 + `handlers_dicom.go` × 1 + `handlers_mp4.go` × 3) refactorés pour passer par `pythonCmd()`. Suppression des `os.Environ()` et `exec.CommandContext` répétés ; imports `os/exec` retirés des 3 fichiers handlers. Compilation Go OK ; smoke test `/health` OK avec `STARHE_WORKER_BIN` défini.
+- [x] **`react_ui/package.json`** — `mac.extraResources` ajoute `{ "from": "../pythonCode/modules/dist/starhe_worker", "to": "starhe_worker" }`. (Linux/Windows à ajouter quand les builds par OS seront faits via CI.)
+- [x] **`react_ui/electron/main.ts`** — Le spawn Go reçoit désormais `STARHE_WORKER_BIN: path.join(process.resourcesPath, 'starhe_worker', 'starhe_worker')` en mode packagé (extension `.exe` sur Windows). En mode dev (`isDev`), la var n'est pas définie → Go retombe sur le venv local.
+- [x] **Build `.dmg` final** — `STARHE-0.6.2-mac-arm64.dmg` = **284 MB** (vs 111 MB Phase 1, +173 MB pour Python + torch + mmdet). Contenu `STARHE.app/Contents/Resources/` vérifié : `go_server/` (13 MB) + `weasis-dcm2png/` (2.6 MB) + `starhe_worker/` (568 MB décompressé).
+- [x] **README.md** — Section "## Distribution — Builds Electron" mise à jour : ligne `starhe_worker` dans tableau extraResources, prérequis PyInstaller, étape 2 dans "Builder localement", nouvelle sous-section "Worker Python bundlé (Phase 2)" avec tableau de mapping des 5 modules + limitations Phase 2.
+
+> **Validation bout-en-bout pendante** : tester l'analyse réelle d'un `.dcm` depuis le `.dmg` installé (avec MongoDB lancé), pour confirmer que torch + mmdet + prepUS chargent bien depuis le bundle PyInstaller (et non depuis un venv masqué). Si KO → diagnostiquer imports manquants dans `warn-starhe_worker.txt` et ajouter aux `hiddenimports`.
+
+---
+### 📦 Distribution Electron — Phase 4 (10 juin 2026)
+
+> Phase 4 = télécharger les modèles `.pth` (~750 MB) au premier lancement plutôt que de les embarquer dans le `.dmg`. Garde l'installeur léger (325 MB) et permet de mettre à jour les poids indépendamment des releases applicatives.
+
+- [x] **`pythonCode/modules/starhe_plugin/config.py`** — Ajout d'une variable `WEIGHTS_DIR = os.environ.get("STARHE_WEIGHTS_DIR") or MODELS_DIR`. Les 3 checkpoints `.pth` (`STARHE_RISK_CHECKPOINT`, `STARHE_DETECT_CHECKPOINT`, `STARHE_DINO_CHECKPOINT`) sont désormais résolus relativement à `WEIGHTS_DIR` ; les fichiers de config `.py` mmaction/mmdet restent dans `MODELS_DIR` (livrés avec le code). Smoke test : `STARHE_WEIGHTS_DIR=/tmp/foo python -c "from starhe_plugin import config; print(config.STARHE_RISK_CHECKPOINT)"` → `/tmp/foo/best_acc_mean_cls_f1_epoch_14.pth` ✅.
+- [x] **`react_ui/electron/download-models.ts`** — Nouveau module (~230 lignes) :
+  - Constantes `REPO_OWNER='cesthugo'`, `REPO_NAME='PLUGIN1-MEDomics'`, `RELEASE_TAG='STARHE_MODELS'` + override de test `TEST_BASE_URL = process.env.STARHE_MODELS_BASE_URL || ''`.
+  - `REQUIRED_MODELS` = `[best_acc_mean_cls_f1_epoch_14.pth, best_coco_bbox_mAP_50_iter_2100.pth]`.
+  - `getWeightsDir()` → `path.join(app.getPath('userData'), 'models')` (sur macOS : `~/Library/Application Support/starhe-plugin/models/`).
+  - `modelsReady()` vérifie l'existence + taille > 1 Mo de chaque fichier requis.
+  - `resolveAssetUrl(name)` : 3 chemins — (1) `${TEST_BASE_URL}/${name}` si défini (PoC local), (2) GitHub API `/releases/tags/STARHE_MODELS` + header `Accept: application/octet-stream` si `GITHUB_TOKEN` défini (repo privé), (3) URL publique `releases/download/STARHE_MODELS/${name}` sinon.
+  - `httpGet(url, headers)` suit jusqu'à 6 redirections, gère `http:` (test) et `https:` (GitHub), User-Agent custom.
+  - `downloadOne(name, destDir, onBytes)` écrit dans `.part` puis renomme atomiquement à la fin.
+  - `ensureModelsDownloaded()` ouvre une fenêtre Electron 540×340 frameless, attend `did-finish-load`, télécharge séquentiellement chaque fichier en émettant `download:progress` (phase `start|progress|done|error`, octets reçus / total, % global), gère les actions IPC `download:retry` et `download:quit`, ferme la fenêtre 600 ms après succès.
+- [x] **`react_ui/electron/download-models.html`** — UI sombre 540×340 (`#0c1018`) : titre "Téléchargement des modèles STARHE", barre de progression, ligne de détail (MB téléchargés / total + %), zone d'erreur avec boutons Réessayer / Quitter. Écoute `window.starheDownload.onProgress(evt => ...)`.
+- [x] **`react_ui/electron/download-preload.ts`** — Bridge `contextBridge` qui expose `window.starheDownload` = `{ onProgress(cb), retry(), quit() }` ; câble `ipcRenderer.on('download:progress')` et `ipcRenderer.send('download:retry'|'download:quit')`.
+- [x] **`react_ui/electron/main.ts`** — `bootSequence()` insère le bloc Phase 4 entre splash et spawn Go : `if (!isDev && !modelsReady()) { splashWin?.close(); await ensureModelsDownloaded(); createSplash(); }`. Le spawn Go reçoit en plus `STARHE_WEIGHTS_DIR: getWeightsDir()` en mode packagé (en dev, la var reste absente → fallback `MODELS_DIR` du repo).
+- [x] **`react_ui/package.json` — `build:electron-main`** — Copie `download-models.html` vers `electron-dist/` (en plus de `splash.html`). `tsc -p tsconfig.electron.json` compile `download-models.ts` + `download-preload.ts` automatiquement.
+- [x] **PoC validé end-to-end** — `python3 -m http.server 8765` dans `pythonCode/modules/starhe_plugin/models/`, `rm -rf "$HOME/Library/Application Support/starhe-plugin"`, lancement `STARHE_MODELS_BASE_URL=http://localhost:8765 STARHE.app/Contents/MacOS/STARHE`. Résultat : la fenêtre de téléchargement s'ouvre, les 2 fichiers (312 MB + 439 MB = 750 MB) arrivent dans `~/Library/Application Support/starhe-plugin/models/` en ~8 s. Serveur HTTP confirme 1 HEAD + 2 GET → HTTP 200.
+- [x] **`.dmg` final inchangé** — `STARHE-0.6.2-mac-arm64.dmg` = **325 MB** (les `.pth` ne sont PAS embarqués, conformément à l'objectif Phase 4). Le `.dmg` reste identique en taille à Phase 3 ; seul le code Electron grandit (~quelques Ko).
+
+**Limitations / prérequis pour la prod** :
+1. Le tag de release `STARHE_MODELS` sur `cesthugo/PLUGIN1-MEDomics` est actuellement **privé** → le téléchargement réel échouera (404) sans `GITHUB_TOKEN`. Pour la distribution, rendre la release publique, ou héberger les `.pth` sur un CDN public et mettre à jour `RELEASE_DL_BASE`.
+2. `STARHE_MODELS_BASE_URL` est l'override de test (point vers n'importe quel serveur HTTP local qui sert les fichiers à la racine). Très utile pour les démos hors ligne ou la CI.
+3. Pour forcer un re-téléchargement après mise à jour des poids : supprimer le dossier `app.getPath('userData')/models/`.
+
+**À venir** :
+- [ ] **Validation E2E avec analyse complète** — après le PoC de téléchargement, lancer une vraie analyse `.dcm` depuis le `.dmg` installé pour valider que le pipeline charge bien les `.pth` depuis `STARHE_WEIGHTS_DIR` et non depuis `MODELS_DIR` (qui est vide dans le bundle PyInstaller).
+- [ ] **Rendre la release `STARHE_MODELS` publique** (ou changer d'hébergeur) pour que les utilisateurs finaux n'aient pas besoin de `GITHUB_TOKEN`.
+- [ ] **Indicateur de re-téléchargement** — ajouter un bouton dans Settings React "Mettre à jour les modèles" qui appelle un IPC vers Electron pour relancer `ensureModelsDownloaded()` même si `modelsReady()` retourne `true`.
+
+---### 📦 Distribution Electron — Phase 5 (10 juin 2026)
+
+> Phase 5 = CI GitHub Actions multi-plateformes. Sur `git push` d'un tag `v*` (ou via `workflow_dispatch`), une matrice de 4 jobs builde la grille complète d'installeurs MEDomics-aligned et publie une release GitHub en brouillon avec les artefacts + `SHA256SUMS.txt`.
+
+- [x] **`react_ui/package.json` — `extraResources` Linux/Windows complétés** — Avant : seul `mac.extraResources` listait `starhe_worker` et `jre`. Maintenant les blocs `linux` et `win` listent aussi `starhe_worker` (chemin `../pythonCode/modules/dist/starhe_worker`, identique cross-OS car PyInstaller produit un dossier homonyme) et la JRE (`jre-linux-${arch}` / `jre-win-${arch}`, mappant les noms produits par `fetch_jre.sh`/`fetch_jre.ps1`). La variable `${arch}` d'electron-builder est résolue par electron-builder en `x64`/`arm64` à la volée.
+- [x] **`.github/workflows/release.yml`** — Nouveau workflow (~150 lignes) :
+  - **Triggers** : `push` sur tag `v*` (release auto) + `workflow_dispatch` (test manuel sans publication).
+  - **`permissions: contents: write`** — requis pour `softprops/action-gh-release` qui crée la release et y upload des assets.
+  - **Matrice de build** (4 runners GitHub-hosted) :
+
+    | Runner | `platform` | `eb_flags` | Cibles produites |
+    |---|---|---|---|
+    | `macos-14` (Apple Silicon) | `mac-arm64` | `--mac --arm64` | `.dmg`, `.pkg`, `.zip` arm64 |
+    | `macos-13` (Intel) | `mac-x64` | `--mac --x64` | `.dmg`, `.pkg`, `.zip` x64 |
+    | `ubuntu-latest` | `linux-x64` | `--linux --x64` | `.deb`, `.AppImage` |
+    | `windows-latest` | `win-x64` | `--win --x64` | `.exe` (NSIS) |
+
+  - **Étapes par job** (séquentielles) :
+    1. `actions/checkout@v4`
+    2. `setup-node@v4` (Node 20) avec cache npm sur `react_ui/package-lock.json`
+    3. `setup-python@v5` (Python 3.13) avec cache pip sur `requirements.txt`
+    4. `setup-go@v5` (Go 1.22) avec cache `go.sum`
+    5. Linux only : `apt-get install fakeroot dpkg rpm libarchive-tools` (requis par electron-builder pour `.deb`/`.AppImage`)
+    6. `go build -trimpath -ldflags "-s -w" -o go_server` (ou `.exe`) dans `go_server/`
+    7. `pip install pyinstaller==6.20.0` + `requirements.txt`
+    8. `pyinstaller ../../scripts/starhe_worker.spec --noconfirm` dans `pythonCode/modules/`
+    9. JRE : `bash scripts/fetch_jre.sh <platform>` sur Unix, `pwsh .\scripts\fetch_jre.ps1 -Platform <platform>` sur Windows
+    10. `npm ci` puis `npm run build:electron` dans `react_ui/`
+    11. `npx electron-builder <eb_flags> --publish never` — `--publish never` empêche electron-builder de tenter de publier directement (on gère la release dans le job final)
+    12. Copie des installeurs finaux (`.dmg`, `.pkg`, `.zip`, `.deb`, `.AppImage`, `.exe`) dans `dist-artifacts/`, puis `upload-artifact@v4` nommé `starhe-<platform>`
+  - **Env vars critiques** : `CSC_IDENTITY_AUTO_DISCOVERY=false` (empêche electron-builder de chercher des certificats de signature absents et de faire échouer le build), `GH_TOKEN=${{ secrets.GITHUB_TOKEN }}` (téléchargement des binaires Electron derrière proxy CI)
+  - **Job `release`** (dépend de `build`) — ne s'exécute que sur `push` de tag (pas sur `workflow_dispatch`) :
+    1. Télécharge tous les artefacts via `download-artifact@v4` avec `pattern: starhe-*` + `merge-multiple: true`
+    2. Calcule `SHA256SUMS.txt` avec `sha256sum *` sur tous les fichiers téléchargés
+    3. `softprops/action-gh-release@v2` : crée la release en `draft: true` (relecture humaine avant publication), `generate_release_notes: true` (changelog auto depuis les PRs/commits), upload tous les `artifacts/*` incluant le `SHA256SUMS.txt`
+- [x] **Validation YAML** — `get_errors` sur le fichier : 0 erreur. JSON `package.json` revalidé via `node -e` après édition des `extraResources`.
+
+**Pré-requis côté repo pour que le workflow fonctionne** :
+- [ ] **`GITHUB_TOKEN` automatique** — déjà disponible nativement dans GitHub Actions (`secrets.GITHUB_TOKEN`), aucun setup manuel requis pour la création de releases.
+- [ ] **Tag annoté** — `git tag -a v0.6.3 -m "Release 0.6.3" && git push origin v0.6.3` déclenche le workflow.
+- [ ] **Test à blanc** — déclencher manuellement via `gh workflow run release.yml` (ou onglet Actions UI) avant le premier tag, pour valider les 4 builds sans publier de release.
+
+**Limitations connues** :
+- [ ] **`weasis-dcm2png/native/`** — ne contient actuellement que le `.dylib` macOS. Pour Linux/Windows, le bridge Java tombera en fallback pydicom au runtime (pas d'erreur, mais perd l'application des LUT). Solution : régénérer les natifs OpenCV par OS (`mvn package` avec profils platform-specific dans `third_party/weasis-dcm2png/pom.xml`) — à faire avant la première vraie release distribuée hors macOS.
+- [ ] **Signature & notarisation** — non couvertes par ce workflow. Pour macOS : ajouter secrets `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `CSC_LINK` (cert .p12 base64), `CSC_KEY_PASSWORD`, retirer `CSC_IDENTITY_AUTO_DISCOVERY=false`, et appeler `xcrun notarytool` post-build. Pour Windows : secret `CSC_LINK` (cert EV .pfx base64) + `CSC_KEY_PASSWORD`. Hors scope MVP.
+- [ ] **Runners macOS coûteux** — `macos-14` et `macos-13` consomment 10× les minutes Linux sur le quota GitHub gratuit. Pour les tests d'intégration, restreindre `workflow_dispatch` à `ubuntu-latest` uniquement.
+
+---### � Organisation du projet — scripts/ + Makefile (29 mai 2026)
 - [x] **`scripts/` — Déplacement des lanceurs** — `setup.sh`, `setup.ps1`, `run_tkinter.sh`, `run_tkinter.ps1`, `start_react.sh`, `start_react.ps1`, `download_models.py` déplacés depuis la racine vers `scripts/` ; chemins internes mis à jour (`.sh` : `dirname "$0"/..` ; `.ps1` : `Split-Path -Parent $PSScriptRoot`) ; références croisées corrigées (`start_react.sh` → `scripts/setup.sh`, `start_react.ps1` → `scripts/setup.ps1`)
 - [x] **`Makefile`** — Nouveau task runner à la racine ; cibles : `setup`, `tkinter`, `react`, `build`, `help` (par défaut) ; détection OS automatique Windows/Unix ; délègue aux scripts dans `scripts/` ; `make help` testé ✅
 

@@ -16,7 +16,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -152,18 +151,12 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	args := []string{
-		"-m", "starhe_plugin.dicom.loader_cli",
 		dicomPath,
 		"--quality", strconv.Itoa(quality),
 		"--max-dim", strconv.Itoa(maxDim),
 	}
 
-	cmd := exec.CommandContext(ctx, cfg.PythonExe, args...)
-	cmd.Dir = cfg.PythonModPath
-	cmd.Env = append(os.Environ(),
-		"PYTHONPATH="+cfg.PythonModPath,
-		"PYTHONUTF8=1",
-	)
+	cmd := pythonCmd(ctx, "dicom.loader_cli", args...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

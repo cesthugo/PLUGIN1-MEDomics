@@ -29,9 +29,34 @@ from starhe_plugin.utils.go_print import go_print
 
 
 # ── Chemins des artefacts Weasis ─────────────────────────────────────────────
-_WEASIS_DIR        = Path(PROJECT_ROOT) / "third_party" / "weasis-dcm2png"
-WEASIS_JAR         = _WEASIS_DIR / "dist" / "weasis-dcm2png.jar"
-WEASIS_NATIVE_DIR  = _WEASIS_DIR / "dist" / "native"
+# En mode dev : pointe vers `third_party/weasis-dcm2png/dist/` du dépôt.
+# En mode bundle Electron : `STARHE_WEASIS_DIR` est défini par main.ts et
+# pointe vers `STARHE.app/Contents/Resources/weasis-dcm2png/` (extraResources),
+# qui contient directement `weasis-dcm2png.jar` + `native/`.
+_WEASIS_DIST_ENV = os.environ.get("STARHE_WEASIS_DIR")
+if _WEASIS_DIST_ENV:
+    WEASIS_DIST_DIR = Path(_WEASIS_DIST_ENV)
+else:
+    WEASIS_DIST_DIR = Path(PROJECT_ROOT) / "third_party" / "weasis-dcm2png" / "dist"
+
+WEASIS_JAR         = WEASIS_DIST_DIR / "weasis-dcm2png.jar"
+WEASIS_NATIVE_DIR  = WEASIS_DIST_DIR / "native"
+
+
+def _java_bin() -> str | None:
+    """Résout l'exécutable `java` à utiliser.
+
+    Priorité :
+    1. `STARHE_JAVA_BIN` (défini par Electron en mode packagé → JRE Temurin
+       embarquée dans `STARHE.app/Contents/Resources/jre/bin/java`).
+    2. `java` du PATH système (mode dev avec `brew install openjdk@17`).
+
+    Retourne `None` si rien n'est trouvé.
+    """
+    env_bin = os.environ.get("STARHE_JAVA_BIN")
+    if env_bin and Path(env_bin).is_file():
+        return env_bin
+    return shutil.which("java")
 
 
 def weasis_available() -> bool:
@@ -42,11 +67,12 @@ def weasis_available() -> bool:
     """
     if not WEASIS_JAR.is_file():
         return False
-    if shutil.which("java") is None:
+    java = _java_bin()
+    if java is None:
         return False
     try:
         res = subprocess.run(
-            ["java", "-version"],
+            [java, "-version"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=5,
@@ -66,8 +92,12 @@ def export_dicom_to_pngs_weasis(dicom_path: str | Path,
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    java = _java_bin()
+    if java is None:
+        raise RuntimeError("java introuvable (ni STARHE_JAVA_BIN ni PATH)")
+
     cmd = [
-        "java",
+        java,
         f"-Djava.library.path={WEASIS_NATIVE_DIR}",
         "--enable-native-access=ALL-UNNAMED",
         "-jar", str(WEASIS_JAR),

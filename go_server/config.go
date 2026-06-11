@@ -8,7 +8,9 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 )
@@ -17,9 +19,14 @@ type appConfig struct {
 	// Réseau
 	Port string
 
-	// Python
+	// Python — mode "venv" (dev)
 	PythonExe     string // Chemin absolu vers python du venv
 	PythonModPath string // Dossier racine des modules Python (contient starhe_plugin/)
+
+	// Python — mode "bundle" (Electron packagé). Si non vide, on utilise
+	// l'exécutable PyInstaller starhe_worker à la place du venv.
+	// Convention : starhe_worker --module <name> <args...>
+	WorkerBin string
 
 	// MongoDB
 	MongoURI        string
@@ -52,6 +59,7 @@ var cfg = appConfig{
 
 	PythonExe:     envOr("STARHE_PYTHON_EXE", defaultPythonExe()),
 	PythonModPath: envOr("STARHE_PYTHON_PATH", filepath.Join(serverDir(), "..", "pythonCode", "modules")),
+	WorkerBin:     os.Getenv("STARHE_WORKER_BIN"), // vide en dev, défini par Electron en prod
 
 	MongoURI:        envOr("MONGO_URI", "mongodb://localhost:54017/"),
 	MongoDatabase:   envOr("MONGO_DB", "medomics"),
@@ -64,3 +72,25 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
+
+// pythonCmd construit la commande pour exécuter un module Python STARHE.
+// En mode bundle (WorkerBin défini) : starhe_worker --module <name> <args...>
+// En mode venv :                       python -m starhe_plugin.<name> <args...>
+// Env et Dir sont pré-configurés (PYTHONPATH, PYTHONUTF8, cwd).
+func pythonCmd(ctx context.Context, module string, args ...string) *exec.Cmd {
+	var cmd *exec.Cmd
+	if cfg.WorkerBin != "" {
+		full := append([]string{"--module", module}, args...)
+		cmd = exec.CommandContext(ctx, cfg.WorkerBin, full...)
+	} else {
+		full := append([]string{"-m", "starhe_plugin." + module}, args...)
+		cmd = exec.CommandContext(ctx, cfg.PythonExe, full...)
+	}
+	cmd.Dir = cfg.PythonModPath
+	cmd.Env = append(os.Environ(),
+		"PYTHONPATH="+cfg.PythonModPath,
+		"PYTHONUTF8=1", // force UTF-8 sous Windows
+	)
+	return cmd
+}
+

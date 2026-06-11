@@ -169,7 +169,6 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // ── Fenêtre live ───────────────────────────────────────────────────────────
   const [showLive,  setShowLive]  = useState(false);
   const [showBatch, setShowBatch] = useState(false);
-  const [showOrthanc, setShowOrthanc] = useState(false);
 
   // ── Vue multi-panneaux ─────────────────────────────────────────────────────
   const [pendingLayoutOpen, setPendingLayoutOpen] = useState<BatchResultToOpen[] | null>(null);
@@ -564,7 +563,6 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           onResetAnalysis={onResetAnalysis}
           onOpenLive={() => setShowLive(true)}
           onOpenBatch={() => setShowBatch(true)}
-          onOpenOrthanc={() => setShowOrthanc(true)}
           onGotoFrame={onGotoFrame}
           onToggleTheme={() => setDarkMode(d => !d)}
           onAnalysisModeChange={mode => updateSettings({ analysisMode: mode })}

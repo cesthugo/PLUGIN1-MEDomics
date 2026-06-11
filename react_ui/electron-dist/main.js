@@ -51,7 +51,11 @@ const electron_1 = require("electron");
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
+const download_models_1 = require("./download-models");
 const isDev = !electron_1.app.isPackaged;
+// Port + URL du serveur Go — alignés avec go_server/config.go (PORT env)
+const GO_PORT = process.env.STARHE_PORT ?? '8082';
+const GO_BASE_URL = `http://localhost:${GO_PORT}`;
 // ── Serveur Go ────────────────────────────────────────────────────────────────
 let goServer = null;
 /** true dès que l'app commence à se fermer — inhibe les redémarrages */
@@ -71,6 +75,29 @@ function getGoServerBin() {
     // En production : binaire copié dans les ressources packagées
     return path.join(process.resourcesPath, 'go_server', bin);
 }
+/** Ping GET /health — résout au premier 200, rejette après `timeoutMs`. */
+function waitForGoHealthy(timeoutMs = 30000, intervalMs = 300) {
+    const deadline = Date.now() + timeoutMs;
+    return new Promise((resolve, reject) => {
+        const tryOnce = () => {
+            const req = electron_1.net.request(`${GO_BASE_URL}/health`);
+            req.on('response', (res) => {
+                if (res.statusCode === 200)
+                    return resolve();
+                scheduleRetry();
+            });
+            req.on('error', scheduleRetry);
+            req.end();
+        };
+        const scheduleRetry = () => {
+            if (Date.now() > deadline) {
+                return reject(new Error(`Go server n'a pas répondu sur ${GO_BASE_URL}/health en ${timeoutMs} ms`));
+            }
+            setTimeout(tryOnce, intervalMs);
+        };
+        tryOnce();
+    });
+}
 function startGoServer() {
     if (appQuitting)
         return;
@@ -82,7 +109,31 @@ function startGoServer() {
     }
     goServer = (0, child_process_1.spawn)(bin, [], {
         stdio: 'inherit',
-        env: { ...process.env },
+        env: {
+            ...process.env,
+            PORT: GO_PORT,
+            // Pointe le bridge weasis vers la copie bundlée (extraResources).
+            // Ignoré si non-packagé : weasis_bridge.py recalcule depuis PROJECT_ROOT.
+            ...(isDev ? {} : { STARHE_WEASIS_DIR: path.join(process.resourcesPath, 'weasis-dcm2png') }),
+            // Pointe le bridge weasis vers la JRE Temurin embarquée (Phase 3).
+            // En dev : utilise le `java` du PATH (brew install openjdk@17).
+            ...(isDev
+                ? {}
+                : {
+                    STARHE_JAVA_BIN: path.join(process.resourcesPath, 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java'),
+                }),
+            // Pointe Go vers le worker Python bundlé (PyInstaller --onedir).
+            // Si non défini, Go retombe sur le venv local (mode dev).
+            ...(isDev
+                ? {}
+                : {
+                    STARHE_WORKER_BIN: path.join(process.resourcesPath, 'starhe_worker', process.platform === 'win32' ? 'starhe_worker.exe' : 'starhe_worker'),
+                }),
+            // Pointe le pipeline Python vers le dossier où les `.pth` ont été
+            // téléchargés au 1er lancement (Phase 4). En dev : non défini → utilise
+            // pythonCode/modules/starhe_plugin/models/ (.pth versionnés en local).
+            ...(isDev ? {} : { STARHE_WEIGHTS_DIR: (0, download_models_1.getWeightsDir)() }),
+        },
     });
     console.log(`[STARHE] Serveur Go démarré (pid ${goServer.pid}, tentative ${restartAttempt + 1})`);
     goServer.on('error', (err) => console.error('[STARHE] Erreur démarrage serveur Go :', err.message));
@@ -108,30 +159,107 @@ function startGoServer() {
     }, 30000);
 }
 // ── Fenêtre principale ────────────────────────────────────────────────────────
-function createWindow() {
-    const win = new electron_1.BrowserWindow({
+let splashWin = null;
+let mainWin = null;
+function createSplash() {
+    splashWin = new electron_1.BrowserWindow({
+        width: 480,
+        height: 280,
+        frame: false,
+        resizable: false,
+        movable: true,
+        alwaysOnTop: true,
+        transparent: false,
+        backgroundColor: '#0c1018',
+        show: true,
+        webPreferences: { contextIsolation: true, nodeIntegration: false },
+    });
+    splashWin.loadFile(path.join(__dirname, 'splash.html'));
+    splashWin.on('closed', () => { splashWin = null; });
+}
+function createMainWindow() {
+    mainWin = new electron_1.BrowserWindow({
         width: 1440,
         height: 900,
         minWidth: 1024,
         minHeight: 700,
         title: 'STARHE — MEDomics Plugin',
         backgroundColor: '#0c1018',
+        show: false, // affiché après ready-to-show pour éviter le flash blanc
         webPreferences: {
-            // Chemin vers le script preload compilé (electron-dist/preload.js)
             preload: path.join(__dirname, 'preload.js'),
-            contextIsolation: true, // Sécurité : pas d'accès Node depuis le renderer
+            contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false, // Nécessaire pour les preloads non-sandboxés
+            sandbox: false,
         },
     });
     if (isDev) {
-        // Charge le serveur de développement Vite (avec HMR)
-        win.loadURL('http://localhost:5173');
-        win.webContents.openDevTools();
+        mainWin.loadURL('http://localhost:5173');
+        mainWin.webContents.openDevTools();
     }
     else {
-        // Charge le build statique (dist/index.html)
-        win.loadFile(path.join(__dirname, '../dist/index.html'));
+        mainWin.loadFile(path.join(__dirname, '../dist/index.html'));
+    }
+    mainWin.once('ready-to-show', () => {
+        mainWin?.show();
+        splashWin?.close();
+    });
+    mainWin.on('closed', () => { mainWin = null; });
+}
+/** Affiche un dialog clair si le serveur Go ne répond pas (MongoDB down, port pris, etc.). */
+async function showGoUnavailableDialog(err) {
+    const { response } = await electron_1.dialog.showMessageBox({
+        type: 'error',
+        title: 'STARHE — Serveur indisponible',
+        message: 'Le serveur Go STARHE n\'a pas pu démarrer.',
+        detail: `${err.message}\n\n` +
+            `Vérifie que :\n` +
+            `  • MongoDB tourne sur le port 54017 (prérequis externe)\n` +
+            `  • Le port ${GO_PORT} n'est pas déjà utilisé\n` +
+            `  • Le binaire go_server est présent dans les ressources de l'app\n\n` +
+            `Tu peux réessayer ou quitter l'application.`,
+        buttons: ['Réessayer', 'Quitter'],
+        defaultId: 0,
+        cancelId: 1,
+    });
+    if (response === 0) {
+        // Réessai : la window principale est déjà créée, on relance juste la sonde
+        await bootSequence();
+    }
+    else {
+        appQuitting = true;
+        electron_1.app.quit();
+    }
+}
+/** Orchestration : splash → download models (1er lancement) → spawn Go → wait healthy → main window. */
+async function bootSequence() {
+    if (!splashWin)
+        createSplash();
+    // Phase 4 : télécharger les modèles `.pth` si absents (mode packagé uniquement).
+    // En dev, on suppose qu'ils sont déjà dans pythonCode/.../models/.
+    if (!isDev && !(0, download_models_1.modelsReady)()) {
+        splashWin?.close();
+        try {
+            await (0, download_models_1.ensureModelsDownloaded)();
+        }
+        catch (err) {
+            // Utilisateur a cliqué "Quitter" dans la fenêtre download
+            appQuitting = true;
+            electron_1.app.quit();
+            return;
+        }
+        if (!splashWin)
+            createSplash();
+    }
+    startGoServer();
+    try {
+        await waitForGoHealthy();
+        if (!mainWin)
+            createMainWindow();
+    }
+    catch (err) {
+        splashWin?.close();
+        await showGoUnavailableDialog(err);
     }
 }
 // ── IPC : dialogue natif fichiers DICOM ───────────────────────────────────────
@@ -155,12 +283,11 @@ electron_1.ipcMain.handle('open-dicom-files', async () => {
 });
 // ── Cycle de vie de l'application ─────────────────────────────────────────────
 electron_1.app.whenReady().then(() => {
-    startGoServer();
-    createWindow();
+    bootSequence();
     // macOS : recréer la fenêtre si l'app est réactivée sans fenêtre ouverte
     electron_1.app.on('activate', () => {
         if (electron_1.BrowserWindow.getAllWindows().length === 0)
-            createWindow();
+            bootSequence();
     });
 });
 electron_1.app.on('before-quit', () => {

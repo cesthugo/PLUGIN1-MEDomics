@@ -1,6 +1,8 @@
 {
-  "name": "starhe-plugin-react-ui",
-  "version": "0.1.0",
+  "name": "starhe-plugin",
+  "version": "0.6.2",
+  "description": "STARHE — Plugin MEDomics (détection et évaluation du risque sur DICOM échographique hépatique)",
+  "author": "MEDomics-UdeS",
   "private": true,
   "type": "module",
   "main": "electron-dist/main.js",
@@ -11,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "dev:electron": "concurrently --kill-others -n vite,electron -c cyan,yellow \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build:renderer": "tsc --noEmit && vite build",
-    "build:electron-main": "node -e \"const fs=require('fs');fs.mkdirSync('electron-dist',{recursive:true});fs.writeFileSync('electron-dist/package.json',JSON.stringify({type:'commonjs'}))\" && tsc -p tsconfig.electron.json",
+    "build:electron-main": "node -e \"const fs=require('fs');fs.mkdirSync('electron-dist',{recursive:true});fs.writeFileSync('electron-dist/package.json',JSON.stringify({type:'commonjs'}));fs.copyFileSync('electron/splash.html','electron-dist/splash.html');fs.copyFileSync('electron/download-models.html','electron-dist/download-models.html')\" && tsc -p tsconfig.electron.json",
     "build:electron": "npm run build:renderer && npm run build:electron-main",
     "electron:pack": "npm run build:electron && electron-builder"
   },
@@ -33,42 +35,76 @@
   },
   "build": {
     "appId": "com.medomics.starhe-plugin",
-    "productName": "STARHE — MEDomics",
+    "productName": "STARHE",
+    "artifactName": "STARHE-${version}-${os}-${arch}.${ext}",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build-resources"
     },
     "files": [
       "dist/**/*",
       "electron-dist/**/*",
-      "!**/.DS_Store"
+      "!**/.DS_Store",
+      "!**/*.map"
     ],
     "extraResources": [
       {
-        "from": "../go_server/go_server",
-        "to": "go_server/go_server"
+        "from": "../third_party/weasis-dcm2png/dist",
+        "to": "weasis-dcm2png",
+        "filter": ["**/*"]
       }
     ],
     "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
+      "category": "public.app-category.medical",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extraResources": [
+        { "from": "../go_server/go_server", "to": "go_server/go_server" },
+        { "from": "../pythonCode/modules/dist/starhe_worker", "to": "starhe_worker" },
+        { "from": "build-resources/jre-mac-${arch}", "to": "jre" }
       ],
-      "category": "public.app-category.medical"
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "pkg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ]
+    },
+    "dmg": {
+      "artifactName": "STARHE-${version}-mac-${arch}.${ext}",
+      "title": "STARHE ${version}"
+    },
+    "pkg": {
+      "artifactName": "STARHE-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "category": "Science",
+      "icon": "build-resources/icon.png",
+      "synopsis": "STARHE — Plugin MEDomics (DICOM hépatique)",
+      "extraResources": [
+        { "from": "../go_server/go_server", "to": "go_server/go_server" },
+        { "from": "../pythonCode/modules/dist/starhe_worker", "to": "starhe_worker" },
+        { "from": "build-resources/jre-linux-${arch}", "to": "jre" }
+      ],
+      "target": [
+        { "target": "deb", "arch": ["x64"] },
+        { "target": "AppImage", "arch": ["x64"] }
+      ]
     },
     "win": {
+      "extraResources": [
+        { "from": "../go_server/go_server.exe", "to": "go_server/go_server.exe" },
+        { "from": "../pythonCode/modules/dist/starhe_worker", "to": "starhe_worker" },
+        { "from": "build-resources/jre-win-${arch}", "to": "jre" }
+      ],
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
+        { "target": "nsis", "arch": ["x64"] }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "STARHE-${version}-win-${arch}.${ext}"
     }
   }
 }

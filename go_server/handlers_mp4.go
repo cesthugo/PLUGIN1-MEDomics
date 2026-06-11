@@ -18,7 +18,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -138,18 +137,12 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	args := []string{
-		"-m", "starhe_plugin.dicom.loader_mp4_cli",
 		tmpPath,
 		"--quality", strconv.Itoa(quality),
 		"--max-dim", strconv.Itoa(maxDim),
 	}
 
-	cmd := exec.CommandContext(ctx, cfg.PythonExe, args...)
-	cmd.Dir = cfg.PythonModPath
-	cmd.Env = append(os.Environ(),
-		"PYTHONPATH="+cfg.PythonModPath,
-		"PYTHONUTF8=1",
-	)
+	cmd := pythonCmd(ctx, "dicom.loader_mp4_cli", args...)
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -287,7 +280,6 @@ func mp4AnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Construction des arguments subprocess
 	args := []string{
-		"-m", "starhe_plugin.pipeline_mp4",
 		req.Mp4Path,
 		"--backscan_width",  strconv.Itoa(req.BackscanWidth),
 		"--backscan_height", strconv.Itoa(req.BackscanHeight),
@@ -303,12 +295,7 @@ func mp4AnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, "--analysis_mode", analysisMode)
 
-	cmd := exec.CommandContext(r.Context(), cfg.PythonExe, args...)
-	cmd.Dir = cfg.PythonModPath
-	cmd.Env = append(os.Environ(),
-		"PYTHONPATH="+cfg.PythonModPath,
-		"PYTHONUTF8=1",
-	)
+	cmd := pythonCmd(r.Context(), "pipeline_mp4", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
