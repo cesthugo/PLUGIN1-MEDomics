@@ -22,11 +22,18 @@ $MainLog  = Join-Path $LogDir "starhe_dev.log"
 
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+# Arrete les processus go_server.exe restants pour liberer les fichiers log
+Get-Process -Name "go_server" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 300
+
+$ErrorActionPreference = "Continue"
 Set-Content -Path $GoLog -Value ""
 Set-Content -Path $GoErrLog -Value ""
 Set-Content -Path $ReactLog -Value ""
 Set-Content -Path $ReactErrLog -Value ""
 Set-Content -Path $MainLog -Value ""
+$ErrorActionPreference = "Stop"
 
 
 function Write-DevLog {
@@ -75,13 +82,13 @@ Write-DevLog "npm trouvé : $NpmExe"
 # ── Vérification venv Python ──────────────────────────────────────────────────
 $VenvPython = Join-Path $RootDir "pythonCode\modules\starhe_plugin\.venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
-    Write-DevLog "Venv Python introuvable — lancement du setup..."
+    Write-DevLog "Venv Python introuvable - lancement du setup..."
     & "$RootDir\scripts\setup.ps1"
     if (-not (Test-Path $VenvPython)) {
-        Write-DevLog "ERREUR: setup.ps1 n'a pas créé le venv. Consulte les logs."
+        Write-DevLog "ERREUR: setup.ps1 n'a pas cree le venv. Consulte les logs."
         exit 1
     }
-    Write-DevLog "Venv Python prêt."
+    Write-DevLog "Venv Python pret."
 }
 
 
@@ -167,10 +174,16 @@ try {
 
     $NodeModules = Join-Path $RootDir "react_ui\node_modules"
     if (-not (Test-Path $NodeModules)) {
-        Write-DevLog "Dépendances React absentes: exécution de npm ci..."
+        Write-DevLog "Dependances React absentes: execution de npm ci..."
         Push-Location (Join-Path $RootDir "react_ui")
+        $ErrorActionPreference = "Continue"
         & $NpmExe ci *> $ReactLog
+        $npmExitCode = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
         Pop-Location
+        if ($npmExitCode -ne 0) {
+            throw "Echec de npm ci. Consulte $ReactLog"
+        }
     }
 
     Write-DevLog "Lancement de React/Vite sur http://localhost:5173..."

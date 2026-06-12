@@ -74,8 +74,11 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "[OK] Dependances installees."
 
 # -- 4. Installer prepUS + sonocrop -------------------------------------------
+$ErrorActionPreference = "Continue"
 & $PYTHON -c "import prepUS" 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$prepUSExitCode = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($prepUSExitCode -ne 0) {
     Write-Host "[..] Installation de sonocrop + prepUS ..."
     & $PIP install sonocrop --no-deps --quiet
     & $PIP install "$PREPUS" --no-deps --quiet
