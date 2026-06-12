@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.6.1` — Last updated: 5 juin 2026*
+*Version `0.6.3` — Last updated: 12 juin 2026*
 
 ---
 
@@ -68,17 +68,17 @@ Two AI models are used:
 
 Le plugin se distribue sous forme d'**application Electron autonome** (même approche que MEDomics). Tout le pipeline (renderer React + electron-builder + extraResources) est configuré dans [react_ui/package.json](react_ui/package.json) section `"build"`.
 
-### Cibles produites (alignées sur MEDomics)
+### Cibles produites
 
 | Plateforme | Format | Nom | Notes |
 |---|---|---|---|
-| macOS arm64 | `.dmg` | `STARHE-<version>-mac-arm64.dmg` | Drag-and-drop |
-| macOS arm64 | `.pkg` | `STARHE-<version>-mac-arm64.pkg` | Installeur scripté |
-| macOS arm64 | `.zip` | `STARHE-<version>-mac-arm64.zip` | Archive `.app` (auto-update Squirrel.Mac) |
-| macOS x64 | idem ×3 | `…-mac-x64.…` | Mac Intel |
-| Linux x64 | `.deb` | `STARHE-<version>-linux-x64.deb` | Debian / Ubuntu |
-| Linux x64 | `.AppImage` | `STARHE-<version>-linux-x64.AppImage` | Universel Linux |
+| macOS arm64 | `.dmg` | `STARHE-<version>-mac-arm64.dmg` | Drag-and-drop (Apple Silicon M1/M2/M3) |
+| macOS arm64 | `.zip` | `STARHE-<version>-mac-arm64.zip` | Archive `.app` |
+| macOS x64 | `.dmg` | `STARHE-<version>-mac-x64.dmg` | Mac Intel (runner macos-13, queue longue) |
+| Linux x64 | `.deb` | `STARHE-<version>-linux-amd64.deb` | Debian / Ubuntu |
 | Windows x64 | `.exe` | `STARHE-<version>-win-x64.exe` | Installeur NSIS |
+
+> Les cibles `.pkg` et `.AppImage` ont été retirées : `.pkg` nécessite un certificat Apple Developer, `.AppImage` saturait le disque des runners Ubuntu GitHub-hosted (~14 GB disponibles).
 
 ### Architecture du wrapper Electron
 
@@ -227,21 +227,32 @@ La fenêtre de téléchargement doit s'ouvrir et progresser jusqu'à 100 %, puis
 
 Le workflow [.github/workflows/release.yml](.github/workflows/release.yml) builde l'intégralité de la grille MEDomics-aligned sur runners GitHub-hosted dès qu'un tag `v*` est poussé. Pour tester sans publier de release : déclencher `workflow_dispatch` depuis l'onglet **Actions** (ou `gh workflow run release.yml`).
 
-| Runner | Plateforme | Cibles produites |
-|---|---|---|
-| `macos-14` | `mac-arm64` | `.dmg`, `.pkg`, `.zip` |
-| `macos-13` | `mac-x64` | `.dmg`, `.pkg`, `.zip` |
-| `ubuntu-latest` | `linux-x64` | `.deb`, `.AppImage` |
-| `windows-latest` | `win-x64` | `.exe` (NSIS) |
+| Runner | Plateforme | Cibles produites | Durée typique |
+|---|---|---|---|
+| `macos-14` | `mac-arm64` | `.dmg`, `.zip` | ~3 min |
+| `macos-13` | `mac-x64` | `.dmg`, `.zip` | 1–5 h (queue longue tier gratuit) |
+| `ubuntu-latest` | `linux-x64` | `.deb` | ~12 min (torch CPU-only) |
+| `windows-latest` | `win-x64` | `.exe` (NSIS) | ~9 min |
 
-Chaque job effectue : build Go → install Python deps + `pyinstaller starhe_worker.spec` → `fetch_jre.{sh,ps1} <platform>` → `npm ci` + `npm run build:electron` → `npx electron-builder <flags>` → upload des installeurs. Un job final `release` agrège les artefacts, calcule `SHA256SUMS.txt`, et crée une release GitHub en **brouillon** (relecture humaine avant publication) via `softprops/action-gh-release@v2`.
+Chaque job effectue : libération disque (Linux, ~25 GB) → build Go → install Python deps + torch CPU-only (Linux) + `pyinstaller starhe_worker.spec` (caché sur hit) → `fetch_jre.{sh,ps1} <platform>` → `npm ci` + `npm run build:electron` → `npx electron-builder <flags>` → upload des installeurs. Le job final `release` agrège les artefacts, calcule `SHA256SUMS.txt`, et crée une **release GitHub brouillon** via `softprops/action-gh-release@v2`.
 
-**Déclencher une release** :
+**Déclencher une nouvelle release** :
 
 ```bash
-git tag -a v0.6.3 -m "Release 0.6.3"
-git push origin v0.6.3
+# 1. Bumper la version
+#    Éditer "version" dans react_ui/package.json → ex. "0.6.4"
+git add react_ui/package.json
+git commit -m "chore: bump version to 0.6.4"
+git push
+
+# 2. Tagger → déclenche automatiquement le workflow CI
+git tag -a v0.6.4 -m "v0.6.4"
+git push origin v0.6.4
+# → GitHub Actions build les 4 plateformes et crée la release brouillon
+# → Aller sur GitHub Releases et cliquer "Publish release"
 ```
+
+**Première release publiée : [v0.6.3](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/v0.6.3)** (12 juin 2026) — 4 artefacts : `.dmg` arm64, `.zip` arm64, `.deb` linux, `.exe` win.
 
 > **Limites** : le workflow n'effectue **ni signature ni notarisation** (`CSC_IDENTITY_AUTO_DISCOVERY=false`). Pour une release clinique, ajouter les secrets Apple/Windows et activer `xcrun notarytool` post-build. Le dossier `weasis-dcm2png/native/` ne contient actuellement que les `.dylib` macOS → le bridge Java tombe en fallback pydicom au runtime sur Linux/Windows tant que les `.so`/`.dll` OpenCV n'ont pas été régénérés.
 
