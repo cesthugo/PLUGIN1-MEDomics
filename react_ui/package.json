@@ -1,6 +1,6 @@
 {
   "name": "starhe-plugin",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "STARHE — Plugin MEDomics (détection et évaluation du risque sur DICOM échographique hépatique)",
   "author": {
     "name": "MEDomics-UdeS",
