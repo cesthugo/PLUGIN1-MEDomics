@@ -27,7 +27,7 @@ _REPO    = "https://github.com/cesthugo/PLUGIN1-MEDomics"
 _TAG     = "STARHE_MODELS"
 _BASE    = f"{_REPO}/releases/download/{_TAG}"
 
-MODELS_DIR = Path(__file__).parent / "pythonCode" / "modules" / "starhe_plugin" / "models"
+MODELS_DIR = Path(__file__).parent.parent / "pythonCode" / "modules" / "starhe_plugin" / "models"
 
 # (nom_fichier, sha256_hex_ou_None)  — sha256 optionnel, vérifie l'intégrité si renseigné
 WEIGHTS = [

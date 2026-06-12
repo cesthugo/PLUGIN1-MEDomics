@@ -146,8 +146,8 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 	if quality < 1 || quality > 95 { quality = 70  }
 	if maxDim  < 64 || maxDim > 4096 { maxDim = 640 }
 
-	// Timeout généreux : 120 s pour les gros fichiers DICOM multi-frames
-	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	// Timeout : 300 s pour les gros fichiers DICOM multi-frames (J2K Lossless lent à décoder)
+	ctx, cancel := context.WithTimeout(r.Context(), 300*time.Second)
 	defer cancel()
 
 	args := []string{

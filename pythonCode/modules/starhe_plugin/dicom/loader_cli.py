@@ -129,13 +129,18 @@ def load_and_encode(
     ds = anonymize(ds)
 
     # ── Extraction et normalisation des frames ────────────────────────────────
-    frames_raw = extract_frames(ds)
+    # Max 120 frames pour l'affichage : évite de décoder des centaines de frames J2K
+    # (le pipeline AI utilise extract_frames sans cette limite pour l'analyse complète)
+    MAX_DISPLAY_FRAMES = 120
+    frames_raw = extract_frames(ds, display_max_frames=MAX_DISPLAY_FRAMES)
+
     if frames_raw.ndim == 3:
         frames_uint8 = np.stack([frame_to_uint8(f) for f in frames_raw])
         frames_rgb   = np.stack([frames_uint8] * 3, axis=-1)
     else:
         frames_uint8 = np.stack([frame_to_uint8(f) for f in frames_raw])
         frames_rgb   = frames_uint8
+    del frames_raw  # libère ~400 MB si frames RGB 1280×890
 
     frames_rgb = remove_pixel_burnin(frames_rgb)
 
@@ -170,22 +175,33 @@ def load_and_encode(
 
     # ── Encodage JPEG base64 ──────────────────────────────────────────────────
     frames_b64: list[str] = []
-    for f in frames_rgb:
-        if f.ndim == 2:
-            img = Image.fromarray(f, mode="L").convert("RGB")
-        else:
-            img = Image.fromarray(f.astype(np.uint8), mode="RGB")
+    for i, f in enumerate(frames_rgb):
+        try:
+            if f.ndim == 2:
+                img = Image.fromarray(f, mode="L").convert("RGB")
+            elif f.ndim == 3 and f.shape[2] == 4:
+                img = Image.fromarray(f.astype(np.uint8), mode="RGBA").convert("RGB")
+            else:
+                img = Image.fromarray(f.astype(np.uint8), mode="RGB")
 
-        # Réduction si trop grand
-        w, h = img.size
-        if max(w, h) > max_dim:
-            scale = max_dim / max(w, h)
-            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))),
-                             Image.LANCZOS)
-
-        buf = BytesIO()
-        img.save(buf, format="JPEG", quality=quality)
-        frames_b64.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+            # Réduction si trop grand
+            w, h = img.size
+            if max(w, h) > max_dim:
+                scale = max_dim / max(w, h)
+                img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))),
+                                 Image.LANCZOS)
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=quality)
+            frames_b64.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+        except Exception as frame_exc:
+            sys.stderr.write(f"GO_PRINT|warning|frame {i} encode echoue ({frame_exc}), frame noire substituee\n")
+            sys.stderr.flush()
+            h_px = int(f.shape[0]) if f.ndim >= 1 else 64
+            w_px = int(f.shape[1]) if f.ndim >= 2 else 64
+            black = Image.new("RGB", (min(w_px, max_dim), min(h_px, max_dim)), (0, 0, 0))
+            buf = BytesIO()
+            black.save(buf, format="JPEG", quality=quality)
+            frames_b64.append(base64.b64encode(buf.getvalue()).decode("ascii"))
 
     return {
         "file_name":          os.path.basename(dicom_path),
@@ -226,9 +242,13 @@ def main() -> None:
         result = load_and_encode(args.dicom_path, args.quality, args.max_dim)
         print(json.dumps(result), flush=True)
     except Exception as exc:
+        tb = traceback.format_exc()
+        sys.stderr.write(f"GO_PRINT|error|loader_cli crash: {str(exc)}\n")
+        sys.stderr.write(tb + "\n")
+        sys.stderr.flush()
         print(json.dumps({
             "error":     str(exc),
-            "traceback": traceback.format_exc(),
+            "traceback": tb,
         }), flush=True)
         sys.exit(1)
 
