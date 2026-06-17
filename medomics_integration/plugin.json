@@ -1,0 +1,11 @@
+{
+  "id": "starhe",
+  "name": "STARHE",
+  "version": "0.6.3",
+  "subtitle": "Échographie hépatique — détection & analyse",
+  "description": "Plugin d'analyse d'images ultrasonores abdominales. Charge des fichiers DICOM, détecte automatiquement les lésions hépatiques (RTMDet) et évalue le risque de carcinome hépatocellulaire (C3D).",
+  "tags": ["DICOM", "Échographie", "IA", "Hépatologie"],
+  "healthUrl": "http://localhost:8082/health",
+  "uiUrl": "http://localhost:8082/ui/",
+  "apiPort": 8082
+}

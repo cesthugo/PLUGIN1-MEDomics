@@ -34,6 +34,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
+	mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.Dir(cfg.UIDir))))
 	mux.HandleFunc("POST /starhe/analyze", analyzeHandler)
 	mux.HandleFunc("POST /starhe/live", liveHandler)
 	mux.HandleFunc("GET /starhe/results", listResultsHandler)

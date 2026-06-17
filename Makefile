@@ -6,7 +6,9 @@
 #   make setup      — installe le venv Python, les dépendances et prepUS
 #   make tkinter    — lance l'interface prototype Tkinter
 #   make react      — compile et démarre le serveur Go + l'UI React/Vite
-#   make build      — compile l'application Electron distribuable
+#   make electron   — lance l'application Electron en mode développement
+#   make build      — compile les fichiers Electron (sans lancer l'app)
+#   make pack       — compile + package l'installateur distributable
 #   make help       — affiche cette aide
 
 # ── Détection OS ──────────────────────────────────────────────────────────────
@@ -22,7 +24,7 @@ else
 endif
 
 # ── Cibles ────────────────────────────────────────────────────────────────────
-.PHONY: help setup tkinter react build
+.PHONY: help setup tkinter react electron build pack
 
 help:
 	@echo ""
@@ -32,7 +34,9 @@ help:
 	@echo "  make setup      Installe le venv Python, dépendances et prepUS"
 	@echo "  make tkinter    Lance l'interface prototype Tkinter"
 	@echo "  make react      Démarre le serveur Go + UI React (développement)"
-	@echo "  make build      Compile l'app Electron distribuable"
+	@echo "  make electron   Lance l'app Electron en mode développement (Vite + Electron)"
+	@echo "  make build      Compile les fichiers Electron (renderer + main, sans lancer)"
+	@echo "  make pack       Compile + package l'installateur distributable"
 	@echo ""
 
 setup:
@@ -44,5 +48,11 @@ tkinter:
 react:
 	$(SHELL_REACT)
 
+electron:
+	cd react_ui && npm run dev:electron
+
 build:
 	cd react_ui && npm run build:electron
+
+pack:
+	cd react_ui && npm run electron:pack

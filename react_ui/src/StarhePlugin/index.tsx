@@ -17,7 +17,7 @@
 //   - Raccourcis clavier (Espace, ←/→, P, M, S, R, C, L, ±, B, Ctrl+0/+/-)
 
 import React, {
-  useCallback, useEffect, useMemo, useState,
+  useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
 
 import type {
@@ -26,8 +26,9 @@ import type {
 import {
   SIDEBAR_BG, SIDEBAR_HOV, MAIN_BG, CARD_BG, CARD_BORDER, CARD_SHADOW,
   BLUE, BLUE_TEXT, SBAR_FG, SBAR_MUTED, BORDER, CANVAS_BG,
+  PTAB_BG, PTAB_ACT_BG,
 } from './colors';
-import { loadDicom, loadDicomFile, loadMp4File, deleteCache } from './api';
+import { loadDicom, loadDicomFile, loadMp4File, deleteCache, makeTabLabel } from './api';
 import medomicsLogo from '../assets/medomics_logo.png';
 import { usePipelineSSE } from './hooks/usePipelineSSE';
 import { usePlayback }    from './hooks/usePlayback';
@@ -44,16 +45,39 @@ import { BatchModal }          from './components/BatchModal';
 import type { BatchResultToOpen } from './components/BatchModal';
 import { LayoutPickerModal }   from './components/LayoutPickerModal';
 import type { LayoutMode }     from './components/LayoutPickerModal';
-import { PatientTabBar }       from './components/PatientTabBar';
-import { FileThumbnailStrip }  from './components/FileThumbnailStrip';
 import { MultiPanelView }      from './components/MultiPanelView';
-import { useTabManager }       from './hooks/useTabManager';
-import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { isDicomFile }         from './utils';
+import { FileThumbnailStrip }  from './components/FileThumbnailStrip';
 
 // ── ID auto-incrémenté ────────────────────────────────────────────────────────
+let _nextTabId = 1;
+const nextTabId = () => _nextTabId++;
 let _nextLogId = 1;
 const nextLogId = () => _nextLogId++;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function makeDefaultTab(): TabState {
+  return {
+    id:              nextTabId(),
+    label:           '—',
+    patientName:     'Patient inconnu',
+    dicomPath:       '',
+    data:            null,
+    frameIdx:        0,
+    detectionsBy:    {},
+    resultsBy:       {},
+    measuresByFrame: {},
+    selectedMeasure: null,
+    zoom:            1,
+    panX:            0,
+    panY:            0,
+    contrast:        1,
+    brightness:      0,
+    viewMode:        'normal',
+    speedMult:       1,
+    loop:            true,
+  };
+}
 
 // ── Composant principal ───────────────────────────────────────────────────────
 
@@ -67,27 +91,29 @@ export interface StarhePluginProps {
 }
 
 export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: StarhePluginProps) {
-  // ── Logs ────────────────────────────────────────────────────────────────────
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const addLog = useCallback((message: string, level: LogLevel = 'info') => {
-    setLogs(prev => [...prev.slice(-200), { id: nextLogId(), level, message }]);
-  }, []);
+  // ── Onglets et patients ────────────────────────────────────────────────────
+  const [tabs,             setTabs]            = useState<TabState[]>([]);
+  const [activeTabId,      setActiveTabId]     = useState<number>(-1);
+  const [patients,         setPatients]        = useState<Patient[]>([]);
+  const [activePatientName, setActivePatientName] = useState<string>('');
+
+  // Ref pour lire l'état courant dans closeTab (lecture synchrone hors updater)
+  const tabsRef     = useRef<TabState[]>(tabs);
+  tabsRef.current   = tabs;
+  const patientsRef = useRef<Patient[]>(patients);
+  patientsRef.current = patients;
+
+  // Dérivés : calculés à chaque render à partir des IDs stables
+  const activeTabIdx = tabs.findIndex(t => t.id === activeTabId);
+  const activeTab    = activeTabIdx >= 0 ? tabs[activeTabIdx] : null;
+  const activePatientIdx = patients.findIndex(p => p.name === activePatientName);
 
   // ── Lecture vidéo ──────────────────────────────────────────────────────────
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // ── Onglets et patients (via hook) ─────────────────────────────────────────
-  const {
-    tabs, activeTabId, patients, activePatientName,
-    activeTab, activeTabIdx, activePatientIdx,
-    addTab, addMp4Tab, openBatchResultAsTab,
-    switchTab, closeTab, updateActiveTab, updateTabById,
-    setActiveTabId, setActivePatientName,
-  } = useTabManager({ addLog, isPlaying, setIsPlaying });
-
   const handleFrameChange = useCallback((idx: number) => {
-    updateActiveTab(t => ({ ...t, frameIdx: idx }));
-  }, [updateActiveTab]);
+    setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, frameIdx: idx } : t));
+  }, [activeTabId]);
 
   const handleStop = useCallback(() => setIsPlaying(false), []);
 
@@ -102,6 +128,12 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     onStop:        handleStop,
   });
 
+  // ── Log ────────────────────────────────────────────────────────────────────
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const addLog = useCallback((message: string, level: LogLevel = 'info') => {
+    setLogs(prev => [...prev.slice(-200), { id: nextLogId(), level, message }]);
+  }, []);
+
   // ── Pipeline SSE ───────────────────────────────────────────────────────────
   const { status: analysisStatus, progress, startAnalysis, cancelAnalysis, lastResult }
     = usePipelineSSE(addLog);
@@ -112,12 +144,15 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // Quand un résultat arrive, l'injecter dans l'onglet *cible* (pas nécessairement l'actif)
   useEffect(() => {
     if (!lastResult || analysisTargetTabId < 0) return;
-    updateTabById(analysisTargetTabId, t => ({
-      ...t,
-      detectionsBy: { ...t.detectionsBy, original: lastResult.detectionsPerFrame },
-      resultsBy:    { ...t.resultsBy,    original: lastResult.result },
+    setTabs(prev => prev.map(t => {
+      if (t.id !== analysisTargetTabId) return t;
+      return {
+        ...t,
+        detectionsBy: { ...t.detectionsBy, original: lastResult.detectionsPerFrame },
+        resultsBy:    { ...t.resultsBy,    original: lastResult.result },
+      };
     }));
-  }, [lastResult, analysisTargetTabId, updateTabById]);
+  }, [lastResult, analysisTargetTabId]);
 
   // ── Réglages d'affichage (persistés dans localStorage) ────────────────────
   const { settings: displaySettings, updateSettings, resetSettings } = useDisplaySettings();
@@ -173,6 +208,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // ── Vue multi-panneaux ─────────────────────────────────────────────────────
   const [pendingLayoutOpen, setPendingLayoutOpen] = useState<BatchResultToOpen[] | null>(null);
   const [multiPanel, setMultiPanel] = useState<{ layout: LayoutMode; tabIds: number[] } | null>(null);
+  const [showLayoutPicker, setShowLayoutPicker] = useState(false);
 
   // ── Chargement DICOM ───────────────────────────────────────────────────────
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
@@ -182,6 +218,102 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const isElectron = typeof window !== 'undefined' &&
     (window.electronAPI !== undefined ||
      navigator.userAgent.includes('Electron'));
+
+  // ── Injection d'un onglet après chargement réussi ─────────────────────────
+  const addTab = useCallback((
+    displayName: string,
+    dicomPath:   string,
+    data:        import('./types').DicomData,
+  ) => {
+    const label  = makeTabLabel(data.studyDate, data.fileName);
+    const newTab: TabState = {
+      ...makeDefaultTab(),
+      label,
+      patientName: data.patientName,
+      dicomPath,
+      data,
+    };
+    // Functional updaters : chaque appel reçoit le résultat du précédent (React batchs)
+    // → sûr même si plusieurs fichiers chargent simultanément avant le prochain render
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);  // ID stable — pas d'index périmé
+    setPatients(prev => {
+      const existIdx = prev.findIndex(p => p.name === data.patientName);
+      if (existIdx >= 0) {
+        const updated = [...prev];
+        updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
+        return updated;
+      }
+      return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
+    });
+    setActivePatientName(data.patientName);
+    addLog(`DICOM chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
+  }, [addLog]);
+
+  // ── Injection d'un onglet MP4 après chargement réussi ────────────────────
+  const addMp4Tab = useCallback((
+    displayName: string,
+    serverPath:  string,
+    data:        import('./types').DicomData,
+  ) => {
+    const label = displayName.replace(/\.[^.]+$/, '').slice(0, 20);
+    const newTab: TabState = {
+      ...makeDefaultTab(),
+      label,
+      patientName: 'Vidéo MP4',
+      dicomPath: serverPath,
+      isMp4: true,
+      data,
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+    setPatients(prev => {
+      const existIdx = prev.findIndex(p => p.name === 'Vidéo MP4');
+      if (existIdx >= 0) {
+        const updated = [...prev];
+        updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
+        return updated;
+      }
+      return [...prev, { name: 'Vidéo MP4', tabIds: [newTab.id] }];
+    });
+    setActivePatientName('Vidéo MP4');
+    addLog(`MP4 chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
+  }, [addLog]);
+
+  // ── Ouverture d'un résultat batch en onglet (helper partagé) ─────────────
+  const openBatchResultAsTab = useCallback(async (result: BatchResultToOpen): Promise<number> => {
+    const name = result.name;
+    addLog(`Chargement : ${name}`, 'info');
+    const data = await loadDicom(result.serverPath);
+    const label = makeTabLabel(data.studyDate, data.fileName);
+    const newTab: TabState = {
+      ...makeDefaultTab(),
+      label,
+      patientName: data.patientName,
+      dicomPath:   result.serverPath,
+      data,
+      detectionsBy: result.detections?.length ? { original: result.detections } : {},
+      resultsBy: result.risk ? { original: {
+        riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
+        riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
+        detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lésion(s)`,
+        detFg:    '#facc15',
+      }} : {},
+    };
+    setTabs(prev => [...prev, newTab]);
+    setPatients(prev => {
+      const existIdx = prev.findIndex(p => p.name === data.patientName);
+      if (existIdx >= 0) {
+        const updated = [...prev];
+        updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
+        return updated;
+      }
+      return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
+    });
+    setActivePatientName(data.patientName);
+    addLog(`DICOM chargé avec résultats — ${data.frameCount} frame(s).`, 'success');
+    return newTab.id;
+  }, [addLog]);
 
   // Chargement par chemin absolu (Electron ou saisie manuelle)
   const doLoadPath = useCallback(async (path: string, displayName: string) => {
@@ -221,9 +353,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }
   }, [addLog, addTab, loadingPaths]);
 
-  // Chargement DICOM — sélecteur de dossier (webkitdirectory) :
-  // l’utilisateur choisit un dossier et tous les fichiers .dcm / .dicom /
-  // sans extension à l’intérieur sont chargés automatiquement.
+  // Chargement DICOM — fichiers individuels ET dossier entier (un seul bouton)
   const onLoadDicom = useCallback(async () => {
     if (isElectron && window.electronAPI?.openDicomFiles) {
       // Mode Electron : dialogue natif système → chemins absolus réels
@@ -233,29 +363,54 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         await doLoadPath(p, name);
       }
     } else {
-      // Mode navigateur : sélecteur de dossier (webkitdirectory)
-      const input = document.createElement('input');
-      input.type = 'file';
-      (input as any).webkitdirectory = true;
-      (input as any).multiple = true;
-      input.onchange = async () => {
-        for (const file of Array.from(input.files ?? []).filter(isDicomFile)) {
-          await doLoadFile(file);
-        }
+      // Mode navigateur : input unique qui accepte fichiers ET contenu de dossier
+      const isDicom = (f: File) => {
+        const n = f.name.toLowerCase();
+        return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
       };
-      input.click();
+      const fileInput   = document.createElement('input');
+      fileInput.type     = 'file';
+      fileInput.multiple = true;
+      const folderInput  = document.createElement('input');
+      folderInput.type   = 'file';
+      (folderInput as any).webkitdirectory = true;
+      (folderInput as any).multiple = true;
+
+      // Lance d'abord le sélecteur de fichiers, puis (annulation) le sélecteur de dossier
+      const loadFiles = async (input: HTMLInputElement) => {
+        const files = Array.from(input.files ?? []).filter(isDicom);
+        for (const file of files) await doLoadFile(file);
+      };
+
+      // On écoute le focus de la fenêtre pour détecter l'annulation du premier picker
+      let resolved = false;
+      fileInput.onchange = async () => { resolved = true; await loadFiles(fileInput); };
+      folderInput.onchange = async () => { resolved = true; await loadFiles(folderInput); };
+
+      fileInput.click();
+
+      // Si le premier dialog est fermé sans sélection, proposer le picker dossier
+      window.addEventListener('focus', function handler() {
+        window.removeEventListener('focus', handler);
+        setTimeout(() => {
+          if (!resolved) folderInput.click();
+        }, 300);
+      }, { once: true });
     }
   }, [isElectron, doLoadPath, doLoadFile]);
 
-  // Sélection manuelle de fichiers DICOM individuels
-  const onLoadDicomFiles = useCallback(() => {
-    const input = document.createElement('input');
-    input.type = 'file';
+  // Chargement fichiers DICOM individuels (second bouton de la sidebar)
+  const onLoadDicomFiles = useCallback(async () => {
+    const isDicom = (f: File) => {
+      const n = f.name.toLowerCase();
+      return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
+    };
+    const input   = document.createElement('input');
+    input.type     = 'file';
     input.multiple = true;
     input.onchange = async () => {
-      for (const file of Array.from(input.files ?? []).filter(isDicomFile)) {
-        await doLoadFile(file);
-      }
+      const files = Array.from(input.files ?? []).filter(isDicom);
+      for (const file of files) await doLoadFile(file);
     };
     input.click();
   }, [doLoadFile]);
@@ -298,6 +453,10 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   }, [doLoadPath]);
 
   // ── Navigation ────────────────────────────────────────────────────────────
+
+  const updateActiveTab = useCallback((updater: (t: TabState) => TabState) => {
+    setTabs(prev => prev.map(t => t.id === activeTabId ? updater(t) : t));
+  }, [activeTabId]);
 
   const onPrevFrame = useCallback(() => {
     if (!activeTab?.data) return;
@@ -385,13 +544,11 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const onZoomPan = useCallback((zoom: number, panX: number, panY: number) =>
     updateActiveTab(t => ({ ...t, zoom, panX, panY })), [updateActiveTab]);
 
-  // Réinitialise panX=0 / panY=0 pour tous les onglets visibles en mode multi-panneaux.
   const onResetAllPanelsPan = useCallback(() => {
     if (!multiPanel) return;
-    for (const id of multiPanel.tabIds) {
-      if (id >= 0) updateTabById(id, t => ({ ...t, panX: 0, panY: 0 }));
-    }
-  }, [multiPanel, updateTabById]);
+    const ids = multiPanel.tabIds;
+    setTabs(prev => prev.map(t => ids.includes(t.id) ? { ...t, panX: 0, panY: 0 } : t));
+  }, [multiPanel]);
 
   const onContrastBright = useCallback((contrast: number, brightness: number) =>
     updateActiveTab(t => ({ ...t, contrast, brightness })), [updateActiveTab]);
@@ -459,14 +616,165 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }));
   }, [updateActiveTab]);
 
-  // ── Raccourcis clavier ─────────────────────────────────────────────────────────────────
-  useKeyboardShortcuts({
-    activeTab, activePatientIdx, patients,
-    switchTab, closeTab,
+  // ── Onglets ────────────────────────────────────────────────────────────────
+
+  const switchTab = useCallback((tabId: number) => {
+    if (!tabsRef.current.some(t => t.id === tabId)) return;
+    if (isPlaying) setIsPlaying(false);
+    setActiveTabId(tabId);
+    const patient = patientsRef.current.find(p => p.tabIds.includes(tabId));
+    if (patient) setActivePatientName(patient.name);
+  }, [isPlaying]);
+
+  // ── Multi-panneaux : callbacks ─────────────────────────────────────────────
+
+  const onFocusPanel    = useCallback((tabId: number) => switchTab(tabId), [switchTab]);
+  const onExitMultiPanel = useCallback(() => setMultiPanel(null), []);
+  const onOpenLayoutPicker = useCallback(() => setShowLayoutPicker(true), []);
+
+  const onDropToPanel = useCallback((slotIdx: number, tabId: number) => {
+    setMultiPanel(prev => {
+      if (!prev) return prev;
+      const next = [...prev.tabIds]; next[slotIdx] = tabId;
+      return { ...prev, tabIds: next };
+    });
+    switchTab(tabId);
+  }, [switchTab]);
+
+  const onExpandLayout = useCallback((tabId: number) => {
+    setMultiPanel(prev => {
+      if (!prev) return prev;
+      const nextLayout: LayoutMode =
+        prev.layout === 'split-v' || prev.layout === 'split-h' ? 'quad' : prev.layout;
+      const next = [...prev.tabIds];
+      const empty = next.findIndex(id => id < 0);
+      if (empty >= 0) next[empty] = tabId; else next.push(tabId);
+      while (next.length < 4) next.push(-1);
+      return { layout: nextLayout, tabIds: next.slice(0, 4) };
+    });
+  }, []);
+
+  const onRemovePanel = useCallback((slotIdx: number) => {
+    setMultiPanel(prev => {
+      if (!prev) return prev;
+      const next = [...prev.tabIds]; next[slotIdx] = -1;
+      return { ...prev, tabIds: next };
+    });
+  }, []);
+
+  const closeTab = useCallback((tabId: number) => {
+    const currentTabs = tabsRef.current;
+    // Pas de side effects dans les updaters (évite le double-appel React StrictMode)
+    if (currentTabs.length <= 1) {
+      setTabs([]);
+      setActiveTabId(-1);
+      setPatients([]);
+      setActivePatientName('');
+      setIsPlaying(false);
+      return;
+    }
+    const idx = currentTabs.findIndex(t => t.id === tabId);
+    const next = currentTabs.filter(t => t.id !== tabId);
+    const newActiveTab = next[Math.max(0, Math.min(idx, next.length - 1))];
+    setTabs(next);
+    setActiveTabId(newActiveTab?.id ?? -1);
+    const updatedPatients = patientsRef.current
+      .map(p => ({ ...p, tabIds: p.tabIds.filter(id => id !== tabId) }))
+      .filter(p => p.tabIds.length > 0);
+    setPatients(updatedPatients);
+    const newPatient = updatedPatients.find(p => p.tabIds.includes(newActiveTab?.id ?? -1));
+    if (newPatient) setActivePatientName(newPatient.name);
+  }, []);
+
+  // ── Raccourcis clavier ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const focused = document.activeElement;
+      if (focused && ['INPUT', 'TEXTAREA'].includes((focused as HTMLElement).tagName)) return;
+
+      switch (e.key) {
+        case ' ':           e.preventDefault(); onTogglePlay(); break;
+        case 'ArrowLeft':   e.preventDefault(); onPrevFrame(); break;
+        case 'ArrowRight':  e.preventDefault(); onNextFrame(); break;
+        case 'Home':        e.preventDefault(); onResetVideo(); break;
+        case 'p': case 'P': onToggleViewMode('pan');     break;
+        case 'm': case 'M': onToggleViewMode('measure'); break;
+        case 's': case 'S': onToggleViewMode('series');  break;
+        case 'r': case 'R': onResetView(); break;
+        case 'c': case 'C': setShowContrast(v => !v); break;
+        case 'l': case 'L': setShowBrightness(v => !v); break;
+        case 'Escape':
+          updateActiveTab(t => ({
+            ...t,
+            viewMode: 'normal',
+            selectedMeasure: null,
+          }));
+          break;
+        case '+': case '=':
+          if (!e.metaKey && !e.ctrlKey)
+            updateActiveTab(t => ({ ...t, speedMult: Math.min(3, t.speedMult * 1.25) }));
+          break;
+        case '-':
+          if (!e.metaKey && !e.ctrlKey)
+            updateActiveTab(t => ({ ...t, speedMult: Math.max(0.25, t.speedMult * 0.8) }));
+          break;
+        case 'b': case 'B':
+          updateActiveTab(t => ({ ...t, loop: !t.loop })); break;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '=') {
+        e.preventDefault();
+        updateActiveTab(t => {
+          const newZ = Math.min(10, t.zoom * 1.25);
+          return { ...t, zoom: newZ };
+        });
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault();
+        updateActiveTab(t => {
+          const newZ = Math.max(0.1, t.zoom / 1.25);
+          return { ...t, zoom: newZ };
+        });
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault();
+        updateActiveTab(t => ({ ...t, zoom: 1, panX: 0, panY: 0 }));
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Tab') {
+        e.preventDefault();
+        if (activePatientIdx >= 0 && patients[activePatientIdx]) {
+          const ptTabs = patients[activePatientIdx].tabIds;
+          const curPos = ptTabs.findIndex(id => id === activeTab?.id) ?? 0;
+          const nextId = ptTabs[(curPos + (e.shiftKey ? -1 : 1) + ptTabs.length) % ptTabs.length];
+          if (nextId) switchTab(nextId);
+        }
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
+        if (activeTab) closeTab(activeTab.id);
+      }
+      // Shift+← / Shift+→ : ±10 frames
+      if (e.shiftKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (activeTab?.data) {
+          const n = activeTab.data.frameCount;
+          updateActiveTab(t => ({ ...t, frameIdx: Math.max(0, t.frameIdx - 10) }));
+        }
+      }
+      if (e.shiftKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (activeTab?.data) {
+          const n = activeTab.data.frameCount;
+          updateActiveTab(t => ({ ...t, frameIdx: Math.min(n - 1, t.frameIdx + 10) }));
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [
     onTogglePlay, onPrevFrame, onNextFrame, onResetVideo,
-    onToggleViewMode, onResetView, updateActiveTab,
-    setShowContrast, setShowBrightness,
-  });
+    onToggleViewMode, onResetView, updateActiveTab, activeTab,
+    activePatientIdx, patients, switchTab, closeTab,
+  ]);
 
   // ── Patient actif : tabs associés ──────────────────────────────────────────
   const activePatient = activePatientIdx >= 0 ? patients[activePatientIdx] : null;
@@ -604,92 +912,24 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               <span style={{ fontSize: 12, fontWeight: 700, color: cardTitleFg }}>
                 Visionneuse DICOM
               </span>
-              {/* ── Boutons de disposition (toujours visibles) ─────── */}
-              {(() => {
-                const n = patientTabs.length;
-                const cur = multiPanel?.layout ?? 'single';
-                const btnBase: React.CSSProperties = {
-                  background: 'none', border: '1px solid transparent',
+              {/* Bouton disposition multi-panneaux */}
+              <button
+                onClick={onOpenLayoutPicker}
+                title="Choisir la disposition des panneaux"
+                style={{
+                  marginLeft: 10, background: multiPanel ? '#1e3a5f' : 'none',
+                  border: `1px solid ${multiPanel ? '#3b82f6' : 'transparent'}`,
                   borderRadius: 4, cursor: 'pointer',
-                  padding: '3px 5px', display: 'flex', alignItems: 'center',
-                  transition: 'border-color 0.12s, background 0.12s',
-                };
-                const btnActive: React.CSSProperties = {
-                  ...btnBase,
-                  background: '#1e2d45', border: '1px solid #3b82f6',
-                };
-                const btnDisabled: React.CSSProperties = {
-                  ...btnBase, opacity: 0.3, cursor: 'not-allowed',
-                };
-                const layouts: { key: LayoutMode; title: string; need: number; icon: React.ReactNode }[] = [
-                  {
-                    key: 'single', title: 'Vue simple (1 fichier)', need: 1,
-                    icon: (
-                      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-                        <rect x="1" y="1" width="14" height="10" rx="1" fill="#4a90d9" />
-                      </svg>
-                    ),
-                  },
-                  {
-                    key: 'split-v', title: 'Vue scindée verticalement (2 fichiers côte à côte)', need: 2,
-                    icon: (
-                      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-                        <rect x="1"  y="1" width="6" height="10" rx="1" fill="#4a90d9" />
-                        <rect x="9"  y="1" width="6" height="10" rx="1" fill="#4a90d9" />
-                      </svg>
-                    ),
-                  },
-                  {
-                    key: 'split-h', title: 'Vue scindée horizontalement (2 fichiers haut/bas)', need: 2,
-                    icon: (
-                      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-                        <rect x="1" y="1"  width="14" height="4" rx="1" fill="#4a90d9" />
-                        <rect x="1" y="7"  width="14" height="4" rx="1" fill="#4a90d9" />
-                      </svg>
-                    ),
-                  },
-                  {
-                    key: 'quad', title: 'Vue 4 panneaux (2×2)', need: 2,
-                    icon: (
-                      <svg width="16" height="12" viewBox="0 0 16 12" fill="none">
-                        <rect x="1" y="1" width="6" height="4" rx="1" fill="#4a90d9" />
-                        <rect x="9" y="1" width="6" height="4" rx="1" fill="#4a90d9" />
-                        <rect x="1" y="7" width="6" height="4" rx="1" fill="#4a90d9" />
-                        <rect x="9" y="7" width="6" height="4" rx="1" fill="#4a90d9" />
-                      </svg>
-                    ),
-                  },
-                ];
-                return (
-                  <div style={{ marginLeft: 10, display: 'flex', alignItems: 'center', gap: 2 }}>
-                    {layouts.map(({ key, title, need, icon }) => {
-                      const active   = cur === key;
-                      const disabled = n < need;
-                      return (
-                        <button
-                          key={key}
-                          title={title}
-                          disabled={disabled}
-                          style={disabled ? btnDisabled : active ? btnActive : btnBase}
-                          onMouseEnter={e => { if (!disabled && !active) { (e.currentTarget as HTMLElement).style.background = '#132030'; (e.currentTarget as HTMLElement).style.borderColor = '#2d4a6a'; } }}
-                          onMouseLeave={e => { if (!disabled && !active) { (e.currentTarget as HTMLElement).style.background = 'none'; (e.currentTarget as HTMLElement).style.borderColor = 'transparent'; } }}
-                          onClick={() => {
-                            if (disabled) return;
-                            if (key === 'single') {
-                              setMultiPanel(null);
-                            } else {
-                              const ids = patientTabs.slice(0, key === 'quad' ? 4 : 2).map(t => t.id);
-                              setMultiPanel({ layout: key, tabIds: ids });
-                            }
-                          }}
-                        >
-                          {icon}
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
+                  color: multiPanel ? '#93c5fd' : SBAR_MUTED,
+                  fontSize: 10, fontWeight: 600,
+                  padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 4,
+                  transition: 'background 0.15s, border-color 0.15s',
+                }}
+                onMouseEnter={e => { if (!multiPanel) (e.currentTarget as HTMLElement).style.background = '#1e293b'; }}
+                onMouseLeave={e => { if (!multiPanel) (e.currentTarget as HTMLElement).style.background = 'none'; }}
+              >
+                ⊞ Disposition
+              </button>
               {/* Boutons zoom */}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2, paddingRight: 8 }}>
                 <button
@@ -717,45 +957,18 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               }}
             />
 
-            {/* Canvas DICOM — vue simple ou vue multi-panneaux */}
+            {/* Canvas DICOM ou vue multi-panneaux */}
             {multiPanel ? (
               <MultiPanelView
                 layout={multiPanel.layout}
                 tabIds={multiPanel.tabIds}
                 tabs={tabs}
                 activeTabId={activeTabId}
-                onFocusPanel={id => setActiveTabId(id)}
-                onExit={() => setMultiPanel(null)}
-                onDropToPanel={(slotIdx, droppedTabId) => {
-                  const { layout, tabIds: cur } = multiPanel;
-                  const slots = layout === 'quad' ? 4 : layout === 'single' ? 1 : 2;
-                  const newIds: number[] = Array.from({ length: slots }, (_, i) => cur[i] ?? -1);
-                  const existingSlot = newIds.indexOf(droppedTabId);
-                  if (existingSlot === slotIdx) { setActiveTabId(droppedTabId); return; }
-                  if (existingSlot >= 0) {
-                    const tmp = newIds[slotIdx]; newIds[slotIdx] = droppedTabId; newIds[existingSlot] = tmp;
-                  } else {
-                    newIds[slotIdx] = droppedTabId;
-                  }
-                  setMultiPanel({ layout, tabIds: newIds });
-                  setActiveTabId(droppedTabId);
-                }}
-                onExpandLayout={droppedTabId => {
-                  const { layout, tabIds: cur } = multiPanel;
-                  const slots = layout === 'quad' ? 4 : layout === 'single' ? 1 : 2;
-                  if (slots >= 4) {
-                    // Déjà au maximum — remplacer le dernier slot
-                    const newIds = [...cur.slice(0, 3), droppedTabId];
-                    setMultiPanel({ layout: 'quad', tabIds: newIds });
-                  } else {
-                    // Élargir à quad et ajouter le fichier au prochain slot libre
-                    const newIds: number[] = Array.from({ length: 4 }, (_, i) => cur[i] ?? -1);
-                    const firstEmpty = newIds.indexOf(-1);
-                    newIds[firstEmpty >= 0 ? firstEmpty : slots] = droppedTabId;
-                    setMultiPanel({ layout: 'quad', tabIds: newIds });
-                  }
-                  setActiveTabId(droppedTabId);
-                }}
+                onFocusPanel={onFocusPanel}
+                onExit={onExitMultiPanel}
+                onDropToPanel={onDropToPanel}
+                onExpandLayout={onExpandLayout}
+                onRemovePanel={onRemovePanel}
                 onZoomPan={onZoomPan}
                 onResetAllPanelsPan={onResetAllPanelsPan}
                 onContrastBright={onContrastBright}
@@ -764,49 +977,23 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
                 onMeasureMove={onMeasureMove}
                 onMeasureLabelMove={onMeasureLabelMove}
                 onMeasureSelect={onMeasureSelect}
-                onRemovePanel={slotIdx => {
-                  const { layout, tabIds: cur } = multiPanel;
-                  const slots = layout === 'quad' ? 4 : 2;
-                  const newIds = Array.from({ length: slots }, (_, i): number => cur[i] ?? -1);
-                  newIds[slotIdx] = -1;
-                  const filled = newIds.filter(id => id !== -1);
-                  if (filled.length === 0) { setMultiPanel(null); return; }
-                  if (filled.length === 1) { setMultiPanel(null); setActiveTabId(filled[0]); return; }
-                  if (filled.length === 2) { setMultiPanel({ layout: 'split-v', tabIds: filled }); return; }
-                  setMultiPanel({ layout: 'quad', tabIds: newIds });
-                }}
                 onContextMenu={(x, y) => setCtxMenu({ x, y })}
               />
             ) : (
-              <div
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}
-                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                onDrop={e => {
-                  e.preventDefault();
-                  const raw = e.dataTransfer.getData('text/plain');
-                  if (!raw.startsWith('starhe-tab:')) return;
-                  const droppedId = parseInt(raw.replace('starhe-tab:', ''), 10);
-                  if (!tabs.some(t => t.id === droppedId)) return;
-                  const curId = activeTab?.id ?? -1;
-                  if (droppedId === curId || curId === -1) return;
-                  // Auto-switch à split-v avec le fichier courant + le fichier glissé
-                  setMultiPanel({ layout: 'split-v', tabIds: [curId, droppedId] });
-                }}
-              >
-                <DicomCanvas
-                  tab={activeTab}
-                  onZoomPan={onZoomPan}
-                  onContrastBright={onContrastBright}
-                  onFrameChange={onCanvasFrameChange}
-                  onMeasureAdd={onMeasureAdd}
-                  onMeasureMove={onMeasureMove}
-                  onMeasureLabelMove={onMeasureLabelMove}
-                  onMeasureSelect={onMeasureSelect}
-                  onContextMenu={(x, y) => setCtxMenu({ x, y })}
-                />
-              </div>
+              <DicomCanvas
+                tab={activeTab}
+                onZoomPan={onZoomPan}
+                onContrastBright={onContrastBright}
+                onFrameChange={onCanvasFrameChange}
+                onMeasureAdd={onMeasureAdd}
+                onMeasureMove={onMeasureMove}
+                onMeasureLabelMove={onMeasureLabelMove}
+                onMeasureSelect={onMeasureSelect}
+                onContextMenu={(x, y) => setCtxMenu({ x, y })}
+              />
             )}
-            {/* Bande de vignettes — toujours visible (vue simple et multi-panneaux) */}
+
+            {/* Bande de vignettes — visible dans les deux modes, draggable vers les panneaux */}
             <FileThumbnailStrip
               tabs={patientTabs}
               activeTabId={activeTab?.id ?? -1}
@@ -877,6 +1064,22 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         />
       )}
 
+      {/* Sélecteur de disposition */}
+      {showLayoutPicker && (
+        <LayoutPickerModal
+          count={tabs.length}
+          onPick={layout => {
+            setShowLayoutPicker(false);
+            if (layout === 'single') { setMultiPanel(null); return; }
+            const slots = layout === 'quad' ? 4 : 2;
+            const ids = Array.from({ length: slots }, (_, i) => tabs[i]?.id ?? -1);
+            ids[0] = activeTabId;
+            setMultiPanel({ layout, tabIds: ids });
+          }}
+          onCancel={() => setShowLayoutPicker(false)}
+        />
+      )}
+
       {/* Analyse en direct */}
       {showLive && (
         <LiveModal
@@ -892,44 +1095,49 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           analysisMode={displaySettings.analysisMode}
           onOpenInTab={async (result: BatchResultToOpen) => {
             setShowBatch(false);
+            // Charge le DICOM pour obtenir les frames
+            const name = result.name;
+            addLog(`Chargement : ${name}`, 'info');
             try {
-              const tabId = await openBatchResultAsTab(result);
-              setActiveTabId(tabId);
+              const data = await (result.serverPath
+                ? (await import('./api')).loadDicom(result.serverPath)
+                : Promise.reject(new Error('Chemin serveur absent')));
+              const label  = makeTabLabel(data.studyDate, data.fileName);
+              const newTab: TabState = {
+                ...makeDefaultTab(),
+                label,
+                patientName: data.patientName,
+                dicomPath:   result.serverPath,
+                data,
+                // Injection immédiate des résultats pré-calculés
+                detectionsBy: result.detections?.length
+                  ? { original: result.detections }
+                  : {},
+                resultsBy: result.risk
+                  ? { original: {
+                      riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
+                      riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
+                      detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lésion(s)`,
+                      detFg:    '#facc15',
+                    }}
+                  : {},
+              };
+              setTabs(prev => [...prev, newTab]);
+              setActiveTabId(newTab.id);
+              setPatients(prev => {
+                const existIdx = prev.findIndex(p => p.name === data.patientName);
+                if (existIdx >= 0) {
+                  const updated = [...prev];
+                  updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
+                  return updated;
+                }
+                return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
+              });
+              setActivePatientName(data.patientName);
+              addLog(`DICOM chargé avec résultats — ${data.frameCount} frame(s).`, 'success');
             } catch (err: unknown) {
               const msg = err instanceof Error ? err.message : String(err);
-              addLog(`ERREUR ouverture ${result.name} : ${msg}`, 'error');
-            }
-          }}
-          onOpenInLayout={async (results: BatchResultToOpen[]) => {
-            setShowBatch(false);
-            addLog(`Ouverture de ${results.length} fichier(s)\u2026`, 'info');
-            try {
-              const tabIds = await Promise.all(results.map(r => openBatchResultAsTab(r)));
-              setActiveTabId(tabIds[0]);
-            } catch (err: unknown) {
-              const msg = err instanceof Error ? err.message : String(err);
-              addLog(`ERREUR ouverture : ${msg}`, 'error');
-            }
-          }}
-        />
-      )}
-
-      {/* Sélecteur de disposition multi-panneaux */}
-      {pendingLayoutOpen && (
-        <LayoutPickerModal
-          count={pendingLayoutOpen.length}
-          onCancel={() => setPendingLayoutOpen(null)}
-          onPick={async (layout: LayoutMode) => {
-            const toOpen = pendingLayoutOpen.slice(0, layout === 'single' ? 1 : layout === 'quad' ? 4 : 2);
-            setPendingLayoutOpen(null);
-            addLog(`Ouverture de ${toOpen.length} fichier(s) en vue ${layout}…`, 'info');
-            try {
-              const tabIds = await Promise.all(toOpen.map(r => openBatchResultAsTab(r)));
-              setActiveTabId(tabIds[0]);
-              if (layout !== 'single') setMultiPanel({ layout, tabIds });
-            } catch (err: unknown) {
-              const msg = err instanceof Error ? err.message : String(err);
-              addLog(`ERREUR ouverture multi-panneaux : ${msg}`, 'error');
+              addLog(`ERREUR ouverture ${name} : ${msg}`, 'error');
             }
           }}
         />
@@ -948,5 +1156,59 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   );
 }
 
+// ── Barre patients ────────────────────────────────────────────────────────────
+
+function PatientTabBar({
+  patients,
+  activePatientIdx,
+  onSwitchPatient,
+}: {
+  patients: Patient[];
+  activePatientIdx: number;
+  onSwitchPatient: (idx: number) => void;
+}) {
+  if (!patients.length) return null;
+  return (
+    <div
+      style={{
+        background: PTAB_BG, height: 30, minHeight: 30,
+        display: 'flex', alignItems: 'stretch', overflowX: 'auto',
+        flexShrink: 0,
+      }}
+    >
+      {patients.map((p, idx) => {
+        const active = idx === activePatientIdx;
+        return (
+          <PatientTab
+            key={p.name}
+            name={p.name}
+            active={active}
+            onClick={() => onSwitchPatient(idx)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function PatientTab({ name, active, onClick }: { name: string; active: boolean; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        cursor: 'pointer',
+        background: active ? PTAB_ACT_BG : PTAB_BG,
+        color: active ? '#e5e7eb' : '#6b7280',
+        fontSize: 11, fontWeight: 700,
+        padding: '0 12px',
+        display: 'flex', alignItems: 'center',
+        borderBottom: active ? `2px solid ${BLUE}` : '2px solid transparent',
+        whiteSpace: 'nowrap', userSelect: 'none',
+      }}
+    >
+      {name}
+    </div>
+  );
+}
 
 export default StarhePlugin;

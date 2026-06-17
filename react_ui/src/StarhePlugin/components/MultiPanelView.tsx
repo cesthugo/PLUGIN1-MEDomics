@@ -2,7 +2,7 @@
 //
 // Supporte :
 //  - 2 panneaux côte à côte (split-v), 2 panneaux empilés (split-h), grille 2×2 (quad)
-//  - Redimensionnement par glisser-déposer des séparateurs (poignées)
+//  - Séparateurs fixes 50/50 (non déplaçables)
 //  - Drag & drop d'onglets depuis la bande de vignettes vers les panneaux
 //  - Zone d'expansion : déposer un fichier pour passer à la disposition supérieure
 //  - Panneau actif (interactions activées) / panneau inactif (clic pour activer)
@@ -44,46 +44,11 @@ export function MultiPanelView({
   const [dragDepth,      setDragDepth]      = React.useState(0);
   const [dragOverExpand, setDragOverExpand] = React.useState(false);
 
-  // Resize state — colSplit/rowSplit are percentages [10, 90]
-  const [colSplit, setColSplit] = React.useState(50);
-  const [rowSplit, setRowSplit] = React.useState(50);
-  const [resizing, setResizing] = React.useState<'col' | 'row' | null>(null);
-  const gridRef = React.useRef<HTMLDivElement>(null);
-
-  // Reset splits when layout changes
-  React.useEffect(() => { setColSplit(50); setRowSplit(50); }, [layout]);
-
-  // Ref stable pour onResetAllPanelsPan — évite les closures périmées dans l'effet de resize.
-  const onResetAllPanelsPanRef = React.useRef(onResetAllPanelsPan);
-  onResetAllPanelsPanRef.current = onResetAllPanelsPan;
-
-  // Global mouse move/up for resize drag
-  React.useEffect(() => {
-    if (!resizing) return;
-    const onMove = (e: MouseEvent) => {
-      const el = gridRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      if (resizing === 'col') {
-        setColSplit(Math.max(10, Math.min(90, (e.clientX - rect.left) / rect.width  * 100)));
-      } else {
-        setRowSplit(Math.max(10, Math.min(90, (e.clientY - rect.top)  / rect.height * 100)));
-      }
-    };
-    const onUp = () => { setResizing(null); onResetAllPanelsPanRef.current(); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup',   onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup',   onUp);
-    };
-  }, [resizing]);
-
-  const c = colSplit; const r = rowSplit;
+  // Séparateurs fixes 50/50 — non déplaçables
   const gridStyle: React.CSSProperties =
-    layout === 'split-v' ? { gridTemplateColumns: `${c}fr ${100-c}fr` } :
-    layout === 'split-h' ? { gridTemplateRows:    `${r}fr ${100-r}fr` } :
-    layout === 'quad'    ? { gridTemplateColumns: `${c}fr ${100-c}fr`, gridTemplateRows: `${r}fr ${100-r}fr` } :
+    layout === 'split-v' ? { gridTemplateColumns: '1fr 1fr' } :
+    layout === 'split-h' ? { gridTemplateRows:    '1fr 1fr' } :
+    layout === 'quad'    ? { gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' } :
     {};
 
   // Stable no-op callbacks for unfocused panels (avoid unnecessary re-renders)
@@ -127,16 +92,13 @@ export function MultiPanelView({
         </button>
       </div>
 
-      {/* Grille de panneaux — avec zones de dépôt drag & drop + redimensionnement */}
+      {/* Grille de panneaux — avec zones de dépôt drag & drop */}
       <div
-        ref={gridRef}
         style={{
           flex: 1, display: 'grid', ...gridStyle,
           gap: 2, background: '#000',
           overflow: 'hidden', minHeight: 0,
           position: 'relative',
-          cursor: resizing === 'col' ? 'col-resize' : resizing === 'row' ? 'row-resize' : 'default',
-          userSelect: resizing ? 'none' : 'auto',
         }}
         onDragEnter={() => setDragDepth(d => d + 1)}
         onDragLeave={() => setDragDepth(d => d - 1)}
@@ -174,16 +136,10 @@ export function MultiPanelView({
                 onDropToPanel(i, droppedId);
               }}
             >
-              {/* Canvas du panneau.
-                 - panneau non-focalisé → pointerEvents: none  (overlay de focus actif)
-                 - resize du séparateur en cours → pointerEvents: none sur TOUS les panneaux
-                   pour que les events souris ne fuient pas sur le canvas pendant le drag
-                   et n'accumulent pas de décalage de pan via un dragRef éventuellement actif.
-              */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', pointerEvents: (isFocused && !resizing) ? 'auto' : 'none' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', pointerEvents: isFocused ? 'auto' : 'none' }}>
                 {tab ? (
                   <DicomCanvas
-                    tab={resizing ? { ...tab, panX: 0, panY: 0 } : tab}
+                    tab={tab}
                     onZoomPan={isFocused          ? onZoomPan          : NOOP_ZP}
                     onPanReset={onResetAllPanelsPan}
                     onContrastBright={isFocused   ? onContrastBright   : NOOP_CB}
@@ -284,52 +240,26 @@ export function MultiPanelView({
           );
         })}
 
-        {/* ── Poignées de redimensionnement ──────────────────────────────── */}
+        {/* ── Séparateurs fixes (non déplaçables) ────────────────────────── */}
 
         {/* Séparateur vertical — split-v et quad */}
         {(layout === 'split-v' || layout === 'quad') && (
-          <div
-            title="Glisser pour redimensionner"
-            style={{
-              position: 'absolute', top: 0, bottom: 0,
-              left: `calc(${colSplit}% - 5px)`, width: 10,
-              cursor: 'col-resize', zIndex: 20,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-            onMouseDown={e => { e.preventDefault(); setResizing('col'); }}
-          >
-            <div style={{
-              width: resizing === 'col' ? 3 : 2,
-              height: resizing === 'col' ? '90%' : '60%',
-              background: resizing === 'col' ? '#3b82f6' : 'rgba(100,116,139,0.5)',
-              borderRadius: 2,
-              transition: 'height 0.15s, background 0.15s, width 0.15s',
-              pointerEvents: 'none',
-            }} />
-          </div>
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: 'calc(50% - 1px)', width: 2,
+            background: 'rgba(100,116,139,0.4)',
+            pointerEvents: 'none', zIndex: 20,
+          }} />
         )}
 
         {/* Séparateur horizontal — split-h et quad */}
         {(layout === 'split-h' || layout === 'quad') && (
-          <div
-            title="Glisser pour redimensionner"
-            style={{
-              position: 'absolute', left: 0, right: 0,
-              top: `calc(${rowSplit}% - 5px)`, height: 10,
-              cursor: 'row-resize', zIndex: 20,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-            onMouseDown={e => { e.preventDefault(); setResizing('row'); }}
-          >
-            <div style={{
-              height: resizing === 'row' ? 3 : 2,
-              width: resizing === 'row' ? '90%' : '60%',
-              background: resizing === 'row' ? '#3b82f6' : 'rgba(100,116,139,0.5)',
-              borderRadius: 2,
-              transition: 'width 0.15s, background 0.15s, height 0.15s',
-              pointerEvents: 'none',
-            }} />
-          </div>
+          <div style={{
+            position: 'absolute', left: 0, right: 0,
+            top: 'calc(50% - 1px)', height: 2,
+            background: 'rgba(100,116,139,0.4)',
+            pointerEvents: 'none', zIndex: 20,
+          }} />
         )}
       </div>
 

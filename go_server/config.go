@@ -28,6 +28,9 @@ type appConfig struct {
 	// Convention : starhe_worker --module <name> <args...>
 	WorkerBin string
 
+	// UI — répertoire du build React servi sous /ui/
+	UIDir string
+
 	// MongoDB
 	MongoURI        string
 	MongoDatabase   string
@@ -60,6 +63,8 @@ var cfg = appConfig{
 	PythonExe:     envOr("STARHE_PYTHON_EXE", defaultPythonExe()),
 	PythonModPath: envOr("STARHE_PYTHON_PATH", filepath.Join(serverDir(), "..", "pythonCode", "modules")),
 	WorkerBin:     os.Getenv("STARHE_WORKER_BIN"), // vide en dev, défini par Electron en prod
+
+	UIDir: envOr("STARHE_UI_DIR", filepath.Join(serverDir(), "..", "react_ui", "dist")),
 
 	MongoURI:        envOr("MONGO_URI", "mongodb://localhost:54017/"),
 	MongoDatabase:   envOr("MONGO_DB", "medomics"),

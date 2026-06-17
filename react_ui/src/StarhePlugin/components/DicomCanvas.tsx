@@ -186,26 +186,17 @@ export function DicomCanvas({
   const hasDataRef = useRef(!!tab?.data);
   hasDataRef.current = !!tab?.data;
 
-  // Quand le canvas est redimensionné (ex. déplacement du séparateur multi-panneaux),
-  // réinitialise panX=0 / panY=0 pour forcer le recentrage de l'image.
-  //
-  // - Mode multi-panneaux : onPanReset est fourni → appelle onResetAllPanelsPan() qui
-  //   recentre TOUS les panneaux (focalisés ET non-focalisés), quel que soit l'état de
-  //   l'onZoomPan qui peut être NOOP pour les panneaux non-focalisés.
-  // - Mode vue simple : onPanReset absent → repli sur onZoomPan(zoom,0,0) en sautant
-  //   la première mesure initiale du ResizeObserver (isFirstSizeRef).
+  // Quand le canvas est redimensionné en mode vue simple (ex. resize fenêtre),
+  // réinitialise panX=0 / panY=0 pour recentrer l'image.
+  // En mode multi-panneaux (onPanReset fourni) on ne fait rien : le pan doit
+  // être préservé pendant et après le déplacement du séparateur.
   const isFirstSizeRef = useRef(true);
   useEffect(() => {
     if (!hasDataRef.current) return;
-    if (onPanResetRef.current) {
-      // Multi-panel : reset ALL panels on every canvas resize — no initial-skip needed
-      // (panX=0 initially, so calling this on mount is a harmless no-op).
-      onPanResetRef.current();
-    } else {
-      // Single panel : skip the very first size measurement to preserve user pan/zoom.
-      if (isFirstSizeRef.current) { isFirstSizeRef.current = false; return; }
-      onZoomPanRef.current(tabZoomRef.current, 0, 0);
-    }
+    if (onPanResetRef.current) return; // multi-panel : conserver le pan
+    // Single panel : skip the very first size measurement to preserve user pan/zoom.
+    if (isFirstSizeRef.current) { isFirstSizeRef.current = false; return; }
+    onZoomPanRef.current(tabZoomRef.current, 0, 0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasSize.w, canvasSize.h]);
 

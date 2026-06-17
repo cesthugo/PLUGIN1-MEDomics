@@ -3,17 +3,22 @@ dicom/prepus_bridge.py — Intégration de l'API prepUS.removeLayoutFile
 ======================================================================
 Reproduit exactement le pipeline de référence (prepus/prepUS/cli.py) :
 
-    1. Exporte les frames numpy → MP4 temporaire (OpenCV, codec mp4v).
+    1. Encode les frames numpy → MP4 via ffmpeg (codec mpeg4, -qscale:v 1).
+       Fallback cv2.VideoWriter(mp4v) si ffmpeg est absent du PATH.
     2. Appelle prepUS.cli.removeLayoutFile (back_scan_conversion=True).
     3. Lit video.mp4 (cône US rogné, UI statique retirée) → numpy gris.
     4. Lit info.json → dict de coordonnées de crop.
 
 C'est la même sortie que les video.mp4 utilisés pour l'entraînement du C3D.
+ffmpeg (codec mpeg4) produit un bitstream identique à celui utilisé par Jérémy
+à l'entraînement, contrairement à cv2.VideoWriter(mp4v) qui dépend du FFmpeg
+lié à OpenCV et varie entre OS/versions.
 """
 
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -78,6 +83,60 @@ def map_detections_to_dicom_coords(
     return mapped
 
 
+def _frames_to_mp4_ffmpeg(frames: np.ndarray, fps: float, out_mp4: str) -> None:
+    """
+    Encode (T, H, W, 3) uint8 RGB → MP4 via ffmpeg (rawvideo pipe).
+    Codec mpeg4, -qscale:v 1 — identique au pipeline d'entraînement de Jérémy
+    (test_dicom_pipeline.py) et indépendant de la version OpenCV/FFmpeg système.
+    Fallback vers cv2.VideoWriter(mp4v) si ffmpeg est absent du PATH.
+    """
+    T, H, W, _ = frames.shape
+    ffmpeg_bin = shutil.which("ffmpeg")
+
+    if ffmpeg_bin is None:
+        go_print("warning", "prepus_bridge: ffmpeg absent — fallback cv2.VideoWriter(mp4v)")
+        _frames_to_mp4_cv2(frames, fps, out_mp4)
+        return
+
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-f", "rawvideo", "-pix_fmt", "rgb24",
+        "-s", f"{W}x{H}", "-r", str(fps),
+        "-i", "pipe:0",
+        "-c:v", "mpeg4", "-qscale:v", "1",
+        out_mp4,
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        for f in frames:
+            proc.stdin.write(f.astype(np.uint8).tobytes())
+        proc.stdin.close()
+    except BrokenPipeError:
+        pass
+    rc = proc.wait()
+    if rc != 0:
+        err = proc.stderr.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"ffmpeg exit={rc}:\n{err[-500:]}")
+    go_print("info", f"prepus_bridge: ffmpeg {T} frames → {os.path.basename(out_mp4)}")
+
+
+def _frames_to_mp4_cv2(frames: np.ndarray, fps: float, out_mp4: str) -> None:
+    """Fallback cv2.VideoWriter(mp4v) utilisé uniquement si ffmpeg est absent."""
+    T, H, W, _ = frames.shape
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(out_mp4, fourcc, fps, (W, H))
+    for f in frames:
+        bgr = cv2.cvtColor(f.astype(np.uint8), cv2.COLOR_RGB2BGR)
+        writer.write(bgr)
+    writer.release()
+    go_print("info", f"prepus_bridge: cv2.VideoWriter(mp4v) {T} frames → {os.path.basename(out_mp4)}")
+
+
 def preprocess_with_prepus(
     frames: np.ndarray,
     fps: float = 22.0,
@@ -111,15 +170,9 @@ def preprocess_with_prepus(
     work_dir = tempfile.mkdtemp(prefix="starhe_prepus_")
 
     try:
-        # ── 1. Exporter les frames vers un MP4 temporaire ─────────────────────
+        # ── 1. Encoder les frames → MP4 via ffmpeg (codec mpeg4, qscale 1) ───
         tmp_mp4 = os.path.join(work_dir, "input.mp4")
-        fourcc  = cv2.VideoWriter_fourcc(*"mp4v")
-        writer  = cv2.VideoWriter(tmp_mp4, fourcc, fps, (W, H))
-        for f in frames:
-            bgr = cv2.cvtColor(f.astype(np.uint8), cv2.COLOR_RGB2BGR)
-            writer.write(bgr)
-        writer.release()
-        go_print("info", f"prepus_bridge: {T} frames exportés → {os.path.basename(tmp_mp4)}")
+        _frames_to_mp4_ffmpeg(frames, fps, tmp_mp4)
 
         # ── 2. Appel prepUS ───────────────────────────────────────────────────
         out_dir = os.path.join(work_dir, "out")
