@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.6.3` — Last updated: 12 juin 2026*
+*Version `0.6.3` — Last updated: June 19, 2026*
 
 ---
 
@@ -66,98 +66,98 @@ Two AI models are used:
 
 ## Distribution — Builds Electron (`.dmg` / `.deb` / `.AppImage` / `.exe`)
 
-Le plugin se distribue sous forme d'**application Electron autonome** (même approche que MEDomics). Tout le pipeline (renderer React + electron-builder + extraResources) est configuré dans [react_ui/package.json](react_ui/package.json) section `"build"`.
+The plugin is distributed as a **standalone Electron application** (same approach as MEDomics). The full pipeline (React renderer + electron-builder + extraResources) is configured in [react_ui/package.json](react_ui/package.json) under the `"build"` key.
 
-### Cibles produites
+### Produced Targets
 
-| Plateforme | Format | Nom | Notes |
+| Platform | Format | Name | Notes |
 |---|---|---|---|
 | macOS arm64 | `.dmg` | `STARHE-<version>-mac-arm64.dmg` | Drag-and-drop (Apple Silicon M1/M2/M3) |
-| macOS arm64 | `.zip` | `STARHE-<version>-mac-arm64.zip` | Archive `.app` |
-| macOS x64 | `.dmg` | `STARHE-<version>-mac-x64.dmg` | Mac Intel (runner macos-13, queue longue) |
+| macOS arm64 | `.zip` | `STARHE-<version>-mac-arm64.zip` | `.app` archive |
+| macOS x64 | `.dmg` | `STARHE-<version>-mac-x64.dmg` | Mac Intel (macos-13 runner, long queue) |
 | Linux x64 | `.deb` | `STARHE-<version>-linux-amd64.deb` | Debian / Ubuntu |
-| Windows x64 | `.exe` | `STARHE-<version>-win-x64.exe` | Installeur NSIS |
+| Windows x64 | `.exe` | `STARHE-<version>-win-x64.exe` | NSIS installer |
 
-> Les cibles `.pkg` et `.AppImage` ont été retirées : `.pkg` nécessite un certificat Apple Developer, `.AppImage` saturait le disque des runners Ubuntu GitHub-hosted (~14 GB disponibles).
+> The `.pkg` and `.AppImage` targets were removed: `.pkg` requires an Apple Developer certificate, `.AppImage` was exhausting the disk of GitHub-hosted Ubuntu runners (~14 GB available).
 
-### Architecture du wrapper Electron
+### Electron Wrapper Architecture
 
-| Fichier | Rôle |
+| File | Role |
 |---|---|
-| [react_ui/electron/main.ts](react_ui/electron/main.ts) | Processus principal : splash → spawn `go_server` → wait `/health` 200 → main window |
-| [react_ui/electron/preload.ts](react_ui/electron/preload.ts) | `contextBridge` minimal : `openDicomFiles()` natif + `apiBase` |
-| [react_ui/electron/splash.html](react_ui/electron/splash.html) | Splash 480×280 affiché pendant le démarrage du serveur Go |
-| [react_ui/build-resources/](react_ui/build-resources/) | Icônes `.icns` / `.ico` / `.png` (placeholders pour l'instant) |
+| [react_ui/electron/main.ts](react_ui/electron/main.ts) | Main process: splash → spawn `go_server` → wait `/health` 200 → main window |
+| [react_ui/electron/preload.ts](react_ui/electron/preload.ts) | Minimal `contextBridge`: native `openDicomFiles()` + `apiBase` |
+| [react_ui/electron/splash.html](react_ui/electron/splash.html) | 480×280 splash shown while the Go server starts |
+| [react_ui/build-resources/](react_ui/build-resources/) | `.icns` / `.ico` / `.png` icons (placeholders for now) |
 
-Le `main.ts` :
-- Spawn `go_server` avec env `PORT=8082` + `STARHE_WEASIS_DIR` pointant vers les ressources packagées
-- **Healthcheck** : ping `GET /health` toutes les 300 ms, timeout 30 s — si KO, dialog "Réessayer / Quitter" avec hint MongoDB
-- **Backoff exponentiel** : redémarrage auto du Go server si crash (1s → 2s → 5s → 10s → 30s)
-- **Kill propre** sur `before-quit` (SIGTERM au Go server)
+`main.ts`:
+- Spawns `go_server` with env `PORT=8082` + `STARHE_WEASIS_DIR` pointing to the packaged resources
+- **Healthcheck**: pings `GET /health` every 300 ms, 30 s timeout — on failure, shows "Retry / Quit" dialog with MongoDB hint
+- **Exponential backoff**: auto-restarts the Go server on crash (1s → 2s → 5s → 10s → 30s)
+- **Clean kill** on `before-quit` (SIGTERM to the Go server)
 
-### Ressources embarquées (`extraResources`)
+### Bundled Resources (`extraResources`)
 
-Copiées dans `STARHE.app/Contents/Resources/` (macOS) ou `resources/` (Linux/Windows) :
+Copied into `STARHE.app/Contents/Resources/` (macOS) or `resources/` (Linux/Windows):
 
-| Source | Destination | Taille |
+| Source | Destination | Size |
 |---|---|---|
 | `go_server/go_server` | `go_server/go_server` | ~13 MB |
-| `third_party/weasis-dcm2png/dist/` | `weasis-dcm2png/` | ~18 MB JAR + libs natives OpenCV |
-| `pythonCode/modules/dist/starhe_worker/` | `starhe_worker/` | ~568 MB (Python + torch + mmdet bundlé via PyInstaller) |
+| `third_party/weasis-dcm2png/dist/` | `weasis-dcm2png/` | ~18 MB JAR + OpenCV native libs |
+| `pythonCode/modules/dist/starhe_worker/` | `starhe_worker/` | ~568 MB (Python + torch + mmdet bundled via PyInstaller) |
 | `react_ui/build-resources/jre-mac-${arch}/` | `jre/` | ~151 MB (Temurin 17 JRE) |
 
-> **MongoDB reste un prérequis externe** (cohérence MEDomics) — pas embarqué. Si MongoDB est down, l'utilisateur voit le dialog "Réessayer / Quitter" avec instructions.
+> **MongoDB remains an external prerequisite** (MEDomics consistency) — not bundled. If MongoDB is down, the user sees the "Retry / Quit" dialog with instructions.
 
-### Pré-requis pour builder
+### Build Prerequisites
 
-| Outil | Version | Pourquoi |
+| Tool | Version | Why |
 |---|---|---|
 | Node.js | 18+ | electron-builder + Vite |
-| Go | 1.21+ | Compiler `go_server` avant le packaging |
-| Python 3.13 + venv | — | Compiler le worker PyInstaller (`pythonCode/modules/starhe_plugin/.venv/`) |
-| PyInstaller | 6.20+ | `pip install pyinstaller` dans le venv |
-| `curl` + `tar` (Unix) ou PowerShell (Win) | — | Télécharger la JRE Temurin via `scripts/fetch_jre.{sh,ps1}` |
-| (Optionnel) `iconutil` / ImageMagick | — | Générer `.icns` / `.ico` à partir d'un PNG (cf. [react_ui/build-resources/README.md](react_ui/build-resources/README.md)) |
+| Go | 1.21+ | Compile `go_server` before packaging |
+| Python 3.13 + venv | — | Compile the PyInstaller worker (`pythonCode/modules/starhe_plugin/.venv/`) |
+| PyInstaller | 6.20+ | `pip install pyinstaller` in the venv |
+| `curl` + `tar` (Unix) or PowerShell (Win) | — | Download the Temurin JRE via `scripts/fetch_jre.{sh,ps1}` |
+| (Optional) `iconutil` / ImageMagick | — | Generate `.icns` / `.ico` from a PNG (see [react_ui/build-resources/README.md](react_ui/build-resources/README.md)) |
 
-### Builder localement
+### Build locally
 
 ```bash
-# 1. Compiler le binaire Go pour la plateforme courante
+# 1. Compile the Go binary for the current platform
 (cd go_server && go build -o go_server .)        # Mac/Linux
-# Windows : go build -o go_server.exe .
+# Windows: go build -o go_server.exe .
 
-# 2. Bundler le worker Python (--onedir, ~5-10 min, taille ~530 MB)
+# 2. Bundle the Python worker (--onedir, ~5-10 min, ~530 MB)
 cd pythonCode/modules
 pyinstaller ../../scripts/starhe_worker.spec --noconfirm
-# Produit : pythonCode/modules/dist/starhe_worker/starhe_worker
-# Test :   ./dist/starhe_worker/starhe_worker --module pipeline --help
+# Produces: pythonCode/modules/dist/starhe_worker/starhe_worker
+# Test:     ./dist/starhe_worker/starhe_worker --module pipeline --help
 
-# 3. Télécharger la JRE Temurin 17 pour la plateforme courante (~130 MB)
+# 3. Download the Temurin 17 JRE for the current platform (~130 MB)
 cd ../..
 ./scripts/fetch_jre.sh                # auto-detect (mac-arm64, mac-x64, linux-x64)
-# Windows :  .\scripts\fetch_jre.ps1
-# Produit : react_ui/build-resources/jre-<platform>/bin/java(.exe)
+# Windows:  .\scripts\fetch_jre.ps1
+# Produces: react_ui/build-resources/jre-<platform>/bin/java(.exe)
 
-# 4. Builder le renderer + Electron main + packager
+# 4. Build the renderer + Electron main + package
 cd react_ui
-npm install        # première fois
-npm run electron:pack         # toutes les cibles déclarées dans package.json
-# Ou cible précise :
+npm install        # first time
+npm run electron:pack         # all targets declared in package.json
+# Or a specific target:
 npx electron-builder --mac dmg --arm64
 npx electron-builder --linux deb AppImage --x64
 npx electron-builder --win nsis --x64
 ```
 
-Artefacts générés dans [react_ui/release/](react_ui/release/) (gitignored).
+Artifacts generated in [react_ui/release/](react_ui/release/) (gitignored).
 
-### Worker Python bundlé (Phase 2)
+### Bundled Python Worker (Phase 2)
 
-Le serveur Go détecte automatiquement quel Python utiliser via la variable d'environnement `STARHE_WORKER_BIN` (cf. [go_server/config.go](go_server/config.go), helper `pythonCmd()`) :
+The Go server automatically detects which Python to use via the `STARHE_WORKER_BIN` environment variable (see [go_server/config.go](go_server/config.go), `pythonCmd()` helper):
 
-- **Mode dev** (`STARHE_WORKER_BIN` non défini) : `python -m starhe_plugin.<module>` depuis le venv local
-- **Mode packagé** (`STARHE_WORKER_BIN=/path/to/starhe_worker`) : `starhe_worker --module <name>` — bundle PyInstaller autonome
+- **Dev mode** (`STARHE_WORKER_BIN` not set): `python -m starhe_plugin.<module>` from the local venv
+- **Packaged mode** (`STARHE_WORKER_BIN=/path/to/starhe_worker`): `starhe_worker --module <name>` — standalone PyInstaller bundle
 
-Electron passe automatiquement cette variable au spawn du Go server (cf. [react_ui/electron/main.ts](react_ui/electron/main.ts)). Les 5 entry points sont dispatchés par [pythonCode/modules/starhe_plugin/starhe_worker.py](pythonCode/modules/starhe_plugin/starhe_worker.py) via `runpy.run_module()` :
+Electron automatically passes this variable when spawning the Go server (see [react_ui/electron/main.ts](react_ui/electron/main.ts)). The 5 entry points are dispatched by [pythonCode/modules/starhe_plugin/starhe_worker.py](pythonCode/modules/starhe_plugin/starhe_worker.py) via `runpy.run_module()`:
 
 | `--module` | Module Python invoqué |
 |---|---|
@@ -167,26 +167,26 @@ Electron passe automatiquement cette variable au spawn du Go server (cf. [react_
 | `dicom.loader_cli` | `starhe_plugin.dicom.loader_cli` (extraction frames DICOM) |
 | `dicom.loader_mp4_cli` | `starhe_plugin.dicom.loader_mp4_cli` (extraction frames MP4) |
 
-### JRE Temurin embarquée (Phase 3)
+### Bundled Temurin JRE (Phase 3)
 
-Le pipeline appelle `weasis-dcm2png` (JAR Java) pour appliquer les LUT VOI exactement comme à l'entraînement. Plutôt que d'exiger `brew install openjdk@17` chez l'utilisateur, le `.dmg` embarque une JRE Temurin 17 autonome (~150 MB extraits).
+The pipeline calls `weasis-dcm2png` (Java JAR) to apply VOI LUTs exactly as during training. Rather than requiring `brew install openjdk@17` from the user, the `.dmg` bundles a standalone Temurin 17 JRE (~150 MB extracted).
 
-Le bridge Python [weasis_bridge.py](pythonCode/modules/starhe_plugin/dicom/weasis_bridge.py) lit deux variables d'environnement, dans l'ordre :
+The Python bridge [weasis_bridge.py](pythonCode/modules/starhe_plugin/dicom/weasis_bridge.py) reads two environment variables, in order:
 
-| Variable | Mode dev | Mode packagé |
+| Variable | Dev mode | Packaged mode |
 |---|---|---|
-| `STARHE_JAVA_BIN` | non défini → `shutil.which("java")` (PATH) | `Resources/jre/bin/java` (JRE embarquée) |
-| `STARHE_WEASIS_DIR` | non défini → `third_party/weasis-dcm2png/dist/` (dépôt) | `Resources/weasis-dcm2png/` (JAR + libs OpenCV bundlés) |
+| `STARHE_JAVA_BIN` | not set → `shutil.which("java")` (PATH) | `Resources/jre/bin/java` (bundled JRE) |
+| `STARHE_WEASIS_DIR` | not set → `third_party/weasis-dcm2png/dist/` (repo) | `Resources/weasis-dcm2png/` (bundled JAR + OpenCV libs) |
 
-Electron définit ces deux variables uniquement en mode packagé. En dev, le fallback PATH est utilisé pour `java`, et le JAR du dépôt pour le bridge.
+Electron sets both variables only in packaged mode. In dev mode, PATH fallback is used for `java`, and the repo JAR for the bridge.
 
-> **Limitations Phase 3** :
-> - Les **modèles `.pth`** (~750 MB) ne sont **toujours pas embarqués** — restent à télécharger au 1er lancement (Phase 4 à venir).
-> - La JRE et le bundle PyInstaller sont **spécifiques à la plateforme courante**. Builder sur chaque OS+arch cible (CI GitHub Actions, Phase 5) avec `fetch_jre.sh <platform>` puis `electron-builder --mac/--linux/--win`.
+> **Phase 3 limitations**:
+> - The **`.pth` model weights** (~750 MB) are **still not bundled** — they remain to be downloaded on first launch (Phase 4).
+> - The JRE and PyInstaller bundle are **specific to the current platform**. Build on each target OS+arch (GitHub Actions CI, Phase 5) with `fetch_jre.sh <platform>` then `electron-builder --mac/--linux/--win`.
 
-### Modèles `.pth` téléchargés au 1er lancement (Phase 4)
+### `.pth` Models Downloaded on First Launch (Phase 4)
 
-Pour garder le `.dmg` léger (325 MB au lieu de ~1 Go), les deux checkpoints C3D + RTMDet ne sont **pas embarqués** dans l'installeur. Au premier lancement d'une build packagée, Electron ouvre une fenêtre "Téléchargement des modèles STARHE" qui récupère les fichiers et les stocke dans le dossier `userData` de l'app.
+To keep the `.dmg` small (325 MB instead of ~1 GB), the two C3D + RTMDet checkpoints are **not bundled** in the installer. On the first launch of a packaged build, Electron opens a "Downloading STARHE models" window that fetches the files and stores them in the app's `userData` folder.
 
 | Fichier | Taille | Modèle |
 |---|---|---|
@@ -197,72 +197,97 @@ Pour garder le `.dmg` léger (325 MB au lieu de ~1 Go), les deux checkpoints C3D
 
 Le module [react_ui/electron/download-models.ts](react_ui/electron/download-models.ts) résout l'URL de téléchargement dans cet ordre :
 
-| Priorité | Condition | Source |
+| Priority | Condition | Source |
 |---|---|---|
-| 1 | `STARHE_MODELS_BASE_URL` défini | `${STARHE_MODELS_BASE_URL}/<name>` (override de test / hébergement custom) |
-| 2 | `GITHUB_TOKEN` défini | GitHub API `/repos/cesthugo/PLUGIN1-MEDomics/releases/tags/STARHE_MODELS` (repo privé) |
-| 3 | défaut | `https://github.com/cesthugo/PLUGIN1-MEDomics/releases/download/STARHE_MODELS/<name>` (release publique) |
+| 1 | `STARHE_MODELS_BASE_URL` set | `${STARHE_MODELS_BASE_URL}/<name>` (test override / custom hosting) |
+| 2 | `GITHUB_TOKEN` set | GitHub API `/repos/cesthugo/PLUGIN1-MEDomics/releases/tags/STARHE_MODELS` (private repo) |
+| 3 | default | `https://github.com/cesthugo/PLUGIN1-MEDomics/releases/download/STARHE_MODELS/<name>` (public release) |
 
-Côté Python, [config.py](pythonCode/modules/starhe_plugin/config.py) lit `STARHE_WEIGHTS_DIR` (défini par Electron au spawn du Go server en mode packagé) pour résoudre les chemins des `.pth`. En mode dev, la variable est absente et le code retombe sur `MODELS_DIR` (= `pythonCode/modules/starhe_plugin/models/` du dépôt).
+On the Python side, [config.py](pythonCode/modules/starhe_plugin/config.py) reads `STARHE_WEIGHTS_DIR` (set by Electron when spawning the Go server in packaged mode) to resolve `.pth` paths. In dev mode, the variable is absent and the code falls back to `MODELS_DIR` (= `pythonCode/modules/starhe_plugin/models/` in the repo).
 
-**Test PoC local** sans dépendance GitHub :
+**Local PoC test** without GitHub dependency:
 
 ```bash
-# 1) Servir les .pth depuis le dépôt
+# 1) Serve the .pth files from the repo
 cd pythonCode/modules/starhe_plugin/models && python3 -m http.server 8765 &
 
-# 2) Vider userData puis lancer l'app avec l'override
+# 2) Clear userData then launch the app with the override
 rm -rf "$HOME/Library/Application Support/starhe-plugin"
 STARHE_MODELS_BASE_URL=http://localhost:8765 \
   /Applications/STARHE.app/Contents/MacOS/STARHE
 ```
 
-La fenêtre de téléchargement doit s'ouvrir et progresser jusqu'à 100 %, puis l'app continue son boot normal (splash → Go server → React UI).
+The download window should open and progress to 100%, then the app continues its normal boot (splash → Go server → React UI).
 
-> **Limitations Phase 4** :
-> - La release GitHub `STARHE_MODELS` est actuellement **privée** → la priorité 3 (URL publique) renvoie 404. Pour la distribution finale, rendre la release publique ou héberger les `.pth` sur un CDN (puis mettre à jour `RELEASE_DL_BASE` dans [download-models.ts](react_ui/electron/download-models.ts)).
-> - Pour forcer un re-téléchargement après mise à jour des poids : supprimer le dossier `app.getPath('userData')/models/`.
+> **Phase 4 limitations**:
+> - The `STARHE_MODELS` GitHub release is currently **private** → priority 3 (public URL) returns 404. For final distribution, make the release public or host the `.pth` files on a CDN (then update `RELEASE_DL_BASE` in [download-models.ts](react_ui/electron/download-models.ts)).
+> - To force a re-download after updating weights: delete the `app.getPath('userData')/models/` folder.
 
-### CI multi-plateformes (Phase 5)
+### Multi-Platform CI (Phase 5)
 
-Le workflow [.github/workflows/release.yml](.github/workflows/release.yml) builde l'intégralité de la grille MEDomics-aligned sur runners GitHub-hosted dès qu'un tag `v*` est poussé. Pour tester sans publier de release : déclencher `workflow_dispatch` depuis l'onglet **Actions** (ou `gh workflow run release.yml`).
+The [.github/workflows/release.yml](.github/workflows/release.yml) workflow builds the complete MEDomics-aligned installer grid on GitHub-hosted runners as soon as a `v*` tag is pushed. To test without publishing a release: trigger `workflow_dispatch` from the **Actions** tab (or `gh workflow run release.yml`).
 
-| Runner | Plateforme | Cibles produites | Durée typique |
+| Runner | Platform | Produced targets | Typical duration |
 |---|---|---|---|
 | `macos-14` | `mac-arm64` | `.dmg`, `.zip` | ~3 min |
-| `macos-13` | `mac-x64` | `.dmg`, `.zip` | 1–5 h (queue longue tier gratuit) |
+| `macos-13` | `mac-x64` | `.dmg`, `.zip` | 1–5 h (long queue free tier) |
 | `ubuntu-latest` | `linux-x64` | `.deb` | ~12 min (torch CPU-only) |
 | `windows-latest` | `win-x64` | `.exe` (NSIS) | ~9 min |
 
-Chaque job effectue : libération disque (Linux, ~25 GB) → build Go → install Python deps + torch CPU-only (Linux) + `pyinstaller starhe_worker.spec` (caché sur hit) → `fetch_jre.{sh,ps1} <platform>` → `npm ci` + `npm run build:electron` → `npx electron-builder <flags>` → upload des installeurs. Le job final `release` agrège les artefacts, calcule `SHA256SUMS.txt`, et crée une **release GitHub brouillon** via `softprops/action-gh-release@v2`.
+Each job: disk cleanup (Linux, ~25 GB) → Go build → Python deps + torch CPU-only (Linux) + `pyinstaller starhe_worker.spec` (cached on hit) → `fetch_jre.{sh,ps1} <platform>` → `npm ci` + `npm run build:electron` → `npx electron-builder <flags>` → upload installers. The final `release` job aggregates artifacts, computes `SHA256SUMS.txt`, and creates a **draft GitHub release** via `softprops/action-gh-release@v2`.
 
-**Déclencher une nouvelle release** :
+**Trigger a new release**:
 
 ```bash
-# 1. Bumper la version
-#    Éditer "version" dans react_ui/package.json → ex. "0.6.4"
+# 1. Bump the version
+#    Edit "version" in react_ui/package.json → e.g. "0.6.4"
 git add react_ui/package.json
 git commit -m "chore: bump version to 0.6.4"
 git push
 
-# 2. Tagger → déclenche automatiquement le workflow CI
+# 2. Tag → automatically triggers the CI workflow
 git tag -a v0.6.4 -m "v0.6.4"
 git push origin v0.6.4
-# → GitHub Actions build les 4 plateformes et crée la release brouillon
-# → Aller sur GitHub Releases et cliquer "Publish release"
+# → GitHub Actions builds 4 platforms and creates the draft release
+# → Go to GitHub Releases and click "Publish release"
 ```
 
-**Première release publiée : [v0.6.3](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/v0.6.3)** (12 juin 2026) — 4 artefacts : `.dmg` arm64, `.zip` arm64, `.deb` linux, `.exe` win.
+**First published release: [v0.6.3](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/v0.6.3)** (June 12, 2026) — 4 artifacts: `.dmg` arm64, `.zip` arm64, `.deb` linux, `.exe` win.
 
-> **Limites** : le workflow n'effectue **ni signature ni notarisation** (`CSC_IDENTITY_AUTO_DISCOVERY=false`). Pour une release clinique, ajouter les secrets Apple/Windows et activer `xcrun notarytool` post-build. Le dossier `weasis-dcm2png/native/` ne contient actuellement que les `.dylib` macOS → le bridge Java tombe en fallback pydicom au runtime sur Linux/Windows tant que les `.so`/`.dll` OpenCV n'ont pas été régénérés.
+> **Limitations**: the workflow performs **neither signing nor notarization** (`CSC_IDENTITY_AUTO_DISCOVERY=false`). For a clinical release, add Apple/Windows secrets and enable `xcrun notarytool` post-build. The `weasis-dcm2png/native/` folder currently contains only macOS `.dylib` files → the Java bridge falls back to pydicom at runtime on Linux/Windows until the OpenCV `.so`/`.dll` are regenerated.
 
-### Signature & notarisation
+### Signing & Notarization
 
-Les builds actuels sont **non signés** :
-- **macOS** : Gatekeeper bloquera le premier lancement → clic-droit > **Ouvrir** > **Ouvrir quand même**
-- **Windows** : SmartScreen affichera un avertissement → **Informations complémentaires** > **Exécuter quand même**
+Current builds are **unsigned**:
+- **macOS**: Gatekeeper will block the first launch → right-click > **Open** > **Open Anyway**
+- **Windows**: SmartScreen will show a warning → **More info** > **Run anyway**
 
-Pour une release officielle clinique, prévoir : Apple Developer ID + notarisation (`xcrun notarytool`), Windows EV Code Signing Certificate.
+For an official clinical release, plan for: Apple Developer ID + notarization (`xcrun notarytool`), Windows EV Code Signing Certificate.
+
+### MEDomics Generic Plugin Discovery Integration
+
+STARHE integrates into MEDomics via a generic plugin discovery system added in June 2026, requiring **no MEDomics source code changes** per plugin.
+
+**How it works:**
+1. `scripts/medomics_register.sh` installs `medomics_integration/plugin.json` into the MEDomics `userData/plugins/STARHE/` directory (auto-detects dev/prod paths).
+2. On startup, MEDomics calls the `discover-plugins` IPC handler, which scans `userData/plugins/` and reads each `plugin.json` manifest.
+3. Any unknown `open{X}Module` dispatch in `layoutContext.jsx` looks up the matching plugin in `discoveredPlugins` and calls `openExternalPlugin()`, which opens a FlexLayout tab.
+4. The tab renders `ExternalPluginPage.jsx` — a generic iframe component that loads the plugin `uiUrl` and exchanges `PLUGIN_INIT` / `STARHE_INIT` postMessages.
+
+**`medomics_integration/plugin.json` manifest fields:**
+
+| Field | Value |
+|---|---|
+| `id` | `starhe` |
+| `name` | `STARHE` |
+| `uiUrl` | `http://localhost:8082` (Go server serves the built React UI) |
+| `healthUrl` | `http://localhost:8082/health` |
+| `apiPort` | `8082` |
+
+**Register the plugin (run once after launching MEDomics at least once):**
+```bash
+./scripts/medomics_register.sh
+```
 
 ---
 
@@ -583,9 +608,9 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 | **Console panel** | Collapsible log console; toggled from Settings or keyboard shortcut |
 | **Settings panel** | Font scale, font family, text/sidebar/bg colors, analysis mode, console toggle — persisted to `localStorage` |
 | **Live analysis modal** | 3 sources (C-STORE, folder, HDMI), real-time RTMDet overlay, risk score; backed by `run_live.py` subprocess launched by the Go server; preview frames streamed before inference → surveillance-camera behaviour |
-| **MongoDB cache** | Cached results restored instantly on re-open; "Réinitialiser l'analyse" clears the server cache |
+| **MongoDB cache** | Cached results restored instantly on re-open; "Reset analysis" clears the server cache |
 | **Batch analysis modal** | Multi-file sequential analysis; results table with risk score + bbox count per file; export to JSON (with full `detections_per_frame`) or CSV; import a previous JSON to reload results without re-running inference; checkboxes to open one, several, or all files directly in viewer tabs with detections pre-injected |
-| **Folder loading** | "📁 Charger un dossier DICOM" — `webkitdirectory` picker; auto-detects `.dcm`, `.dicom`, and extension-less files |
+| **Folder loading** | "📁 Load a DICOM folder" — `webkitdirectory` picker; auto-detects `.dcm`, `.dicom`, and extension-less files |
 | **Theme** | Dark theme by default; sidebar and background colors fully configurable from Settings |
 | **Keyboard shortcuts** | Space (play/pause), ←/→ (±1 frame), Shift+←/→ (±10), Home, P/M/S/R/C/L, `+`/`-` (±speed without modifier), `Cmd+`/`Cmd-`/`Cmd+0` (zoom only), B (loop), Ctrl+Tab / Ctrl+W |
 
@@ -688,7 +713,7 @@ The mmaction2 config (`configs_mmaction/recognition/c3d/c3d_starhe.py`) used:
 
 At inference, `pipeline.py` therefore passes `crop_only_frames` (fan-shaped sector crop, uint8 grayscale stacked into 3 identical channels R=G=B) to the C3D — exactly what Decord produces when reading a grayscale `video.mp4`.
 
-### Fixes applied (27–28 mai 2026)
+### Fixes applied (May 27–28, 2026)
 
 Three corrections in `c3d.py` and one correction in `pipeline.py` were implemented:
 
@@ -703,55 +728,55 @@ Three corrections in `c3d.py` and one correction in `pipeline.py` were implement
 
 | Configuration | Sens | Spec | Notes |
 |---|---|---|---|
-| Jérémy N (référence) | **91 %** (21/23) | **52 %** (13/25) | Training pipeline |
-| Notre implémentation (Batch 4, 28/05/2026) | **91 %** (21/23) | **52 %** (13/25) | ✅ Identique |
+| Jérémy N (reference) | **91%** (21/23) | **52%** (13/25) | Training pipeline |
+| Our implementation (Batch 4, 28/05/2026) | **91%** (21/23) | **52%** (13/25) | ✅ Identical |
 
-2 FN persistants : 02-0019 (23 %) et 03-0038 (36 %) — probablement dans les FN de Jérémy N également.  
-12 FP : 7 erreurs structurelles du modèle (communes avec Jérémy N) + 5 FP Supersonic borderline (02-0022, 02-0025, 05-0018, 05-0077, 06-0029).
+2 persistent FNs: 02-0019 (23%) and 03-0038 (36%) — likely also FNs in Jérémy N's pipeline.  
+12 FPs: 7 structural model errors (shared with Jérémy N) + 5 borderline Supersonic FPs (02-0022, 02-0025, 05-0018, 05-0077, 06-0029).
 
-### Validation du port C3D — comparaison contre mmaction2 (3 juin 2026)
+### C3D Port Validation — comparison against mmaction2 (June 3, 2026)
 
-Pour isoler le C3D du reste de la chaîne (lecture DICOM → prepUS → décodage MP4 → preprocessing → modèle), on a :
+To isolate the C3D from the rest of the chain (DICOM reading → prepUS → MP4 decoding → preprocessing → model):
 
-1. **Pré-généré 49 crops `video.mp4` une seule fois** (déterministe) avec `prepUS.removeLayoutFile` à partir des MP4 d'entraînement de Jérémy (`VIDEO TESTING BATCH MP4/`) → `/tmp/crops_fixed/<PID>/video.mp4`.
-2. **Exécuté la référence mmaction2** (`init_recognizer` + `inference_recognizer`) avec la config et le checkpoint d'origine de Jérémy, dans un venv Python 3.10 dédié (`/tmp/mmaction_env/`: torch 2.1.2 + mmcv-lite 2.1.0 + mmaction2 1.2.0 + eva-decord).
-3. **Exécuté notre C3D PyTorch pur** sur exactement les mêmes `video.mp4`.
+1. **Pre-generated 49 `video.mp4` crops once** (deterministic) with `prepUS.removeLayoutFile` from Jérémy's training MP4s (`VIDEO TESTING BATCH MP4/`) → `/tmp/crops_fixed/<PID>/video.mp4`.
+2. **Ran the mmaction2 reference** (`init_recognizer` + `inference_recognizer`) with Jérémy's original config and checkpoint, in a dedicated Python 3.10 venv (`/tmp/mmaction_env/`: torch 2.1.2 + mmcv-lite 2.1.0 + mmaction2 1.2.0 + eva-decord).
+3. **Ran our pure PyTorch C3D** on exactly the same `video.mp4` files.
 
-Résultats (`/tmp/ref_scores.json` vs `/tmp/ours_scores.json`, score "high risk", N=49) :
+Results (`/tmp/ref_scores.json` vs `/tmp/ours_scores.json`, "high risk" score, N=49):
 
-| Comparaison | Mean Δ | MAE | Max\|Δ\| | Accord label (seuil 0.5) |
+| Comparison | Mean Δ | MAE | Max\|Δ\| | Label agreement (threshold 0.5) |
 |---|---|---|---|---|
-| **Nous vs Ref mmaction2** (mêmes crops) | −0.0003 | **0.013** | 0.052 | **47/49 (96 %)** |
+| **Ours vs Ref mmaction2** (same crops) | −0.0003 | **0.013** | 0.052 | **47/49 (96%)** |
 | Ref mmaction2 vs Jérémy (cached preds) | +0.036 | 0.111 | 0.531 | 43/49 |
-| Nous vs Jérémy | +0.036 | 0.109 | 0.529 | 43/49 |
+| Ours vs Jérémy | +0.036 | 0.109 | 0.529 | 43/49 |
 
-**Conclusion** : notre port pytorch du C3D est validé bit-near du C3D mmaction2 de référence (MAE 1.3 %, biais ≈ 0). Les 4 % de divergence restants proviennent du décodage vidéo (cv2 vs Decord du même `video.mp4`). Les 6 patients en désaccord avec Jérémy (`01-0096`, `02-0049`, `03-0022`, `05-0009`, `05-0021`, `05-0077`) **sont également en désaccord avec la référence mmaction2 sur les mêmes crops** : le résidu vient donc des crops prepUS (non-déterminisme entre les crops actuels et ceux générés à l'entraînement de Jérémy), pas du modèle.
+**Conclusion**: our PyTorch C3D port is validated as bit-near equivalent to the reference mmaction2 C3D (MAE 1.3%, bias ≈ 0). The remaining 4% divergence comes from video decoding (cv2 vs Decord on the same `video.mp4`). The 6 patients disagreeing with Jérémy (`01-0096`, `02-0049`, `03-0022`, `05-0009`, `05-0021`, `05-0077`) **also disagree with the mmaction2 reference on the same crops**: the residual therefore comes from prepUS crops (non-determinism between current crops and those generated during Jérémy's training), not from the model.
 
-### Chaîne d'isolation finale du résidu prepUS (5 juin 2026)
+### Final prepUS Residual Isolation Chain (June 5, 2026)
 
-Après la validation C3D ci-dessus, trois tests complémentaires ont été menés pour cerner exactement la source du résidu de ~11 % vs Jérémy :
+After the C3D validation above, three additional tests were run to pinpoint the exact source of the ~11% residual vs Jérémy:
 
-| Test | Résultat | Conclusion |
+| Test | Result | Conclusion |
 |---|---|---|
-| **Décodage `video.mp4`** — cv2(BGR→RGB/GRAY) vs PyAV(rgb24) vs Decord, sur 4 crops grayscale | MAE 0.000, 100 % pixels égaux | Le décodeur n'est pas en cause |
-| **Déterminisme prepUS local** — 3 exécutions consécutives, SHA-256 de `video.mp4` + `info.json` sur 4 MP4 | Hash identique sur les 3 runs pour les 4 fichiers | prepUS est déterministe sur une même machine |
-| **Reproductibilité cross-plateforme prepUS** | ❌ **Non reproductible** par construction : `sonocrop.vid.savevideo` écrit via `cv2.VideoWriter(mp4v)`, qui délègue à FFmpeg lié à OpenCV. Le bitstream produit dépend de l'OS, de la version `opencv-python` et de FFmpeg système — il diffère entre macOS ARM Homebrew (notre env) et Linux Jean Zay (entraînement de Jérémy). | Source unique du résidu — non corrigible sans les crops d'origine. Adrien (auteur prepUS + entraînement) a confirmé le 5 juin que son environnement Jean Zay a été supprimé par erreur (impossible de reconstituer les versions exactes ni les crops d'entraînement). |
+| **`video.mp4` decoding** — cv2(BGR→RGB/GRAY) vs PyAV(rgb24) vs Decord, on 4 grayscale crops | MAE 0.000, 100% equal pixels | The decoder is not the cause |
+| **Local prepUS determinism** — 3 consecutive runs, SHA-256 of `video.mp4` + `info.json` on 4 MP4s | Identical hash across all 3 runs for all 4 files | prepUS is deterministic on the same machine |
+| **Cross-platform prepUS reproducibility** | ❌ **Not reproducible** by design: `sonocrop.vid.savevideo` writes via `cv2.VideoWriter(mp4v)`, which delegates to the FFmpeg linked to OpenCV. The produced bitstream depends on the OS, `opencv-python` version, and system FFmpeg — it differs between macOS ARM Homebrew (our env) and Linux Jean Zay (Jérémy's training). | Sole source of the residual — not fixable without the original crops. Adrien (prepUS author + training) confirmed on June 5 that his Jean Zay environment was accidentally deleted (impossible to reconstruct the exact versions or training crops). |
 
-### Mode bypass MP4 (5 juin 2026)
+### MP4 Bypass Mode (June 5, 2026)
 
-Pour neutraliser cette source de divergence, une variante 100 % numpy du bridge prepUS a été implémentée (`preprocess_with_prepus_inmem` dans `dicom/prepus_bridge.py`) et exposée via le flag `PREPUS_BYPASS_MP4` de `config.py`. Elle réimplémente `removeLayoutFile` directement sur les numpy arrays sans aucun `cv2.VideoWriter` / `cv2.VideoCapture` intermédiaire.
+To neutralize this divergence source, a 100% numpy variant of the prepUS bridge was implemented (`preprocess_with_prepus_inmem` in `dicom/prepus_bridge.py`) and exposed via the `PREPUS_BYPASS_MP4` flag in `config.py`. It reimplements `removeLayoutFile` directly on numpy arrays with no intermediate `cv2.VideoWriter` / `cv2.VideoCapture`.
 
-**Mesure sur les 49 patients de Jérémy** (mode A = roundtrip MP4 existant, mode B = bypass) :
+**Measurement on Jérémy's 49 patients** (mode A = existing MP4 roundtrip, mode B = bypass):
 
-| Métrique | Mode A (MP4 roundtrip) | **Mode B (bypass / `PREPUS_BYPASS_MP4=True`)** | Gain |
+| Metric | Mode A (MP4 roundtrip) | **Mode B (bypass / `PREPUS_BYPASS_MP4=True`)** | Gain |
 |---|---|---|---|
-| MAE vs Jérémy | 0.122 | **0.103** | − 16 % |
-| Accord labels vs Jérémy | 42/49 (85.7 %) | **44/49 (89.8 %)** | + 2 patients |
-| Accuracy vs vérité terrain | 31/49 (63.3 %) | **33/49 (67.3 %)** | + 2 patients |
-| Bias modèle − Jérémy | + 0.044 | + 0.037 | − 16 % |
-| Reproductibilité cross-plateforme | ❌ dépend du FFmpeg lié à cv2 | ✅ bit-à-bit garanti sur tout OS | — |
+| MAE vs Jérémy | 0.122 | **0.103** | −16% |
+| Label agreement vs Jérémy | 42/49 (85.7%) | **44/49 (89.8%)** | +2 patients |
+| Accuracy vs ground truth | 31/49 (63.3%) | **33/49 (67.3%)** | +2 patients |
+| Model bias − Jérémy | +0.044 | +0.037 | −16% |
+| Cross-platform reproducibility | ❌ depends on cv2-linked FFmpeg | ✅ bit-for-bit guaranteed on any OS | — |
 
-Le bypass est strictement meilleur sur les 3 métriques mesurées et élimine la dépendance à l'encodeur mp4v de cv2, qui n'est plus reproductible (env d'entraînement perdu).
+Bypass mode is strictly better on all 3 measured metrics and eliminates the dependency on cv2's mp4v encoder, which is no longer reproducible (training environment lost).
 
 ---
 
@@ -784,9 +809,9 @@ Returns a 2-tuple `(crop_frames, info_dict)`:
 
 ### Internal implementation
 
-Two backends are available, contrôlés par le flag `PREPUS_BYPASS_MP4` de `config.py` :
+Two backends are available, controlled by the `PREPUS_BYPASS_MP4` flag in `config.py`:
 
-**Mode A — MP4 roundtrip** (`preprocess_with_prepus`, légat) :
+**Mode A — MP4 roundtrip** (`preprocess_with_prepus`, legacy):
 
 1. Export numpy frames → temporary MP4 (OpenCV `VideoWriter`, codec `mp4v`, grayscale)
 2. Call `prepUS.cli.removeLayoutFile(mp4, out_dir, back_scan_conversion=True, ...)`
@@ -794,27 +819,27 @@ Two backends are available, contrôlés par le flag `PREPUS_BYPASS_MP4` de `conf
 4. Read `out_dir/info.json` → ROI dict
 5. Cleanup of temporary directory
 
-**Mode B — bypass MP4** (`preprocess_with_prepus_inmem`, activable via `PREPUS_BYPASS_MP4=True`, recommandé depuis le 5 juin 2026) :
+**Mode B — MP4 bypass** (`preprocess_with_prepus_inmem`, enabled via `PREPUS_BYPASS_MP4=True`, recommended since June 5, 2026):
 
-1. Convert numpy RGB frames → grayscale (cv2.cvtColor `RGB2GRAY` — BT.601, identique au chemin lu par `loadvideo` sur un MP4 grayscale)
-2. Run the prepUS algorithm in-process on numpy : variability mask → morphological denoise → `crop_single_object` → `find_linear_fov` (avec retry récursif identique à la référence) → FOV mask → `applyMask`
-3. Return `(crop_frames, info)` directement — aucun `VideoWriter` / `VideoCapture` intermédiaire, aucun dossier temp
+1. Convert numpy RGB frames → grayscale (cv2.cvtColor `RGB2GRAY` — BT.601, identical to the path read by `loadvideo` on a grayscale MP4)
+2. Run the prepUS algorithm in-process on numpy: variability mask → morphological denoise → `crop_single_object` → `find_linear_fov` (with recursive retry identical to the reference) → FOV mask → `applyMask`
+3. Return `(crop_frames, info)` directly — no intermediate `VideoWriter` / `VideoCapture`, no temp folder
 
-Le mode B est strictement équivalent algorithmiquement à `removeLayoutFile(..., back_scan_conversion=True)` mais élimine la non-portabilité cross-OS de l'encodeur mp4v (cf. section validation C3D ci-dessus).
+Mode B is algorithmically strictly equivalent to `removeLayoutFile(..., back_scan_conversion=True)` but eliminates the cross-OS non-portability of the mp4v encoder (see C3D validation section above).
 
 > **Warning**: prepUS must be installed with `--no-deps` to avoid conflicts with the venv's OpenCV version. The `run_tkinter.ps1` script handles this automatically.
 
 ---
 
-## Décodage DICOM via weasis-dcm2png (`dicom/weasis_bridge.py`)
+## DICOM Decoding via weasis-dcm2png (`dicom/weasis_bridge.py`)
 
-### Pourquoi
+### Why
 
-`pydicom.pixel_array` ne dépose **ni la Modality LUT, ni la VOI LUT** du fichier DICOM. Le pipeline d'entraînement de Jérémy passait par **Weasis** (viewer DICOM clinique open-source), qui applique ces deux LUT — exactement comme un radiologue voit l'image sur sa console. Faire la même chose à l'inférence rapproche la distribution d'entrée de celle vue à l'entraînement.
+`pydicom.pixel_array` applies **neither the Modality LUT nor the VOI LUT** from the DICOM file. Jérémy's training pipeline used **Weasis** (open-source clinical DICOM viewer), which applies both LUTs — exactly as a radiologist sees the image on their console. Doing the same at inference brings the input distribution closer to what was seen during training.
 
-### Comment
+### How
 
-Un mini-projet Java **vendorisé** dans [third_party/weasis-dcm2png/](third_party/weasis-dcm2png/) (pom.xml + `Dcm2Png.java` + JAR + libs natives OpenCV/DCM4CHE) expose un CLI headless :
+A Java mini-project **vendored** in [third_party/weasis-dcm2png/](third_party/weasis-dcm2png/) (pom.xml + `Dcm2Png.java` + JAR + OpenCV/DCM4CHE native libs) exposes a headless CLI:
 
 ```bash
 java -Djava.library.path=third_party/weasis-dcm2png/dist/native \
@@ -822,60 +847,60 @@ java -Djava.library.path=third_party/weasis-dcm2png/dist/native \
      -jar third_party/weasis-dcm2png/dist/weasis-dcm2png.jar \
      /path/to/file.dcm /out/dir/
 # stdout: fps=<float> / frames=<int>
-# /out/dir/ : un PNG par frame, LUT appliquées
+# /out/dir/: one PNG per frame, LUTs applied
 ```
 
-Le bridge Python [dicom/weasis_bridge.py](pythonCode/modules/starhe_plugin/dicom/weasis_bridge.py) expose :
+The Python bridge [dicom/weasis_bridge.py](pythonCode/modules/starhe_plugin/dicom/weasis_bridge.py) exposes:
 
-| Fonction | Rôle |
+| Function | Role |
 |---|---|
-| `weasis_available() -> bool` | Vérifie présence du JAR + JVM fonctionnelle (`java -version`) |
-| `export_dicom_to_pngs_weasis(dicom, out_dir) -> (fps, n_frames)` | Subprocess Java, parse stdout |
-| `frames_via_weasis(dicom, work_dir=None) -> (frames_rgb, fps)` | DICOM → PNG → numpy `(T, H, W, 3)` uint8, cleanup auto |
+| `weasis_available() -> bool` | Checks JAR presence + working JVM (`java -version`) |
+| `export_dicom_to_pngs_weasis(dicom, out_dir) -> (fps, n_frames)` | Java subprocess, parses stdout |
+| `frames_via_weasis(dicom, work_dir=None) -> (frames_rgb, fps)` | DICOM → PNG → numpy `(T, H, W, 3)` uint8, auto cleanup |
 
-### Branchement dans le pipeline
+### Pipeline branching
 
-L'étape 3 de [pipeline.py](pythonCode/modules/starhe_plugin/pipeline.py) tente Weasis en premier puis retombe automatiquement sur pydicom :
+Step 3 of [pipeline.py](pythonCode/modules/starhe_plugin/pipeline.py) tries Weasis first then automatically falls back to pydicom:
 
 ```python
 if USE_WEASIS_EXPORT and weasis_available():
     try:
         frames_rgb, weasis_fps = frames_via_weasis(dicom_path)
         if weasis_fps > 0:
-            dicom_fps = weasis_fps      # privilégier la valeur reportée par Weasis
+            dicom_fps = weasis_fps      # prefer the value reported by Weasis
     except Exception as exc:
-        go_print("warning", f"weasis-dcm2png échoué ({exc}) — fallback pydicom")
+        go_print("warning", f"weasis-dcm2png failed ({exc}) — fallback pydicom")
         frames_rgb = None
 
 if frames_rgb is None:
-    # Chemin historique : extract_frames(ds) + frame_to_uint8
+    # Legacy path: extract_frames(ds) + frame_to_uint8
     ...
 ```
 
-Flag dans `config.py` :
+Flag in `config.py`:
 
-| Constante | Défaut | Effet |
+| Constant | Default | Effect |
 |---|---|---|
-| `USE_WEASIS_EXPORT` | `True` | Active la chaîne Weasis avec fallback pydicom automatique |
+| `USE_WEASIS_EXPORT` | `True` | Enables the Weasis chain with automatic pydicom fallback |
 
-**Cas de fallback** :
-- Java absent du PATH (`shutil.which("java")` retourne `None`)
-- JVM non fonctionnelle (sur macOS, `/usr/bin/java` est un stub installeur → installer une vraie JVM, ex. `brew install openjdk@17`)
-- Transfer syntax non supportée par le JAR (notamment **JPEG 2000** — pris en charge par pydicom via pylibjpeg)
-- Subprocess Java exit ≠ 0 ou stdout vide
+**Fallback cases**:
+- Java absent from PATH (`shutil.which("java")` returns `None`)
+- Non-functional JVM (on macOS, `/usr/bin/java` is an installer stub → install a real JVM, e.g. `brew install openjdk@17`)
+- Transfer syntax not supported by the JAR (notably **JPEG 2000** — handled by pydicom via pylibjpeg)
+- Java subprocess exit ≠ 0 or empty stdout
 
-Le fallback est silencieux côté UI (warning dans la console SSE) et conserve le comportement antérieur bit-à-bit. Le flag est conservateur (par défaut `True` mais aucune régression si Java manque).
+The fallback is silent on the UI side (warning in the SSE console) and preserves the prior behavior bit-for-bit. The flag is conservative (default `True` but no regression if Java is missing).
 
-### Script de validation hors UI (`test_dicom_pipeline.py`)
+### Standalone validation script (`test_dicom_pipeline.py`)
 
-`test_dicom_pipeline.py` à la racine du projet exécute la chaîne complète DICOM → Weasis → ffmpeg MP4 → prepUS → C3D + RTMDet hors React/Go, utile pour reproduire un cas et comparer le score de risque à celui du runtime :
+`test_dicom_pipeline.py` at the project root runs the full DICOM → Weasis → ffmpeg MP4 → prepUS → C3D + RTMDet chain outside React/Go, useful for reproducing a case and comparing the risk score to the runtime output:
 
 ```bash
 python test_dicom_pipeline.py /path/to/file.dcm            # RISK + DETECT
-python test_dicom_pipeline.py /path/to/file.dcm --no-detect  # RISK seul
+python test_dicom_pipeline.py /path/to/file.dcm --no-detect  # RISK only
 ```
 
-Si le JAR ou Java manque, le script bascule lui aussi sur le chemin pydicom (mêmes règles que `pipeline.py`).
+If the JAR or Java is missing, the script also switches to the pydicom path (same rules as `pipeline.py`).
 
 ---
 

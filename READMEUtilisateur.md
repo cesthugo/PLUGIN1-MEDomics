@@ -3,7 +3,7 @@
 > This document explains how to use the STARHE plug-in interface,  
 > dedicated to hepatic ultrasound analysis for hepatocellular carcinoma (HCC) detection.
 >
-> **Version 0.6.3** — Last updated: 12 juin 2026
+> **Version 0.6.3** — Last updated: June 19, 2026
 
 ---
 
@@ -315,10 +315,10 @@ Click **📋 Analyse en lot (batch)** in the sidebar. A full-screen modal opens.
 
 1. Add the files you want to analyze.
 2. Select the analysis mode (RISK + DETECT / RISK / DETECT) in the header.
-3. Click **▶ Lancer le batch**.
+3. Click **▶ Run batch**.
 4. Each file is analyzed sequentially; progress is shown inline per file.
 
-### Results table (Récapitulatif)
+### Results table (Summary)
 
 Once at least one file is done, a summary table appears at the bottom:
 
@@ -362,7 +362,7 @@ The **📡 Analyse en direct** button in the sidebar opens a dedicated window fo
 
 ### Opening the window
 
-Click **📡 Analyse en direct** in the main sidebar. A new window appears.  
+Click **📡 Live Analysis** in the main sidebar. A new window appears.  
 Re-clicking while the window is already open brings it to the foreground.
 
 ### Choosing an input source
