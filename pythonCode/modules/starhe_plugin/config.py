@@ -38,8 +38,18 @@ for _d in (MODELS_DIR, TEMP_DIR, WEIGHTS_DIR):
 
 # ── Modèles STARHE (artefacts locaux — autonomes, sans dépendance externe) ────
 
-# Classification (STARHE-RISK) — C3D PyTorch pur
+# Classification (STARHE-RISK) — C3D
 STARHE_RISK_CHECKPOINT = os.path.join(WEIGHTS_DIR, "best_acc_mean_cls_f1_epoch_14.pth")
+
+# Backend C3D pour STARHE-RISK.
+# "mmaction2" : subprocess _c3d_runner.py utilisant les classes C3D et I3DHead
+#               de mmaction2 directement (sans registre mmengine). Requiert
+#               mmaction2==1.2.0 installé avec --no-deps dans le venv.
+#               Résultats bit-identiques à "pytorch" sur les mêmes tenseurs.
+# "pytorch"   : C3DRecognizer local (c3d.py), validé bit-identique à mmaction2,
+#               aucune dépendance mmaction2. Fallback automatique si mmaction2
+#               est absent ou si le subprocess échoue.
+C3D_BACKEND: str = os.environ.get("C3D_BACKEND", "mmaction2")
 
 # Détection (STARHE-DETECT) — modèle actif : "rtmdet" | "dino"
 DETECT_BACKEND = "rtmdet"

@@ -603,6 +603,35 @@
 
 - [ ] **Domain adaptation for Supersonic Imagine** — The C3D model was trained predominantly on non-Supersonic devices. Fine-tune on a small annotated Supersonic set, or apply feature-level normalization (histogram matching, z-score per device type) before feeding frames to C3D.
 
+### 📊 Phase 5b — STARHE-RISK: Improvements from 52-Patient Analysis (June 19, 2026)
+
+> Context: multi-source comparison across 52 patients (Jérémy reference, DICOM pipeline, MP4 Mosaic, Adrien preprocessed videos). Concordance rates: DICOM 38/47 (81%), MP4 43/49 (88%), Adrien 21/22 (95%). Full analysis in `Testing/comparaison_resultats_STARHE.csv`.
+> Two error categories: (1) preprocessing errors — fixable without touching the model; (2) intrinsic model errors — present even in Jérémy's reference.
+
+**Priority 1 — Immediate (no new data, no model change needed)**
+
+- [ ] **Activate weasis in the DICOM production pipeline** — Set `USE_WEASIS_EXPORT = True` in `config.py` and deploy with the bundled Temurin JRE (Phase 3). Expected gain: eliminate 8 of the 9 DICOM discordances vs Jérémy (all due to VOI LUT not applied → systematic over-detection on LowRisk patients). Target: DICOM concordance 81% → ~88–90%.
+
+- [ ] **Activate MP4 bypass mode as default** — Set `PREPUS_BYPASS_MP4 = True` in `config.py`. Already validated (+16% MAE reduction, +2 patients label agreement, bit-for-bit cross-OS reproducibility). Eliminates the dependency on the non-portable `cv2.VideoWriter(mp4v)` encoder.
+
+**Priority 2 — Medium term (requires validation data)**
+
+- [ ] **ROC analysis + decision threshold calibration** — The current threshold of 0.5 is arbitrary. Run a full ROC on the 52-patient set to find the optimal threshold by clinical criterion (sensitivity priority = miss no cancer). A threshold of ~0.55 would eliminate borderline FP (e.g. 05-0018, DICOM score 0.5005) without losing true TP. Lowering to ~0.40 would recover some structural FN at the cost of more FP.
+
+- [ ] **Investigate structural FP patients (01-0063, 01-0072, 01-0083)** — These 3 LowRisk patients score ≥ 0.71 on ALL pipelines including Jérémy. Threshold adjustment will not fix them. Inspect the prepUS crops fed to C3D: imaging artifact, ambiguous hepatic pattern, or known non-HCC pathology (cirrhosis, NASH)? If clinically "reasonable" errors, document as known limitations; if not, consider targeted data augmentation or upweighting in retraining.
+
+- [ ] **Investigate patient 02-0049 (HighRisk missed by Jérémy, caught by DICOM and Adrien)** — DICOM: 0.5215, Adrien: 0.5236 → HighRisk. Jérémy: 0.3851 → Faible. Clinically verify if the HighRisk label is confirmed. If yes, this is evidence that our pipeline has better sensitivity on certain atypical cases — a positive discriminating factor vs the reference.
+
+- [ ] **Measure Weasis vs pydicom gain (quantitative)** — Once weasis is activated in production, redo MAE/concordance on Jérémy's 49 patients with `USE_WEASIS_EXPORT=True` vs `False`. Hypothesis: incremental gain specifically on Supersonic/Canon DICOMs whose VOI LUT is non-trivial.
+
+**Priority 3 — Long term (model-level changes)**
+
+- [ ] **Multi-clip dense sampling for systematic FN** — Patients 02-0016, 02-0019, 05-0065, 05-0080, 02-0089 are HighRisk missed by all pipelines (scores 0.08–0.38). Standard uniform 10-clip sampling misses these cases. Experiment with 20–30 clips or variance-based sampling targeting frames with high local motion (lesions often produce subtle pulsatile patterns distinct from normal parenchyma).
+
+- [ ] **Late fusion with STARHE-DETECT** — For borderline RISK scores (45%–55%), if RTMDet simultaneously detects a lesion on multiple frames, use it as a positive secondary signal to tip the decision toward HighRisk. No model retraining required — post-processing rule on combined RISK + DETECT outputs.
+
+- [ ] **Fine-tuning with hard cases** — The systematic FN and structural FP patients define two "hard" sub-populations. Fine-tune the C3D checkpoint with an augmented dataset upweighting these cases. Requires GPU access (Jean Zay or equivalent) and labeled DICOM data for these specific patients.
+
 ### 🔍 Phase 6: STARHE-DETECT — Real Input Investigation (Short term)
 
 > Context: the exact format of the RTMDet training data is uncertain. `data_prefix = "cropped_videos"` in the config is not sufficiently explicit. Both batches show different behaviors depending on the input (backscan vs crop_only), with no ground-truth bbox to decide objectively.

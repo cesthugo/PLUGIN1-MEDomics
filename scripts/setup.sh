@@ -56,7 +56,36 @@ echo "⚙️  Installation des dépendances (requirements.txt) …"
 "$PIP" install -r "$REQUIREMENTS" --quiet
 echo "✅ Dépendances installées."
 
-# ── 4. Installer prepUS + sonocrop ──────────────────────────────────────────
+# ── 4. Installer mmaction2 (--no-deps) + patches venv ───────────────────────
+if ! "$PYTHON" -c "import mmaction" 2>/dev/null; then
+    echo "⚙️  Installation de mmaction2 (sans dépendances) …"
+    "$PIP" install mmaction2==1.2.0 --no-deps --quiet
+    echo "✅ mmaction2 installé."
+fi
+
+# Patches de compatibilité Python 3.13 + mmdet dans le venv mmaction2
+MMACTION_PKG="$VENV_DIR/lib/$(ls "$VENV_DIR/lib/")/site-packages/mmaction"
+if [ -d "$MMACTION_PKG" ]; then
+    # 1. Suppression de l'import DRN absent du wheel 1.2.0
+    sed -i.bak '/from .drn.drn import DRN/d' \
+        "$MMACTION_PKG/models/localizers/__init__.py" 2>/dev/null && \
+    sed -i.bak "s/__all__ = \['TEM', 'PEM', 'BMN', 'TCANet', 'DRN'\]/__all__ = ['TEM', 'PEM', 'BMN', 'TCANet']/" \
+        "$MMACTION_PKG/models/localizers/__init__.py" 2>/dev/null || true
+
+    # 2. AssertionError dans roi_heads (conflit registre mmdet ↔ mmengine)
+    sed -i.bak "s/except (ImportError, ModuleNotFoundError):/except (ImportError, ModuleNotFoundError, AssertionError):/" \
+        "$MMACTION_PKG/models/roi_heads/__init__.py" 2>/dev/null || true
+
+    # 3. Même patch pour task_modules
+    sed -i.bak "s/except (ImportError, ModuleNotFoundError):/except (ImportError, ModuleNotFoundError, AssertionError):/" \
+        "$MMACTION_PKG/models/task_modules/__init__.py" 2>/dev/null || true
+
+    # Nettoyage des backups .bak
+    find "$MMACTION_PKG" -name "*.bak" -delete 2>/dev/null || true
+    echo "✅ Patches mmaction2 appliqués."
+fi
+
+# ── 5. Installer prepUS + sonocrop ──────────────────────────────────────────
 if ! "$PYTHON" -c "import prepUS" 2>/dev/null; then
     echo "⚙️  Installation de sonocrop + prepUS …"
     "$PIP" install sonocrop --no-deps --quiet

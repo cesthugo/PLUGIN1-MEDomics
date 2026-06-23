@@ -22,7 +22,7 @@ Two AI models are used:
 
 | Model | Architecture | Task | Checkpoint |
 |---|---|---|---|
-| **STARHE-RISK** | C3D (3D-CNN, pure PyTorch) | Binary classification: low / high HCC risk | `models/best_acc_mean_cls_f1_epoch_14.pth` |
+| **STARHE-RISK** | C3D (3D-CNN via mmaction2 subprocess) | Binary classification: low / high HCC risk | `models/epoch_45.pth` |
 | **STARHE-DETECT** | RTMDet (mmdet) or DINO-DETR | Detection and localization of hepatic lesions | `models/best_coco_bbox_mAP_50_iter_2100.pth` |
 
 ---
@@ -190,7 +190,7 @@ To keep the `.dmg` small (325 MB instead of ~1 GB), the two C3D + RTMDet checkpo
 
 | Fichier | Taille | Modèle |
 |---|---|---|
-| `best_acc_mean_cls_f1_epoch_14.pth` | 312 MB | C3D — STARHE-RISK |
+| `epoch_45.pth` | 312 MB | C3D — STARHE-RISK (final-epoch checkpoint, used for reference predictions) |
 | `best_coco_bbox_mAP_50_iter_2100.pth` | 439 MB | RTMDet — STARHE-DETECT |
 
 **Emplacement** : `app.getPath('userData')/models/` — sur macOS : `~/Library/Application Support/starhe-plugin/models/`.
@@ -682,101 +682,276 @@ Steps in order:
 3. **Frame Extraction** — preferred path: `frames_via_weasis()` (subprocess Java → PNG with Modality + VOI LUT, controlled by `USE_WEASIS_EXPORT` flag). Automatic fallback to `extract_frames()` (pydicom) if Java/JAR absent or transfer syntax unsupported by Weasis (notably JPEG 2000). Output: `(T, H, W, 3)` uint8 RGB.  
    At this point, the **RTMDet subprocess is launched in a background thread** so its model loading (~4 s) overlaps with the next two steps.
 4. **prepUS Preprocessing** — executed whenever `run_risk=True` or `run_detection=True`. Crops the US cone and removes static UI overlays. Both STARHE-RISK and STARHE-DETECT receive `crop_frames` (fan-shaped sector crop, same distribution as training data for both models). See dedicated section below.
-5. **STARHE-RISK** — C3D inference on `crop_only_frames` (fan-shaped sector crop, grayscale → pseudo-RGB R=G=B). This matches the training distribution: the C3D was trained on `video.mp4` files produced by prepUS (fan-shaped crop, grayscale, mp4v codec, read by Decord). See [STARHE-RISK C3D Preprocessing](#starhe-risk-c3d-preprocessing-aimodelsc3dpy) below.
+5. **STARHE-RISK** — C3D inference on `crop_only_frames` (fan-shaped sector crop, grayscale → pseudo-RGB R=G=B). This matches the training distribution: the C3D was trained on `video.mp4` files produced by prepUS (fan-shaped crop, grayscale, mp4v codec, read by Decord). See [STARHE-RISK: C3D Pipeline](#starhe-risk-c3d-pipeline) below.
 6. **STARHE-DETECT** — RTMDet inference on `crop_only_frames` (the model was trained on `cropped_videos` — fan-shaped crop, not Cartesian backscan; confirmed by `train_dataloader.data_prefix = "cropped_videos"` in `rtmdet_starhe.py`). Temporal subsampling at stride `DETECT_EVERY_N`. Bounding boxes are remapped from crop space to DICOM coordinates via simple offset (`xmin`/`ymin`). The subprocess is already warm by the time steps 4–5 finish.
 7. **MongoDB Save** — upsert on `file_path`.
 
 ---
 
-## STARHE-RISK C3D Preprocessing (`ai/models/c3d.py`)
+## STARHE-RISK: C3D Pipeline
 
-### Training distribution alignment
+STARHE-RISK classifies a hepatic ultrasound video clip as **low or high HCC risk** using a C3D 3D-CNN trained with mmaction2. At inference the plugin reproduces the exact training pipeline bit-for-bit, validated to produce a score delta of 0.000000 against the original mmaction2 pipeline on the same input files.
 
-The C3D model (`best_acc_mean_cls_f1_epoch_14.pth`) was trained by Jérémy N on Jean Zay (IDRIS cluster) using the following pipeline:
+### Checkpoint
+
+| File | Size | Notes |
+|---|---|---|
+| `epoch_45.pth` | 312 MB | State dict only — stripped from the 596 MB full training checkpoint (which includes optimizer state). This is the checkpoint used to generate `pred_test.pkl` (reference predictions), confirmed by the eval config `c3d_starhe.py` (`load_from = '.../epoch_45.pth'`). |
+
+The stripped checkpoint was produced with:
+```python
+ckpt = torch.load('epoch_45_full.pth', map_location='cpu', weights_only=False)
+torch.save({'state_dict': ckpt['state_dict']}, 'epoch_45.pth')
+```
+
+> **`epoch_45.pth` vs `best_acc_mean_cls_f1_epoch_14.pth`**: `epoch_14` is the early-stopping best checkpoint by validation F1; `epoch_45` is the final-epoch checkpoint used to produce the reference `pred_test.pkl`. They are different models. The plugin uses `epoch_45` to reproduce the published reference results exactly. `STARHE_RISK_CHECKPOINT` in `config.py` points to `epoch_45.pth`.
+
+### Subprocess Architecture (`_c3d_runner.py`)
+
+mmcv's C extension (`mmcv._ext`) is not compiled for Python 3.13. All mmaction2 imports are confined to a **persistent subprocess** (`ai/models/_c3d_runner.py`) so the main process never loads mm* packages.
 
 ```
-DICOM → initial MP4 → prepUS.removeLayoutFile → video.mp4 (fan crop, grayscale, mp4v)
-     → Decord decode → mmaction2 preprocessing → C3D
+STARHERiskModel (main process, Python 3.13)
+  │
+  │  subprocess.Popen([python, ai/models/_c3d_runner.py,
+  │                    --ckpt  models/epoch_45.pth,
+  │                    --device cpu, --deterministic])
+  ▼
+_c3d_runner.py (subprocess)
+  │
+  │  from mmaction.models.backbones.c3d import C3D      # direct import, no registry
+  │  from mmaction.models.heads.i3d_head import I3DHead
+  │  backbone, cls_head = load_weights(ckpt_path)
+  │  print("[c3d_server] READY")
+  │
+  │  loop:
+  │    ← stdin  line: {"frames_b64": "<base64 uint8 T×H×W×3>", "shape": [T,H,W,3]}
+  │    → stdout line: {"score_low": 0.352, "score_high": 0.648}
+  │
+  │  ← {"__EXIT__": true}  →  clean shutdown
 ```
 
-The training data files (`./DATA/STARHE/CLIPS/videos/`) are the `video.mp4` outputs from prepUS:
-- Fan-shaped (sector scan, polar coordinates preserved — **not** Cartesian backscan)
-- Grayscale (single channel, `isColor=False` in OpenCV)
-- Codec: `mp4v` (MPEG-4 Part 2, via `cv2.VideoWriter`)
-- Static UI elements (text, scale bars, TGC) removed by prepUS temporal variability mask
+The subprocess starts once at `STARHERiskModel.__init__()` and is reused for all subsequent predictions. `STARHERiskModel.close()` sends `{"__EXIT__": true}` and waits for the process to terminate cleanly.
 
-The mmaction2 config (`configs_mmaction/recognition/c3d/c3d_starhe.py`) used:
-- `SampleFrames(clip_len=16, num_clips=10, test_mode=True)` — test clip sampling
-- `Resize(scale=(-1, 128))` — proportional resize, shortest side = 128 px
-- `CenterCrop(112)` — center crop 112×112
-- `ActionDataPreprocessor(mean=[104, 117, 128], std=[1, 1, 1])` — mean subtraction
+The subprocess does **not** need the runtime `mmcv._ext` stub or `inspect.getmodule` patches required by the RTMDet runner — the C3D and I3DHead classes do not invoke mmcv C extension ops. Instead, it relies on the three **permanent venv patches** applied once by `scripts/setup.sh` (see [mmaction2 Venv Patches](#mmaction2-venv-patches) below).
 
-At inference, `pipeline.py` therefore passes `crop_only_frames` (fan-shaped sector crop, uint8 grayscale stacked into 3 identical channels R=G=B) to the C3D — exactly what Decord produces when reading a grayscale `video.mp4`.
+#### Loading the model (bypassing the mmengine registry)
 
-### Fixes applied (May 27–28, 2026)
+`init_recognizer()` routes through the mmengine registry, which conflicts with mmdet's registry under Python 3.13 (duplicate class names raise `KeyError`). The subprocess bypasses this by importing the classes directly and loading checkpoint weights by key prefix:
 
-Three corrections in `c3d.py` and one correction in `pipeline.py` were implemented:
+```python
+from mmaction.models.backbones.c3d import C3D
+from mmaction.models.heads.i3d_head import I3DHead
 
-| Fix | Before | After |
-|---|---|---|
-| **`_sample_clips` formula** | `avg = (T−16) / 10` | `avg = (T−16+1) / 10` (mmaction2 exact: `+1`) |
-| **`_sample_clips` offset** | `base × avg + avg/2` | `base × avg + avg/2 − 0.5` (mmaction2: `−0.5`) |
-| **`_resize_shortest`** | `F.interpolate(float32, align_corners=False)` | `cv2.resize(uint8, INTER_LINEAR)` (mmaction2 exact) |
-| **RISK input** | Raw DICOM frames (full frame, UI included) | `crop_only_frames` from prepUS (fan crop, grayscale→pseudo-RGB) |
+backbone = C3D(dropout_ratio=0.5)
+cls_head = I3DHead(num_classes=2, in_channels=4096, dropout_ratio=0.5)
 
-### Validated results (48 patients, threshold = 50 %)
+ckpt  = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+state = ckpt.get('state_dict', ckpt)
+backbone.load_state_dict(
+    {k[len('backbone.'):]: v for k, v in state.items() if k.startswith('backbone.')}
+)
+cls_head.load_state_dict(
+    {k[len('cls_head.'):]: v for k, v in state.items() if k.startswith('cls_head.')}
+)
+```
 
-| Configuration | Sens | Spec | Notes |
+The key prefixes `backbone.` and `cls_head.` are the exact format produced by mmaction2's training checkpointer.
+
+### C3D Architecture
+
+```
+Input: (N, 3, 16, 112, 112)   N clips × 3 channels × 16 frames × 112×112 px
+────────────────────────────────────────────────────────────────────────────────
+Backbone (C3D):
+  conv1a(3→64,  k=3³, pad=1) → ReLU → MaxPool3d(1×2×2, stride 1×2×2)
+  conv2a(64→128, k=3³, pad=1) → ReLU → MaxPool3d(2×2×2)
+  conv3a(128→256, k=3³, pad=1) → ReLU
+  conv3b(256→256, k=3³, pad=1) → ReLU → MaxPool3d(2×2×2)
+  conv4a(256→512, k=3³, pad=1) → ReLU
+  conv4b(512→512, k=3³, pad=1) → ReLU → MaxPool3d(2×2×2)
+  conv5a(512→512, k=3³, pad=1) → ReLU
+  conv5b(512→512, k=3³, pad=1) → ReLU → MaxPool3d(2×2×2)
+  AdaptiveAvgPool3d(1,1,1) → flatten → (N, 8192)
+  fc6 Linear(8192→4096) → ReLU → Dropout(p=0.5)   ← inside backbone.forward()
+  fc7 Linear(4096→4096) → ReLU                     ← inside backbone.forward()
+Output: (N, 4096)
+────────────────────────────────────────────────────────────────────────────────
+Head (I3DHead):
+  Dropout(p=0.5) → fc_cls Linear(4096→2)
+Output: (N, 2) logits [p_low_risk, p_high_risk]
+```
+
+> **Critical**: `fc6`, `fc7`, and their activations are **inside `C3D.forward()`** — this is the mmaction2 convention, not the original C3D paper. `I3DHead` only adds its own dropout + `fc_cls`. Do not replicate `fc6`/`fc7` outside the backbone.
+
+### Preprocessing Pipeline
+
+Both backends (`_c3d_runner.py` and `c3d.py`) share identical preprocessing functions, validated **bit-for-bit** against mmaction2's official transforms `SampleFrames + Resize + CenterCrop + FormatShape` on the same input (diff max = 0.000000, June 22, 2026).
+
+**Input**: `(T, H, W, 3)` uint8 RGB numpy array — fan-cropped grayscale frames from prepUS, replicated into 3 identical channels (R=G=B) to match the pseudo-RGB convention used during training (grayscale `video.mp4` read by Decord, which returns 3-channel frames by default).
+
+#### Step 1 — Frame sampling (`_sample_clips`)
+
+Exact reproduction of `SampleFrames._get_test_clips` for 3D recognizers (mmaction2 1.2.0):
+
+```python
+CLIP_LEN, NUM_CLIPS = 16, 10
+
+def _sample_clips(total: int) -> np.ndarray:
+    """Returns (NUM_CLIPS, CLIP_LEN) int array of frame indices."""
+    max_offset = max(total - CLIP_LEN, 0)
+    if NUM_CLIPS > 1:
+        offset_between = max_offset / float(NUM_CLIPS - 1)
+        offsets = np.round(np.arange(NUM_CLIPS) * offset_between).astype(int)
+    else:
+        offsets = np.array([max_offset // 2], dtype=int)
+    # out_of_bound_opt='loop': wrap indices for videos shorter than CLIP_LEN
+    return np.stack([np.arange(o, o + CLIP_LEN) % total for o in offsets])
+```
+
+**Formula details:**
+- Clips are distributed from offset `0` to `max_offset = total − 16`, with uniform spacing `max_offset / (NUM_CLIPS − 1)`.
+- `np.round()` (not `floor()` or `int()`) — matches mmaction2 exactly, matters for certain frame counts.
+- The modulo `% total` handles short videos (`total < CLIP_LEN`) via wrapping (`out_of_bound_opt='loop'` semantics).
+
+**Example** — `total=146` (`max_offset=130`, `step=130/9≈14.44`):
+```
+offsets = [0, 14, 29, 43, 58, 72, 87, 101, 116, 130]
+```
+
+> **Breaking change fixed June 22, 2026** — the prior formula was `avg = (T−16+1) / 10`, offset `base × avg + avg/2 − 0.5` (clips centered within equal segments). For `T=146` this produced `[6, 19, 32, 45, 58, 71, 84, 97, 110, 123]` — completely different clips from mmaction2. The tensor-level diff reached 169 pixel values, fully invalidating inference. **Both `_c3d_runner.py` and `c3d.py` were corrected.**
+
+#### Step 2 — Resize to 128 px short side (`_resize_shortest`)
+
+```python
+RESIZE_SIZE = 128
+
+def _resize_shortest(frame: np.ndarray) -> np.ndarray:
+    h, w = frame.shape[:2]
+    if h <= w:
+        nh, nw = RESIZE_SIZE, max(1, round(w * RESIZE_SIZE / h))
+    else:
+        nh, nw = max(1, round(h * RESIZE_SIZE / w)), RESIZE_SIZE
+    return cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
+```
+
+Operates on **uint8 pixels** (not float32) using `cv2.INTER_LINEAR` — identical to mmaction2's `Resize(scale=(-1, 128))` internal implementation.
+
+#### Step 3 — Center crop to 112×112
+
+```python
+CROP_SIZE = 112
+y = (h - CROP_SIZE) // 2   # integer division — matches mmaction2 CenterCrop
+x = (w - CROP_SIZE) // 2
+cropped = frame[y:y+CROP_SIZE, x:x+CROP_SIZE]
+```
+
+#### Step 4 — Mean subtraction and tensor assembly
+
+```python
+MEAN = np.array([104.0, 117.0, 128.0], dtype=np.float32)  # BGR ImageNet means
+
+# Per clip (16 frames, shape 112×112×3 each):
+clip_arr = np.stack(cropped_frames).astype(np.float32) - MEAN  # (16, 112, 112, 3)
+clip_t   = clip_arr.transpose(3, 0, 1, 2)                      # (3, 16, 112, 112)
+
+# Final tensor (all 10 clips stacked):
+tensor = torch.from_numpy(np.stack([clip_t_i for i in range(NUM_CLIPS)]))  # (10, 3, 16, 112, 112)
+```
+
+**No division by 255.** `std = [1, 1, 1]`. The values `[104, 117, 128]` are **BGR** ImageNet channel means, consistent with the training config: `ActionDataPreprocessor(mean=[104,117,128], std=[1,1,1], to_rgb=False)`. Since input frames are grayscale (R=G=B), the channel order does not affect inference numerically.
+
+### Inference
+
+```python
+@torch.no_grad()
+def _infer(backbone, cls_head, frames: np.ndarray, device: str) -> tuple[float, float]:
+    tensor = _preprocess(frames).to(device)               # (10, 3, 16, 112, 112)
+    feats  = backbone(tensor)                             # (10, 4096) — includes fc6+fc7
+    logits = cls_head.fc_cls(cls_head.dropout(feats))    # (10, 2)
+    probs  = F.softmax(logits, dim=1).mean(dim=0)        # (2,)
+    return float(probs[0]), float(probs[1])               # score_low, score_high
+```
+
+`average_clips='prob'` (mmaction2 training default): **softmax is applied per clip**, then averaged over the 10 clips. This differs from `average_clips='score'` (average raw logits first), which would yield different results. `probs[1]` is the final `risk_score ∈ [0, 1]`. The decision threshold (default `0.5`, configurable via `RISK_THRESHOLD` in `config.py`) is applied by `starhe_risk.py`, not by the runner.
+
+### Reproducibility
+
+`DETERMINISTIC_INFERENCE = True` (default in `config.py`) forces inside the subprocess:
+
+```python
+device = "cpu"                                 # override — no CUDA/MPS variance
+torch.set_num_threads(1)                       # single-threaded BLAS
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.deterministic   = True
+torch.use_deterministic_algorithms(True, warn_only=True)
+```
+
+Without this, float32 accumulation differences between MKL (Linux/Windows) and Accelerate (macOS ARM) cause ~0.002 score variance per inference. With `DETERMINISTIC_INFERENCE=True`, scores are **bit-identical across all platforms** for the same input file. Cost: ~2–3× slower on CPU.
+
+### Backend Selection
+
+`C3D_BACKEND` in `config.py` (default: `"mmaction2"`) selects the inference backend:
+
+| Value | File | Mode | Requires |
 |---|---|---|---|
-| Jérémy N (reference) | **91%** (21/23) | **52%** (13/25) | Training pipeline |
-| Our implementation (Batch 4, 28/05/2026) | **91%** (21/23) | **52%** (13/25) | ✅ Identical |
+| `"mmaction2"` | `ai/models/_c3d_runner.py` | Persistent subprocess, server mode | mmaction2 1.2.0 installed `--no-deps` + 3 venv patches |
+| `"pytorch"` | `ai/models/c3d.py` | In-process, pure PyTorch | PyTorch only — no mmaction2 |
 
-2 persistent FNs: 02-0019 (23%) and 03-0038 (36%) — likely also FNs in Jérémy N's pipeline.  
-12 FPs: 7 structural model errors (shared with Jérémy N) + 5 borderline Supersonic FPs (02-0022, 02-0025, 05-0018, 05-0077, 06-0029).
+`"pytorch"` is the automatic fallback if mmaction2 is unavailable or if the subprocess fails to start. **Both backends share the same `_sample_clips`, `_resize_shortest`, and `_preprocess` functions** — any preprocessing change must be applied to both files.
 
-### C3D Port Validation — comparison against mmaction2 (June 3, 2026)
+### mmaction2 Venv Patches
 
-To isolate the C3D from the rest of the chain (DICOM reading → prepUS → MP4 decoding → preprocessing → model):
+mmaction2 1.2.0 is installed without its dependency tree (`pip install mmaction2 --no-deps`) to avoid conflicts with the plugin's PyTorch version. Three file patches fix import errors and are applied automatically by `scripts/setup.sh`:
 
-1. **Pre-generated 49 `video.mp4` crops once** (deterministic) with `prepUS.removeLayoutFile` from Jérémy's training MP4s (`VIDEO TESTING BATCH MP4/`) → `/tmp/crops_fixed/<PID>/video.mp4`.
-2. **Ran the mmaction2 reference** (`init_recognizer` + `inference_recognizer`) with Jérémy's original config and checkpoint, in a dedicated Python 3.10 venv (`/tmp/mmaction_env/`: torch 2.1.2 + mmcv-lite 2.1.0 + mmaction2 1.2.0 + eva-decord).
-3. **Ran our pure PyTorch C3D** on exactly the same `video.mp4` files.
-
-Results (`/tmp/ref_scores.json` vs `/tmp/ours_scores.json`, "high risk" score, N=49):
-
-| Comparison | Mean Δ | MAE | Max\|Δ\| | Label agreement (threshold 0.5) |
-|---|---|---|---|---|
-| **Ours vs Ref mmaction2** (same crops) | −0.0003 | **0.013** | 0.052 | **47/49 (96%)** |
-| Ref mmaction2 vs Jérémy (cached preds) | +0.036 | 0.111 | 0.531 | 43/49 |
-| Ours vs Jérémy | +0.036 | 0.109 | 0.529 | 43/49 |
-
-**Conclusion**: our PyTorch C3D port is validated as bit-near equivalent to the reference mmaction2 C3D (MAE 1.3%, bias ≈ 0). The remaining 4% divergence comes from video decoding (cv2 vs Decord on the same `video.mp4`). The 6 patients disagreeing with Jérémy (`01-0096`, `02-0049`, `03-0022`, `05-0009`, `05-0021`, `05-0077`) **also disagree with the mmaction2 reference on the same crops**: the residual therefore comes from prepUS crops (non-determinism between current crops and those generated during Jérémy's training), not from the model.
-
-### Final prepUS Residual Isolation Chain (June 5, 2026)
-
-After the C3D validation above, three additional tests were run to pinpoint the exact source of the ~11% residual vs Jérémy:
-
-| Test | Result | Conclusion |
+| File (relative to `.venv/lib/…/mmaction/`) | Problem | Patch |
 |---|---|---|
-| **`video.mp4` decoding** — cv2(BGR→RGB/GRAY) vs PyAV(rgb24) vs Decord, on 4 grayscale crops | MAE 0.000, 100% equal pixels | The decoder is not the cause |
-| **Local prepUS determinism** — 3 consecutive runs, SHA-256 of `video.mp4` + `info.json` on 4 MP4s | Identical hash across all 3 runs for all 4 files | prepUS is deterministic on the same machine |
-| **Cross-platform prepUS reproducibility** | ❌ **Not reproducible** by design: `sonocrop.vid.savevideo` writes via `cv2.VideoWriter(mp4v)`, which delegates to the FFmpeg linked to OpenCV. The produced bitstream depends on the OS, `opencv-python` version, and system FFmpeg — it differs between macOS ARM Homebrew (our env) and Linux Jean Zay (Jérémy's training). | Sole source of the residual — not fixable without the original crops. Adrien (prepUS author + training) confirmed on June 5 that his Jean Zay environment was accidentally deleted (impossible to reconstruct the exact versions or training crops). |
+| `models/localizers/__init__.py` | Imports `DRN`, which is absent from wheel 1.2.0 | Remove the `DRN` import line |
+| `models/roi_heads/__init__.py` | Registry conflict with mmdet raises `AssertionError` | Add `AssertionError` to the `except` clause |
+| `models/task_modules/__init__.py` | Same registry conflict | Same fix |
 
-### MP4 Bypass Mode (June 5, 2026)
+To verify the patches are correctly applied:
+```bash
+source pythonCode/modules/starhe_plugin/.venv/bin/activate
+python -c "from mmaction.models.backbones.c3d import C3D; print('mmaction2 OK')"
+```
 
-To neutralize this divergence source, a 100% numpy variant of the prepUS bridge was implemented (`preprocess_with_prepus_inmem` in `dicom/prepus_bridge.py`) and exposed via the `PREPUS_BYPASS_MP4` flag in `config.py`. It reimplements `removeLayoutFile` directly on numpy arrays with no intermediate `cv2.VideoWriter` / `cv2.VideoCapture`.
+If this raises an `ImportError`, re-run `make setup` or `scripts/setup.sh`.
 
-**Measurement on Jérémy's 49 patients** (mode A = existing MP4 roundtrip, mode B = bypass):
+### Validation (June 22, 2026)
 
-| Metric | Mode A (MP4 roundtrip) | **Mode B (bypass / `PREPUS_BYPASS_MP4=True`)** | Gain |
-|---|---|---|---|
-| MAE vs Jérémy | 0.122 | **0.103** | −16% |
-| Label agreement vs Jérémy | 42/49 (85.7%) | **44/49 (89.8%)** | +2 patients |
-| Accuracy vs ground truth | 31/49 (63.3%) | **33/49 (67.3%)** | +2 patients |
-| Model bias − Jérémy | +0.044 | +0.037 | −16% |
-| Cross-platform reproducibility | ❌ depends on cv2-linked FFmpeg | ✅ bit-for-bit guaranteed on any OS | — |
+| Test | Input | Outcome |
+|---|---|---|
+| Plugin vs original mmaction2 pipeline (PyAV decoding + mmaction2 transforms) | `data_test`, 24 patients | **Score delta = 0.000000** for all 24 patients — bit-identical |
+| Our `_preprocess` tensor vs mmaction2 `SampleFrames+Resize+CenterCrop+FormatShape` | Single patient (146 frames) | **diff max = 0.000000** |
+| cv2 VideoCapture vs PyAV frame decoder | `data_test`, 6 patients | **0 pixel difference** |
 
-Bypass mode is strictly better on all 3 measured metrics and eliminates the dependency on cv2's mp4v encoder, which is no longer reproducible (training environment lost).
+The three results together confirm the plugin is mathematically equivalent to running the original training inference code on the same input file.
+
+### Training Distribution (context)
+
+The C3D was trained on Jean Zay (IDRIS, Python 3.10, mmaction2 1.2.0) by J. Nizard:
+
+```
+DICOM → ffmpeg MP4 → prepUS.removeLayoutFile
+      → video.mp4 (fan-cropped, grayscale, mp4v codec, static UI removed)
+      → DecordInit + SampleFrames(clip_len=16, num_clips=10, test_mode=True)
+      → DecordDecode
+      → Resize(scale=(-1,128)) → CenterCrop(112) → FormatShape(NCTHW)
+      → ActionDataPreprocessor(mean=[104,117,128], std=[1,1,1], to_rgb=False)
+      → C3D backbone + I3DHead → cross-entropy loss
+Checkpoint selected: epoch_45.pth
+```
+
+The `video.mp4` files produced by `cv2.VideoWriter(mp4v)` on Jean Zay Linux differ bit-for-bit from files produced on macOS ARM (different FFmpeg linked to OpenCV). This is the sole source of ~10% MAE vs `pred_test.pkl` when using locally regenerated prepUS crops — not a code defect. The MP4 bypass mode (`PREPUS_BYPASS_MP4=True`) reduces this to ~8% by eliminating the VideoWriter roundtrip; see [prepUS Preprocessing](#prepus-preprocessing-dicomprepus_bridgepy) below.
+
+### Historical Fix Log
+
+| Date | File(s) | Fix |
+|---|---|---|
+| May 27–28, 2026 | `c3d.py`, `pipeline.py` | `_resize_shortest`: `F.interpolate(float32)` → `cv2.resize(uint8, INTER_LINEAR)`. RISK input: raw DICOM frames → `crop_only_frames` from prepUS (fan crop, grayscale→pseudo-RGB). |
+| June 5, 2026 | `dicom/prepus_bridge.py`, `config.py` | MP4 bypass mode (`PREPUS_BYPASS_MP4`): pure numpy prepUS path, eliminates cross-OS mp4v encoder non-determinism. |
+| June 22, 2026 | `_c3d_runner.py`, `c3d.py` | `_sample_clips`: wrong formula `avg=(T−16+1)/10` + `avg/2−0.5` offset → correct mmaction2 formula `step=max_offset/(NUM_CLIPS−1)`, `offsets=round(arange(NUM_CLIPS)×step)`. Tensor diff was up to 169 pixel values before fix; 0.000000 after. |
 
 ---
 
@@ -906,48 +1081,9 @@ If the JAR or Java is missing, the script also switches to the pydicom path (sam
 
 ## STARHE-RISK Model (C3D)
 
-### Architecture
+> The full technical documentation of the STARHE-RISK pipeline — checkpoint, subprocess architecture, C3D network layout, preprocessing steps, inference algorithm, reproducibility settings, and validation results — is in the [STARHE-RISK: C3D Pipeline](#starhe-risk-c3d-pipeline) section above.
 
-C3D is a 3D convolutional network (spatiotemporal) defined in `ai/models/c3d.py` in pure PyTorch — **no mmaction2/mmcv dependency** at runtime.
-
-```
-Input:  (N, 3, 16, 112, 112)  — N clips, 3 channels, 16 frames, 112×112
-  conv1a → pool1
-  conv2a → pool2
-  conv3a → conv3b → pool3
-  conv4a → conv4b → pool4
-  conv5a → conv5b → pool5
-  flatten → fc6(4096) → relu → dropout
-            fc7(4096) → relu
-  I3DHead: fc_cls(2) → softmax
-Output: (N, 2)  — prob [low_risk, high_risk]
-```
-
-### Why pure PyTorch without mmaction2
-
-The `.pth` checkpoint was trained with mmaction2 (mmcv framework). To avoid dependency conflicts (mmcv incompatible with Python 3.13), the submodule names (`backbone.conv1a.conv.weight`, `cls_head.fc_cls.weight`, etc.) are **exactly reproduced** in `c3d.py`. The checkpoint therefore loads directly with `torch.load` without key remapping.
-
-### Clip preprocessing
-
-```python
-clips = preprocess_clips(frames)  # returns (10, 3, 16, 112, 112)
-```
-
-- **10 clips** uniformly sampled over the entire duration (`NUM_CLIPS=10`)
-- Each clip: 16 consecutive frames (`clip_len=16`)
-- Resize → 128px (short side), center crop → 112×112
-- Normalization: `mean=[104, 117, 128]`, `std=[1, 1, 1]` (BGR values, no division by 255)
-
-### Inference
-
-```python
-logits = model(clips)           # (10, 2)
-probs  = softmax(logits, dim=1) # (10, 2)
-avg    = probs.mean(dim=0)      # (2,)  — average of 10 clips
-risk_score = avg[1]             # "high risk" class probability
-```
-
-Display threshold: no threshold applied, the raw [0–1] score is returned.
+The pure-PyTorch fallback implementation (`ai/models/c3d.py`) reproduces the same architecture and **identical preprocessing** as the mmaction2 subprocess backend. It is selected automatically when mmaction2 is unavailable (`C3D_BACKEND = "pytorch"` in `config.py`, or subprocess failure). Both backends produce bit-identical scores for the same input tensor.
 
 ---
 

@@ -177,28 +177,23 @@ NUM_CLIPS   = 10   # clips de test → moyenne des probas (average_clips='prob')
 
 
 def _sample_clips(total: int) -> np.ndarray:
-    """
-    Reproduit exactement SampleFrames(clip_len=16, num_clips=10, test_mode=True)
-    de mmaction2 (_get_test_clips) :
-      avg_interval = (total - clip_len + 1) / num_clips   # +1
-      offsets      = base * avg + avg/2 - 0.5             # -0.5
-    Retourne (NUM_CLIPS, CLIP_LEN) indices de frames dans [0, total).
+    """Reproduit exactement mmaction2 SampleFrames 3D (clip_len=16, num_clips=10, test_mode=True).
+
+    Formule réelle de mmaction2 1.2.0 _get_test_clips (3D recognizer) :
+      max_offset    = max(total - clip_len, 0)
+      offset_between = max_offset / (num_clips - 1)
+      clip_offsets  = round(arange(num_clips) * offset_between)
+    Les indices hors-borne sont ramenés par modulo (out_of_bound_opt='loop').
     """
     if total <= 0:
         return np.zeros((NUM_CLIPS, CLIP_LEN), dtype=int)
-
-    if total < CLIP_LEN:
-        base = np.arange(CLIP_LEN) % total
-        return np.tile(base, (NUM_CLIPS, 1))
-
-    avg_interval = (total - CLIP_LEN + 1) / float(NUM_CLIPS)  # +1 vs ancienne formule
-    if avg_interval > 0:
-        offsets = (np.arange(NUM_CLIPS) * avg_interval
-                   + avg_interval / 2.0 - 0.5).astype(int)    # -0.5 vs ancienne formule
+    max_offset = max(total - CLIP_LEN, 0)
+    if NUM_CLIPS > 1:
+        offset_between = max_offset / float(NUM_CLIPS - 1)
+        offsets = np.round(np.arange(NUM_CLIPS) * offset_between).astype(int)
     else:
-        offsets = np.zeros(NUM_CLIPS, dtype=int)
-    offsets = np.clip(offsets, 0, total - CLIP_LEN)
-    return np.stack([np.arange(o, o + CLIP_LEN) for o in offsets])
+        offsets = np.array([max_offset // 2], dtype=int)
+    return np.stack([np.arange(o, o + CLIP_LEN) % total for o in offsets])
 
 
 def _resize_shortest(frame: np.ndarray, use_double: bool = False) -> np.ndarray:

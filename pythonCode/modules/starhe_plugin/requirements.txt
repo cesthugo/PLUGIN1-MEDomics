@@ -20,6 +20,14 @@ torchvision>=0.17.0
 mmengine>=0.10.0
 mmcv-lite>=2.0.0rc4,<2.2.0
 mmdet>=3.3.0,<4.0.0
+# mmaction2 — installé SANS dépendances (mmengine/mmcv/torch déjà présents)
+#   pip install mmaction2==1.2.0 --no-deps
+# Requis par C3D_BACKEND="mmaction2" dans config.py (défaut).
+# Patches venv automatiques appliqués par scripts/setup.sh :
+#   localizers/__init__.py  : suppression import DRN absent du wheel
+#   roi_heads/__init__.py   : AssertionError ajouté au except (conflit registre mmdet)
+#   task_modules/__init__.py: idem
+importlib_metadata>=6.0
 
 # ── Base de données ───────────────────────────────────────────────────────────
 pymongo>=4.6.0
