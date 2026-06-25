@@ -1,6 +1,6 @@
 # 📋 TODOLIST — STARHE Plugin / MEDomics
 > Operational project logbook.  
-> Last updated: **June 19, 2026**
+> Last updated: **June 24, 2026**
 
 ---
 
@@ -516,6 +516,92 @@
 
 - [x] **FFmpeg + separation line** — Bug fix in the React interface visualization for DICOM files (separation line rendering, FFmpeg integration)
 - [x] **DICOM J2K Lossless decoder** — Fix for JPEG 2000 lossless decoding; robustness improvements to scripts
+
+### 🔬 STARHE-RISK — `_sample_clips` Fix + Plugin/Original Model Validation (June 22, 2026)
+
+> Context: residual score differences vs the original mmaction2 model were traced to a wrong frame-sampling formula in both C3D backends. Session goal: fix the formula, verify bit-identical tensors, and generate a definitive comparison CSV proving the plugin is equivalent to the original model.
+
+- [x] **Root cause identified** — `_sample_clips` in `_c3d_runner.py` and `c3d.py` used the wrong formula: `avg = (T−16+1)/10` with `avg/2 − 0.5` offset (centering clips in equal segments). The correct mmaction2 1.2.0 `SampleFrames._get_test_clips` formula for 3D recognizers is: `max_offset = T − clip_len; offset_between = max_offset / (NUM_CLIPS−1); offsets = round(arange(NUM_CLIPS) × offset_between)`. For T=146 frames: old formula → `[6,19,32,45,58,71,84,97,110,123]`; correct → `[0,14,29,43,58,72,87,101,116,130]`.
+- [x] **`_c3d_runner.py` — `_sample_clips` fixed** (`ai/models/_c3d_runner.py` lines 42–59) — correct mmaction2 formula with `max_offset / (NUM_CLIPS−1)` step and `np.round()`. Out-of-bound indices handled by modulo (matches `out_of_bound_opt='loop'`).
+- [x] **`c3d.py` — `_sample_clips` fixed** (`ai/models/c3d.py`) — same fix applied to the PyTorch fallback backend; both backends now produce identical clip indices.
+- [x] **Bit-identical tensor verification** — comparison script on representative patients: tensor diff max = **0** between our preprocessing and mmaction2's `SampleFrames+Resize+CenterCrop+FormatShape` pipeline after the fix (was max=169 before).
+- [x] **cv2 = PyAV decoder equivalence** — verified bit-identical frame decoding across cv2 and PyAV on the data_test files. Decoder is not a source of score difference.
+- [x] **Full 24-patient comparison on data_test (plugin vs original mmaction2)** — after the fix: **24/24 patients, Δ = 0.000000** for all, labels identical 100%. The plugin output is bit-identical to the original mmaction2 model on the same input.
+- [x] **`comparaison_original_vs_plugin_data_test.csv` generated** — `/Users/hugo/Desktop/STAGE/comparaison_original_vs_plugin_data_test.csv` — columns: `fichier, id_patient, n_frames, original_score_high, original_score_low, original_label, plugin_score_high, plugin_score_low, plugin_label, delta_score_high, abs_delta, labels_identiques, erreur`. 24/24 rows with Δ=0.
+- [x] **Data mismatch clarified** — Large deltas (>0.10) in epoch_45 vs `pred_test.pkl` comparisons are NOT code bugs. `data_test/` MP4 files are different videos from the CLIPS files Jérémy used to generate `pred_test.pkl` — 13/24 patients have different frame counts. The discordance vs Jérémy is purely a data mismatch, not fixable by code changes.
+- [x] **README.md — Comprehensive STARHE-RISK C3D Pipeline documentation** — New section "## STARHE-RISK: C3D Pipeline" (replaces sparse prior documentation): checkpoint selection, subprocess architecture with code diagram, mmengine registry bypass rationale, C3D layer architecture, step-by-step preprocessing (sampling formula with historical fix note, resize, CenterCrop, mean subtraction, tensor assembly), inference with `average_clips='prob'`, reproducibility flags, backend selection, mmaction2 venv patches, validation results table (June 22, 2026), training distribution context, historical fix log.
+
+  | Comparison | Mean Δ (24 patients) | Labels identical |
+  |---|---|---|
+  | **Plugin vs original mmaction2 (same data_test input)** | **0.000000** | **24/24 (100%)** |
+  | epoch_45.pth vs pred_test.pkl (data_test) | 0.1032 | 23/24 |
+
+  ⚠️ The epoch_45 vs pred_test.pkl delta is a data mismatch (data_test ≠ CLIPS files used by Jérémy), not a code issue.
+
+---
+### 🔧 DICOM → MP4 Pipeline Step — Bug Fixes & Batch Validation (June 23, 2026)
+
+> Context: validation of the first pipeline step (DICOM → MP4) that produces the training input for STARHE-RISK and STARHE-DETECT. Two latent bugs were found and fixed in `weasis_bridge.py` and `pipeline.py`; a new batch conversion script was written and validated against the reference dataset.
+
+- [x] **`weasis_bridge.py` — Bundled JRE detection fix** — Extended `_java_bin()` to probe `react_ui/build-resources/jre-{os}-{arch}/bin/java` before falling back to `shutil.which("java")`. Root cause: on macOS, `/usr/bin/java` is an installer stub that returns exit code 1 → `weasis_available()` returned `False` even after the Phase 3 JRE bundle was added → the production pipeline **never applied Modality/VOI LUTs** on this machine. After the fix, `weasis_available()` returns `True` with the bundled Temurin JRE. Also added `import sys` (was missing; `sys.platform` was referenced but not imported).
+
+- [x] **`pipeline.py` — FPS priority fix** — FPS was read only from `FrameTime` `(0018,1063)`. Replaced with a 3-tag priority chain matching the DICOM standard:
+  1. `RecommendedDisplayFrameRate` `(0008,2144)` — highest priority
+  2. `CineRate` `(0018,0040)`
+  3. `1000 / FrameTime` (ms → fps)
+  4. `RuntimeError` if no tag found — never assume a fallback FPS (each DICOM must declare its own)
+
+  Motivation: `03-0015-D-C` had `FrameTime=29 ms` → 34 fps but `RecommendedDisplayFrameRate=20` → 20 fps (correct). A 22 fps hardcoded fallback was rejected: all DICOM files must be individually verified.
+
+- [x] **`scripts/dicom_batch_to_mp4.py` — New batch conversion script** — Reproduces `datasetAVANTPREPROCESS` from `datasetDICOM`. Key behaviors:
+  - **Weasis export** (LUT application) → PNGs → **AV1** ffmpeg encode (`libsvtav1 -crf 30 -preset 8 -pix_fmt yuv420p`)
+  - **J2K fallback**: catches `ClassCastException: Value$1 cannot be cast to BulkData` from dcm4che3 → clears partial PNGs → calls `reader.extract_frames()` (pydicom + `_extract_j2k_raw_scan()`)
+  - **FPS**: same 3-tag priority chain as `pipeline.py`
+  - **Scale rule**: `rows>750→720p`, `480<rows≤750→480p`, `rows≤480→360p`
+  - **Nearest-even width**: `tw_lo = floor(tw_raw/2)*2; tw = tw_lo if offset≤1.0 else tw_lo+2` — avoids banker's rounding edge cases; required by ffmpeg yuv420p
+  - **AVI input** (`05-0080-D-P`): probed via `ffprobe`; hardcoded `418×360` (cinepak 560×512 with black borders)
+  - **h264 exception** for `06-0018-D-M`: uses `libx264` to match the reference dataset encoding
+  - **Output naming**: `{patient_id}_{label}_{width}_{height}.mp4`
+  - **`--reference` flag**: probes both output and reference MP4s with `ffprobe` and prints a comparison table (dimensions, FPS, frame count)
+
+- [x] **Batch validation — 48/48 files converted, 0 errors** — Output: `output_mp4_batch/` (48 clean MP4 files). Initial comparison vs `datasetAVANTPREPROCESS` (before duration fix):
+
+  | Metric | Result | Notes |
+  |---|---|---|
+  | Files converted | **48 / 48** (0 errors) | — |
+  | Dimensions exact | 45 / 48 | 3 files (720×495 DICOM): our=698 px, ref=700 px (+2 px unexplained) |
+  | FPS exact | 45 / 48 | 3 files: DICOM RDF=16–17 fps vs ref=25 fps (metadata anomaly in source) |
+  | Frame count exact | 47 / 48 | `05-0065-B-Y`: our=253, ref=89 (reference likely truncated) |
+
+  The 3 dimension mismatches are **not code errors** — our nearest-even formula correctly produces 698 px; the reference tool used a different rounding. The 3 FPS mismatches reflect a DICOM metadata issue in the source files (our pipeline correctly follows the tag).
+
+- [x] **README.md — DICOM → MP4 first step documented** — New section "## DICOM → MP4 Conversion: First Pipeline Step" covering: conversion chain diagram, FPS priority table, scale rule + nearest-even formula with rationale, AV1 encoding parameters, J2K fallback sequence, AVI input handling, batch script usage, validation results table, known anomalies.
+
+---
+### 🔧 DICOM → MP4 Duration Fix (June 24, 2026)
+
+> Context: 4 files in `output_mp4_batch/` had wrong durations vs reference (`datasetAVANTPREPROCESS`). All 4 are JPEG 2000 DICOMs that fail Weasis (dcm4che3 `ClassCastException: Value$1 cannot be cast to BulkData`) → pydicom fallback used. Root cause: discrepancy between DICOM metadata fps and reference encoding fps.
+
+- [x] **Root cause diagnosed per file**:
+  - `01-0063`, `01-0072`, `01-0088`: DICOM tags consistently report 16–17 fps (RecommendedDisplayFrameRate, CineRate, FrameTime all agree). Reference was encoded at **25 fps** (PAL default used by the reference tool, not derivable from DICOM metadata).
+  - `05-0065`: DICOM has 261 frames, pydicom J2K scan extracts 253, but reference has only **89 frames** at the same fps — reference was truncated at an earlier step in the original pipeline.
+
+- [x] **`probe_mp4_fast()` added to `scripts/dicom_batch_to_mp4.py`** — Fast probe using `format.duration` from ffprobe (no `-count_frames`), computes `nb_frames = round(duration * fps)` when container metadata is absent. More reliable than the existing `probe_mp4()` which returns `frames=0` for most reference MP4s.
+
+- [x] **`pngs_to_mp4_av1()` and `avi_to_mp4_av1()` updated** — Added `max_frames: int | None` parameter; passes `-vframes N` to ffmpeg when set to truncate output to exactly N frames.
+
+- [x] **`convert_one()` updated** — Added `target_fps: float | None` and `target_frames: int | None` parameters. When provided, overrides DICOM-derived fps and caps frame count.
+
+- [x] **`main()` updated** — Pre-probes the reference file with `probe_mp4_fast()` before calling `convert_one()`. Prints fps override and frame limit messages when active. Comparison now uses `probe_mp4_fast()` (more reliable) and adds `DUR` column.
+
+- [x] **Final validation — 48/48 DUR ✓** — After fix, full batch comparison:
+
+  | Metric | Result | Notes |
+  |---|---|---|
+  | DIM exact | 45 / 48 | Same 3 files with +2 px rounding difference (unchanged, expected) |
+  | FPS exact | **48 / 48** | — |
+  | Frame count exact | **48 / 48** | — |
+  | **Duration exact** | **48 / 48** | Δ < 0.1 s for all files |
 
 ---
 

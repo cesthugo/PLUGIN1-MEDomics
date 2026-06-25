@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.6.3` — Last updated: June 19, 2026*
+*Version `0.6.3` — Last updated: June 25, 2026*
 
 ---
 
@@ -1076,6 +1076,191 @@ python test_dicom_pipeline.py /path/to/file.dcm --no-detect  # RISK only
 ```
 
 If the JAR or Java is missing, the script also switches to the pydicom path (same rules as `pipeline.py`).
+
+---
+
+## DICOM → MP4 Conversion: First Pipeline Step
+
+> This section documents the preprocessing step that converts raw DICOM cine-clips into AV1-encoded MP4 files. These MP4s are the direct input to `prepUS.removeLayoutFile`, which produces the `video.mp4` fan-cropped files on which both STARHE-RISK (C3D) and STARHE-DETECT (RTMDet) were trained. Batch reproduction and validation are handled by `scripts/dicom_batch_to_mp4.py`.
+
+### Conversion Chain
+
+```
+DICOM (.dcm) / AVI (.avi)
+  │
+  ├─ Weasis path  (Java available + transfer syntax ≠ J2K lossless)
+  │    Java → weasis-dcm2png.jar → one PNG per frame (Modality + VOI LUT applied)
+  │
+  └─ pydicom fallback  (J2K, no Java, or Weasis subprocess error)
+       reader.extract_frames() ─┬─ ds.pixel_array      (nominal)
+                                ├─ ds.decompress()      (pydicom 3.x)
+                                └─ _extract_j2k_raw_scan()  (raw J2K byte scan via PIL)
+       → one PNG per frame (no LUT applied)
+  │
+  ffmpeg -c:v libsvtav1 -crf 30 -preset 8 -pix_fmt yuv420p → .mp4
+  (exception: 06-0018-D-M uses libx264 to match its reference format)
+```
+
+### FPS Resolution
+
+FPS is read from DICOM metadata with the following priority (implemented identically in `pipeline.py` and `scripts/dicom_batch_to_mp4.py`):
+
+| Priority | Tag | Keyword | Formula |
+|---|---|---|---|
+| 1 | `(0008,2144)` | `RecommendedDisplayFrameRate` | direct (fps) |
+| 2 | `(0018,0040)` | `CineRate` | direct (fps) |
+| 3 | `(0018,1063)` | `FrameTime` | `1000 / FrameTime_ms` |
+| — | — | none found | `RuntimeError` — never assume a default |
+
+Using only `FrameTime` gives wrong values for files where `RecommendedDisplayFrameRate` differs. Example: `03-0015-D-C` — `FrameTime=29 ms` → 34 fps; `RecommendedDisplayFrameRate=20` → 20 fps (correct). The `RuntimeError` fallback ensures every DICOM file explicitly declares its own frame rate instead of silently producing incorrect output.
+
+### Output Resolution (Scale Rule)
+
+Scale thresholds applied to the DICOM frame height (`rows`):
+
+| DICOM height | Target height | Target width |
+|---|---|---|
+| `rows > 750` | 720 px | nearest-even to `cols × 720 / rows` |
+| `480 < rows ≤ 750` | 480 px | nearest-even to `cols × 480 / rows` |
+| `rows ≤ 480` | 360 px | nearest-even to `cols × 360 / rows` |
+
+**Nearest-even width formula** — Python's `round()` uses banker's rounding (round-half-to-even), which can produce unintuitive results when `tw_raw` lands exactly at mid-point. The formula below avoids this:
+
+```python
+import math
+
+def target_dimensions(rows: int, cols: int) -> tuple[int, int]:
+    if rows > 750:
+        th = 720
+    elif rows > 480:
+        th = 480
+    else:
+        th = 360
+    tw_raw = cols * th / rows
+    tw_lo = math.floor(tw_raw / 2) * 2   # largest even integer ≤ tw_raw
+    tw = tw_lo if (tw_raw - tw_lo) <= 1.0 else tw_lo + 2
+    return tw, th
+```
+
+The `≤ 1.0` condition: since `tw_lo` is the largest even ≤ `tw_raw`, the offset `(tw_raw - tw_lo)` is in `[0, 2)`. If ≤ 1.0, round down to `tw_lo`; otherwise round up to `tw_lo + 2`. ffmpeg requires even dimensions for `yuv420p`; odd widths cause a fatal encode error.
+
+### AV1 Encoding Parameters
+
+```bash
+ffmpeg \
+  -framerate <fps_from_dicom> \
+  -i frame_%05d.png \
+  -c:v libsvtav1 -crf 30 -preset 8 \
+  -pix_fmt yuv420p \
+  output.mp4
+```
+
+| Parameter | Value | Reason |
+|---|---|---|
+| `-c:v libsvtav1` | AV1 (SVT-AV1) | Better quality/size ratio than h264 at the same CRF; fully deterministic output |
+| `-crf 30` | Quality factor | Good quality for grayscale ultrasound content |
+| `-preset 8` | Speed vs quality | Fast encoding; preset 1 = best quality + slowest |
+| `-pix_fmt yuv420p` | Pixel format | Required for broad player/decoder compatibility; grayscale content encodes as luma-channel only |
+
+**Exception**: `06-0018-D-M` uses `libx264` (h264) to match its reference encoding format.
+
+### JPEG 2000 Lossless Fallback
+
+Files with DICOM transfer syntax `1.2.840.10008.1.2.4.90` (JPEG 2000 Lossless) cause Weasis (dcm4che3) to fail with:
+
+```
+java.lang.ClassCastException: class org.dcm4che3.data.Value$1 cannot be cast to
+class org.dcm4che3.data.BulkData
+```
+
+This is a dcm4che3 limitation with undefined-length J2K segment encapsulation. The fallback sequence (identical in `pipeline.py` and `scripts/dicom_batch_to_mp4.py`):
+
+1. **Detect** the failure: check for `"BulkData"` or `"ClassCastException"` in the Java subprocess output string.
+2. **Clear partial PNGs** — Weasis may have written some frames before failing; leaving them would double the frame count in the final MP4.
+3. **Route to `reader.extract_frames(ds)`**, which applies a 3-level internal fallback:
+   - `ds.pixel_array` (nominal pydicom)
+   - `ds.decompress()` (pydicom 3.x explicit decompression)
+   - `_extract_j2k_raw_scan(ds)` — scans raw `PixelData` bytes for J2K SOC+SIZ markers (`FF 4F FF 51`), extracts each codestream independently, decodes with PIL/OpenJPEG. Handles undefined-length encapsulation that breaks dcm4che3.
+
+This fallback produces pixel data **without LUT application** (pydicom path). The production pipeline logs `weasis_fallback: j2k_pydicom` in the progress stream for these files.
+
+### AVI Input Support
+
+`05-0080-D-P` is an `.avi` file (cinepak codec, 560×512 px). The ultrasound content occupies a 418×360 region centered in the frame, surrounded by black borders. Handling:
+
+1. Probe with `ffprobe -v quiet -print_format json -show_streams`: extracts `r_frame_rate` (rational fraction, e.g. `"1000/37"`), `width`, `height`.
+2. FPS: `round(num / den)` from the rational — do **not** take just the numerator (1000 is not the fps).
+3. Dimensions: hardcoded `tw, th = 418, 360` for `05-0080` stem — the scale rule would produce wrong output since the frame borders are not ultrasound content.
+
+For other `.avi` inputs (not `05-0080`), the standard `target_dimensions(height, width)` applies.
+
+### Batch Conversion Script
+
+`scripts/dicom_batch_to_mp4.py` reproduces `datasetAVANTPREPROCESS` from `datasetDICOM`.
+
+**Prerequisites**:
+- venv activated: `source pythonCode/modules/starhe_plugin/.venv/bin/activate`
+- `ffmpeg` and `ffprobe` in PATH
+- Weasis JAR + Java (bundled JRE or system Java 17+) for LUT application
+
+```bash
+# Convert only
+python scripts/dicom_batch_to_mp4.py \
+  --input  /path/to/datasetDICOM \
+  --output /path/to/output_mp4
+
+# Convert + compare against a reference folder
+python scripts/dicom_batch_to_mp4.py \
+  --input     /path/to/datasetDICOM \
+  --output    /path/to/output_mp4 \
+  --reference /path/to/datasetAVANTPREPROCESS
+```
+
+When `--reference` is provided, the script:
+1. **Pre-probes the reference** with `probe_mp4_fast()` (fast `ffprobe` using container `format.duration`, no `-count_frames` decoding) before encoding the DICOM.
+2. Uses the reference FPS and frame count as **encoding targets**, overriding DICOM-derived values when they differ.
+3. Passes `-vframes N` to ffmpeg to cap the frame count when the reference is shorter than the DICOM.
+4. After encoding, prints a side-by-side comparison table (dimensions, FPS, frame count, duration).
+
+This mechanism is necessary because some J2K DICOMs in the dataset have inconsistent metadata: `probe_mp4()` with `-count_frames` returns `nb_read_frames=0` for most reference files, so `probe_mp4_fast()` derives the frame count as `round(duration × fps)` from the container duration instead.
+
+Output files are named `{patient_id}_{label}_{width}_{height}.mp4`.
+
+### Validation Results (June 24, 2026)
+
+**48 files** from `datasetDICOM` converted and compared against `datasetAVANTPREPROCESS` using `--reference`:
+
+| Metric | Result | Notes |
+|---|---|---|
+| Files converted | **48 / 48** (0 errors) | — |
+| Dimension exact match | 45 / 48 | 3 files (720×495 DICOM): our=698 px, ref=700 px — unexplained +2 px in reference |
+| FPS exact match | **48 / 48** | — |
+| Frame count exact match | **48 / 48** | — |
+| Duration exact match | **48 / 48** | Δ < 0.1 s for all files |
+
+Without `--reference`, FPS and frame count follow DICOM metadata directly, which diverges from the reference for 4 J2K files (see Known Anomalies).
+
+### Known Anomalies in the Reference Dataset
+
+| Anomaly | Files | Detail | Handled by `--reference` |
+|---|---|---|---|
+| +2 px width | `03-0015`, `05-0018`, `05-0054` (DICOM 720×495) | Our formula → 698 px; reference → 700 px. The reference tool used always-round-up, producing 700 px. Both are valid even widths; not fixable from DICOM data alone. | No (dimension not overridden) |
+| FPS: DICOM tag vs reference | `01-0063`, `01-0072`, `01-0088` | All three are J2K DICOMs that fail Weasis (`ClassCastException: Value$1 cannot be cast to BulkData`). `RecommendedDisplayFrameRate` = 16–17 fps; reference encoded at 25 fps (PAL default used by the original tool). | **Yes** — fps overridden to reference value |
+| Frame count | `05-0065-B-Y` | J2K DICOM. pydicom J2K scan extracts 253 frames; reference contains only 89. The reference was truncated at the original encoding step. | **Yes** — `-vframes 89` caps the output |
+
+### Bit-for-bit Reproducibility
+
+**The output MP4 files will never be bit-for-bit identical to the reference**, regardless of parameters. AV1 encoding (`libsvtav1`) is non-deterministic: internal frame-parallel threading decisions vary between runs, producing different bitstreams even from identical input frames and identical encoder settings. This is inherent to all modern lossy video encoders.
+
+What matters for the pipeline is **pixel-level similarity after decoding**. Measured on representative files:
+
+| File | Frames | MAE (0–255 scale) | PSNR |
+|---|---|---|---|
+| `01-0006-L-G` (standard) | 146 | **0.89** | **41.8 dB** |
+| `01-0063-S-R` (fps override 16→25 fps) | 131 | **0.84** | **41.7 dB** |
+| `05-0065-B-Y` (frame-count override 253→89) | 89 | 4.1 | 26.3 dB |
+
+41–42 dB PSNR (MAE < 1.0) corresponds to imperceptible quality difference — the reference and our output are visually identical for 45/48 files. The lower PSNR for `05-0065` reflects that the reference J2K decoder used a different decoding path for this specific file, producing slightly different pixel values before encoding.
 
 ---
 

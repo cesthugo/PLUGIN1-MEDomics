@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Tuple
@@ -49,13 +50,31 @@ def _java_bin() -> str | None:
     Priorité :
     1. `STARHE_JAVA_BIN` (défini par Electron en mode packagé → JRE Temurin
        embarquée dans `STARHE.app/Contents/Resources/jre/bin/java`).
-    2. `java` du PATH système (mode dev avec `brew install openjdk@17`).
+    2. JRE Temurin bundlé dans le dépôt (react_ui/build-resources/jre-*/bin/java)
+       — disponible après `scripts/fetch_jre.sh`. Évite la dépendance au PATH
+       système (sur macOS, /usr/bin/java est un stub installeur, pas une JVM).
+    3. `java` du PATH système (mode dev avec `brew install openjdk@17`).
 
-    Retourne `None` si rien n'est trouvé.
+    Retourne `None` si rien n'est trouvé ou si la JVM est un stub macOS.
     """
     env_bin = os.environ.get("STARHE_JAVA_BIN")
     if env_bin and Path(env_bin).is_file():
         return env_bin
+
+    # JRE bundlé dans le dépôt (plusieurs variantes possibles selon la plateforme)
+    import platform
+    arch = "arm64" if platform.machine() == "arm64" else "x64"
+    os_name = "mac" if sys.platform == "darwin" else ("win" if sys.platform == "win32" else "linux")
+    bundled = Path(PROJECT_ROOT) / "react_ui" / "build-resources" / f"jre-{os_name}-{arch}" / "bin" / "java"
+    if bundled.is_file():
+        try:
+            r = subprocess.run([str(bundled), "-version"],
+                               capture_output=True, timeout=5)
+            if r.returncode == 0:
+                return str(bundled)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
     return shutil.which("java")
 
 

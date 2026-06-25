@@ -68,12 +68,26 @@ def run_pipeline(dicom_path: str,
     go_progress(step := step + 1, TOTAL_STEPS, "Chargement DICOM…")
     ds = load_dicom(dicom_path)
 
-    # Extraire le FPS réel depuis le tag FrameTime (0018,1063) en ms/frame.
-    # Utilisé pour l'export MP4 intermédiaire passé à prepUS, afin d'aligner
-    # la temporalité du clip avec le pipeline d'entraînement (Weasis → ffmpeg).
-    _frame_time_ms = float(getattr(ds, "FrameTime", 0.0))
-    dicom_fps = (1000.0 / _frame_time_ms) if _frame_time_ms > 0 else 22.0
-    go_print("info", f"FPS DICOM : {dicom_fps:.2f} fps (FrameTime={_frame_time_ms} ms)")
+    # Extraire le FPS réel depuis les tags DICOM (priorité descendante) :
+    #   1. RecommendedDisplayFrameRate (0008,2144) — entier, source la plus fiable
+    #      (correspond aux fps des MP4 de référence pour 46/49 patients du dataset).
+    #   2. CineRate (0018,0040) — fps direct.
+    #   3. FrameTime (0018,1063) — ms/frame → fps = 1000/FrameTime.
+    _rdp = float(getattr(ds, "RecommendedDisplayFrameRate", 0.0))
+    _cr  = float(getattr(ds, "CineRate", 0.0))
+    _ft  = float(getattr(ds, "FrameTime", 0.0))
+    if _rdp > 0:
+        dicom_fps, _fps_src = _rdp, f"RecommendedDisplayFrameRate={_rdp}"
+    elif _cr > 0:
+        dicom_fps, _fps_src = _cr, f"CineRate={_cr}"
+    elif _ft > 0:
+        dicom_fps, _fps_src = 1000.0 / _ft, f"FrameTime={_ft} ms"
+    else:
+        raise RuntimeError(
+            "Impossible de déterminer le FPS du fichier DICOM : "
+            "aucun tag RecommendedDisplayFrameRate / CineRate / FrameTime trouvé."
+        )
+    go_print("info", f"FPS DICOM : {dicom_fps:.2f} fps ({_fps_src})")
 
     # ── 2. Anonymisation ──────────────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Anonymisation des métadonnées…")
