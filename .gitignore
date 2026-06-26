@@ -34,14 +34,14 @@ logs/
 
 # ── Node.js (dépendances React/Vite – binaires spécifiques à l'OS, jamais commiter) ──
 node_modules/
-react_ui/dist/
+renderer/dist/
 
 # ── Electron build artifacts (générés par npm run electron:pack) ──────────────
-react_ui/electron-dist/
-react_ui/release/
+renderer/electron-dist/
+renderer/release/
 
 # ── JRE Temurin téléchargées par scripts/fetch_jre.sh (par plateforme, ~130 MB) ──
-react_ui/build-resources/jre-*/
+renderer/build-resources/jre-*/
 
 # ── Build artifacts de prepUS (généré par pip install / python setup.py build) ─
 third_party/prepUS/build/

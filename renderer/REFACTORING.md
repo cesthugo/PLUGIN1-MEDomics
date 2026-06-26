@@ -1,4 +1,4 @@
-# Refactoring de `StarhePlugin/index.tsx`
+# Refactoring de `pages/StarhePlugin.tsx`
 
 ## Résumé
 

@@ -12,7 +12,7 @@
  *       MEDomics/renderer/components/mainPages/starhe.jsx
  *
  * 2. Copier le build React du plugin dans :
- *       MEDomics/renderer/public/starhe-ui/   (copier le contenu de react_ui/dist/)
+ *       MEDomics/renderer/public/starhe-ui/   (copier le contenu de renderer/dist/)
  *
  * 3. Dans renderer/components/layout/layoutManager.jsx :
  *       import StarhePage from '../mainPages/starhe'
@@ -49,7 +49,7 @@ const StarhePage = () => {
     return () => window.removeEventListener('message', handleMessage)
   }, [port])
 
-  // Dev : pointe vers le serveur Vite du plugin (cd react_ui && npm run dev)
+  // Dev : pointe vers le serveur Vite du plugin (cd renderer && npm run dev)
   // Prod : pointe vers le build copié dans renderer/public/starhe-ui/
   const starheUrl =
     process.env.NODE_ENV === 'development'

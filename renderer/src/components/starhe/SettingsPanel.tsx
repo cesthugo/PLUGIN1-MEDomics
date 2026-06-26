@@ -4,9 +4,9 @@
 // Toutes les modifications sont appliquées en temps réel et persistées via le hook.
 
 import React, { useEffect, useRef } from 'react';
-import type { DisplaySettings } from '../hooks/useDisplaySettings';
-import { DISPLAY_DEFAULTS } from '../hooks/useDisplaySettings';
-import { SIDEBAR_BG, SBAR_FG, SBAR_MUTED } from '../colors';
+import type { DisplaySettings } from '../../utilities/starhe/hooks/useDisplaySettings';
+import { DISPLAY_DEFAULTS } from '../../utilities/starhe/hooks/useDisplaySettings';
+import { SIDEBAR_BG, SBAR_FG, SBAR_MUTED } from '../../utilities/starhe/colors';
 
 // ── Options de polices proposées ──────────────────────────────────────────────
 

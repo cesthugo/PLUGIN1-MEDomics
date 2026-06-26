@@ -3,7 +3,7 @@
 // Réplique _AdjustDialog de prototype_tkinter.py.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { SIDEBAR_BG, SBAR_FG, SBAR_MUTED, BLUE } from '../colors';
+import { SIDEBAR_BG, SBAR_FG, SBAR_MUTED, BLUE } from '../../utilities/starhe/colors';
 
 export interface AdjustDialogProps {
   title:    string;

@@ -1,8 +1,8 @@
 // components/ConsolePanel.tsx — Console de log style MEDomics (réplique Tkinter)
 
 import React, { useEffect, useRef } from 'react';
-import type { LogEntry } from '../types';
-import { LOG_BG, SUCCESS_FG, WARN_FG, DANGER_FG, BLUE_TEXT } from '../colors';
+import type { LogEntry } from '../../utilities/starhe/types';
+import { LOG_BG, SUCCESS_FG, WARN_FG, DANGER_FG, BLUE_TEXT } from '../../utilities/starhe/colors';
 
 const LEVEL_COLOR: Record<string, string> = {
   info:    '#8892a4',

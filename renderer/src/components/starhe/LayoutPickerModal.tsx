@@ -7,7 +7,7 @@
 import React from 'react';
 import {
   CARD_BG, CARD_BORDER, SBAR_FG, SBAR_MUTED,
-} from '../colors';
+} from '../../utilities/starhe/colors';
 
 // ── Type exporté ─────────────────────────────────────────────────────────────
 

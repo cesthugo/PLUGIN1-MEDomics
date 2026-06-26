@@ -12,7 +12,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { loadDicom, loadDicomFile, loadMp4, loadMp4File, makeTabLabel } from '../api';
 import type { TabState, Patient, DicomData, LogLevel } from '../types';
-import type { BatchResultToOpen } from '../components/BatchModal';
+import type { BatchResultToOpen } from '../../../components/starhe/BatchModal';
 import { nextTabId } from '../utils';
 
 // ── Valeur initiale d'un onglet ───────────────────────────────────────────────

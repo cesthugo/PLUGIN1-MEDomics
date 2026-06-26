@@ -64,7 +64,7 @@ var cfg = appConfig{
 	PythonModPath: envOr("STARHE_PYTHON_PATH", filepath.Join(serverDir(), "..", "pythonCode", "modules")),
 	WorkerBin:     os.Getenv("STARHE_WORKER_BIN"), // vide en dev, défini par Electron en prod
 
-	UIDir: envOr("STARHE_UI_DIR", filepath.Join(serverDir(), "..", "react_ui", "dist")),
+	UIDir: envOr("STARHE_UI_DIR", filepath.Join(serverDir(), "..", "renderer", "dist")),
 
 	MongoURI:        envOr("MONGO_URI", "mongodb://localhost:54017/"),
 	MongoDatabase:   envOr("MONGO_DB", "medomics"),

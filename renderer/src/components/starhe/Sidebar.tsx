@@ -8,12 +8,12 @@
 //   - MÉTADONNÉES   : conservées + tags anonymisés
 
 import React, { useRef, useState } from 'react';
-import type { TabState, LogLevel, Patient } from '../types';
-import type { AnalysisStatus } from '../hooks/usePipelineSSE';
+import type { TabState, LogLevel, Patient } from '../../utilities/starhe/types';
+import type { AnalysisStatus } from '../../utilities/starhe/hooks/usePipelineSSE';
 import {
   SIDEBAR_BG, BLUE, SBAR_FG, SBAR_MUTED,
   SUCCESS_FG, DANGER_FG, RISK_LOW_FG, RISK_HIGH_FG,
-} from '../colors';
+} from '../../utilities/starhe/colors';
 
 // ── Helpers de style ──────────────────────────────────────────────────────────
 

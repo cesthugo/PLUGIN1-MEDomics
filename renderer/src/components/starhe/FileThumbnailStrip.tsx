@@ -4,8 +4,8 @@
 // groupées par date d'étude, avec support drag & drop vers la vue multi-panneaux.
 
 import React from 'react';
-import { TAB_BG } from '../colors';
-import type { TabState } from '../types';
+import { TAB_BG } from '../../utilities/starhe/colors';
+import type { TabState } from '../../utilities/starhe/types';
 
 export function FileThumbnailStrip({
   tabs,

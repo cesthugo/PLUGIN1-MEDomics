@@ -6,7 +6,7 @@
 #
 # Logs :
 #   logs/go_server.log
-#   logs/react_ui.log
+#   logs/renderer.log
 #   logs/starhe_dev.log
 
 set -euo pipefail
@@ -14,7 +14,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$ROOT_DIR/logs"
 GO_LOG="$LOG_DIR/go_server.log"
-REACT_LOG="$LOG_DIR/react_ui.log"
+REACT_LOG="$LOG_DIR/renderer.log"
 MAIN_LOG="$LOG_DIR/starhe_dev.log"
 
 VENV_PYTHON="$ROOT_DIR/pythonCode/modules/starhe_plugin/.venv/bin/python"
@@ -113,14 +113,14 @@ for _ in {1..30}; do
   sleep 1
 done
 
-if [[ ! -d "$ROOT_DIR/react_ui/node_modules" ]]; then
+if [[ ! -d "$ROOT_DIR/renderer/node_modules" ]]; then
   log "Dépendances React absentes: exécution de npm ci..."
-  (cd "$ROOT_DIR/react_ui" && npm ci) >>"$REACT_LOG" 2>&1
+  (cd "$ROOT_DIR/renderer" && npm ci) >>"$REACT_LOG" 2>&1
 fi
 
 log "Lancement de React/Vite sur http://localhost:5173..."
 (
-  cd "$ROOT_DIR/react_ui"
+  cd "$ROOT_DIR/renderer"
   npm run dev
 ) >>"$REACT_LOG" 2>&1 &
 REACT_PID=$!

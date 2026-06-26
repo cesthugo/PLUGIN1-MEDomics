@@ -48,7 +48,7 @@ _SCRIPT_DIR  = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent
 _WEASIS_JAR   = _PROJECT_ROOT / "third_party" / "weasis-dcm2png" / "dist" / "weasis-dcm2png.jar"
 _WEASIS_NATIVE = _PROJECT_ROOT / "third_party" / "weasis-dcm2png" / "dist" / "native"
-_BUNDLED_JAVA = _PROJECT_ROOT / "react_ui" / "build-resources" / "jre-mac-arm64" / "bin" / "java"
+_BUNDLED_JAVA = _PROJECT_ROOT / "renderer" / "build-resources" / "jre-mac-arm64" / "bin" / "java"
 
 
 # ── FPS resolution ─────────────────────────────────────────────────────────────

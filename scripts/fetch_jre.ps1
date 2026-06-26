@@ -5,7 +5,7 @@
 #   .\scripts\fetch_jre.ps1                # win-x64 (défaut)
 #   .\scripts\fetch_jre.ps1 -Platform win-x64
 #
-# Sortie : react_ui\build-resources\jre-win-x64\  (contient bin\java.exe)
+# Sortie : renderer\build-resources\jre-win-x64\  (contient bin\java.exe)
 # Convention package.json : extraResources copie ce dossier vers "jre\" dans
 # resources\jre\bin\java.exe de l'installeur NSIS.
 
@@ -17,7 +17,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root    = Split-Path -Parent $PSScriptRoot
-$OutRoot = Join-Path $Root "react_ui\build-resources"
+$OutRoot = Join-Path $Root "renderer\build-resources"
 
 switch ($Platform) {
     "win-x64"     { $AdoOs = "windows"; $AdoArch = "x64" }

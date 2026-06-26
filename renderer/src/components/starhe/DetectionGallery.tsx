@@ -5,8 +5,8 @@
 // Cliquer sur une frame navigue directement vers elle.
 
 import React from 'react';
-import type { Detection } from '../types';
-import { SIDEBAR_BG, BLUE, SBAR_MUTED } from '../colors';
+import type { Detection } from '../../utilities/starhe/types';
+import { SIDEBAR_BG, BLUE, SBAR_MUTED } from '../../utilities/starhe/colors';
 
 // ── Miniature d'une frame avec bbox SVG overlay ───────────────────────────────
 

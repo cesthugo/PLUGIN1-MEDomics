@@ -5,7 +5,7 @@
 #
 # Logs :
 #   logs\go_server.log
-#   logs\react_ui.log
+#   logs\renderer.log
 #   logs\starhe_dev.log
 
 
@@ -16,8 +16,8 @@ $RootDir  = Split-Path -Parent $PSScriptRoot
 $LogDir   = Join-Path $RootDir "logs"
 $GoLog    = Join-Path $LogDir "go_server.log"
 $GoErrLog = Join-Path $LogDir "go_server.err.log"
-$ReactLog = Join-Path $LogDir "react_ui.log"
-$ReactErrLog = Join-Path $LogDir "react_ui.err.log"
+$ReactLog = Join-Path $LogDir "renderer.log"
+$ReactErrLog = Join-Path $LogDir "renderer.err.log"
 $MainLog  = Join-Path $LogDir "starhe_dev.log"
 
 
@@ -172,10 +172,10 @@ try {
         Write-DevLog "Healthcheck non confirmé après 30s, lancement de React quand même."
     }
 
-    $NodeModules = Join-Path $RootDir "react_ui\node_modules"
+    $NodeModules = Join-Path $RootDir "renderer\node_modules"
     if (-not (Test-Path $NodeModules)) {
         Write-DevLog "Dependances React absentes: execution de npm ci..."
-        Push-Location (Join-Path $RootDir "react_ui")
+        Push-Location (Join-Path $RootDir "renderer")
         $ErrorActionPreference = "Continue"
         & $NpmExe ci *> $ReactLog
         $npmExitCode = $LASTEXITCODE
@@ -189,7 +189,7 @@ try {
     Write-DevLog "Lancement de React/Vite sur http://localhost:5173..."
     $ReactProcess = Start-Process -FilePath $NpmExe `
         -ArgumentList "run", "dev" `
-        -WorkingDirectory (Join-Path $RootDir "react_ui") `
+        -WorkingDirectory (Join-Path $RootDir "renderer") `
         -RedirectStandardOutput $ReactLog `
         -RedirectStandardError $ReactErrLog `
         -PassThru `

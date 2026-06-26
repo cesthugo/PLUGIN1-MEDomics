@@ -22,31 +22,31 @@ import React, {
 
 import type {
   TabState, Patient, LogEntry, LogLevel, ViewMode, Measure,
-} from './types';
+} from '../utilities/starhe/types';
 import {
   SIDEBAR_BG, SIDEBAR_HOV, MAIN_BG, CARD_BG, CARD_BORDER, CARD_SHADOW,
   BLUE, BLUE_TEXT, SBAR_FG, SBAR_MUTED, BORDER, CANVAS_BG,
   PTAB_BG, PTAB_ACT_BG,
-} from './colors';
-import { loadDicom, loadDicomFile, loadMp4File, deleteCache, makeTabLabel } from './api';
+} from '../utilities/starhe/colors';
+import { loadDicom, loadDicomFile, loadMp4File, deleteCache, makeTabLabel } from '../utilities/starhe/api';
 import medomicsLogo from '../assets/medomics_logo.png';
-import { usePipelineSSE } from './hooks/usePipelineSSE';
-import { usePlayback }    from './hooks/usePlayback';
-import { useDisplaySettings, DISPLAY_DEFAULTS } from './hooks/useDisplaySettings';
-import { Sidebar }        from './components/Sidebar';
-import { DicomCanvas }    from './components/DicomCanvas';
-import { ConsolePanel }   from './components/ConsolePanel';
-import { AdjustDialog }   from './components/AdjustDialog';
-import { ContextMenu, buildCanvasContextMenu } from './components/ContextMenu';
-import { LiveModal }      from './components/LiveModal';
-import { SettingsPanel }       from './components/SettingsPanel';
-import { DetectionGallery }    from './components/DetectionGallery';
-import { BatchModal }          from './components/BatchModal';
-import type { BatchResultToOpen } from './components/BatchModal';
-import { LayoutPickerModal }   from './components/LayoutPickerModal';
-import type { LayoutMode }     from './components/LayoutPickerModal';
-import { MultiPanelView }      from './components/MultiPanelView';
-import { FileThumbnailStrip }  from './components/FileThumbnailStrip';
+import { usePipelineSSE } from '../utilities/starhe/hooks/usePipelineSSE';
+import { usePlayback }    from '../utilities/starhe/hooks/usePlayback';
+import { useDisplaySettings, DISPLAY_DEFAULTS } from '../utilities/starhe/hooks/useDisplaySettings';
+import { Sidebar }        from '../components/starhe/Sidebar';
+import { DicomCanvas }    from '../components/starhe/DicomCanvas';
+import { ConsolePanel }   from '../components/starhe/ConsolePanel';
+import { AdjustDialog }   from '../components/starhe/AdjustDialog';
+import { ContextMenu, buildCanvasContextMenu } from '../components/starhe/ContextMenu';
+import { LiveModal }      from '../components/starhe/LiveModal';
+import { SettingsPanel }       from '../components/starhe/SettingsPanel';
+import { DetectionGallery }    from '../components/starhe/DetectionGallery';
+import { BatchModal }          from '../components/starhe/BatchModal';
+import type { BatchResultToOpen } from '../components/starhe/BatchModal';
+import { LayoutPickerModal }   from '../components/starhe/LayoutPickerModal';
+import type { LayoutMode }     from '../components/starhe/LayoutPickerModal';
+import { MultiPanelView }      from '../components/starhe/MultiPanelView';
+import { FileThumbnailStrip }  from '../components/starhe/FileThumbnailStrip';
 
 // ── ID auto-incrémenté ────────────────────────────────────────────────────────
 let _nextTabId = 1;
@@ -223,7 +223,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const addTab = useCallback((
     displayName: string,
     dicomPath:   string,
-    data:        import('./types').DicomData,
+    data:        import('../utilities/starhe/types').DicomData,
   ) => {
     const label  = makeTabLabel(data.studyDate, data.fileName);
     const newTab: TabState = {
@@ -254,7 +254,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const addMp4Tab = useCallback((
     displayName: string,
     serverPath:  string,
-    data:        import('./types').DicomData,
+    data:        import('../utilities/starhe/types').DicomData,
   ) => {
     const label = displayName.replace(/\.[^.]+$/, '').slice(0, 20);
     const newTab: TabState = {
@@ -1100,7 +1100,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             addLog(`Chargement : ${name}`, 'info');
             try {
               const data = await (result.serverPath
-                ? (await import('./api')).loadDicom(result.serverPath)
+                ? (await import('../utilities/starhe/api')).loadDicom(result.serverPath)
                 : Promise.reject(new Error('Chemin serveur absent')));
               const label  = makeTabLabel(data.studyDate, data.fileName);
               const newTab: TabState = {

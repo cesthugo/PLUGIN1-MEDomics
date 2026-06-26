@@ -50,7 +50,7 @@ def _java_bin() -> str | None:
     Priorité :
     1. `STARHE_JAVA_BIN` (défini par Electron en mode packagé → JRE Temurin
        embarquée dans `STARHE.app/Contents/Resources/jre/bin/java`).
-    2. JRE Temurin bundlé dans le dépôt (react_ui/build-resources/jre-*/bin/java)
+    2. JRE Temurin bundlé dans le dépôt (renderer/build-resources/jre-*/bin/java)
        — disponible après `scripts/fetch_jre.sh`. Évite la dépendance au PATH
        système (sur macOS, /usr/bin/java est un stub installeur, pas une JVM).
     3. `java` du PATH système (mode dev avec `brew install openjdk@17`).
@@ -65,7 +65,7 @@ def _java_bin() -> str | None:
     import platform
     arch = "arm64" if platform.machine() == "arm64" else "x64"
     os_name = "mac" if sys.platform == "darwin" else ("win" if sys.platform == "win32" else "linux")
-    bundled = Path(PROJECT_ROOT) / "react_ui" / "build-resources" / f"jre-{os_name}-{arch}" / "bin" / "java"
+    bundled = Path(PROJECT_ROOT) / "renderer" / "build-resources" / f"jre-{os_name}-{arch}" / "bin" / "java"
     if bundled.is_file():
         try:
             r = subprocess.run([str(bundled), "-version"],

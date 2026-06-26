@@ -3,8 +3,8 @@
 // Réplique _show_context_menu de prototype_tkinter.py.
 
 import React, { useEffect, useRef } from 'react';
-import type { ContextMenuItem, ViewMode } from '../types';
-import { SIDEBAR_BG, SBAR_FG, BLUE } from '../colors';
+import type { ContextMenuItem, ViewMode } from '../../utilities/starhe/types';
+import { SIDEBAR_BG, SBAR_FG, BLUE } from '../../utilities/starhe/colors';
 
 export interface ContextMenuProps {
   x:       number;

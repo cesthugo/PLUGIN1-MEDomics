@@ -18,10 +18,10 @@ import {
   computeTransform, imgToScreen, screenToImg,
   getMeasureLabelScreenPos,
   useCanvasInteractions,
-} from '../hooks/useCanvasInteractions';
-import type { Transform } from '../hooks/useCanvasInteractions';
-import type { TabState, ViewMode, Measure, Detection } from '../types';
-import { BLUE, CANVAS_BG, SBAR_MUTED } from '../colors';
+} from '../../utilities/starhe/hooks/useCanvasInteractions';
+import type { Transform } from '../../utilities/starhe/hooks/useCanvasInteractions';
+import type { TabState, ViewMode, Measure, Detection } from '../../utilities/starhe/types';
+import { BLUE, CANVAS_BG, SBAR_MUTED } from '../../utilities/starhe/colors';
 
 // ── Dessine les bboxes de détection ──────────────────────────────────────────
 

@@ -40,8 +40,8 @@ cd pythonCode/modules && pyinstaller ../../scripts/starhe_worker.spec --noconfir
 
 ### TypeScript checks
 ```bash
-cd react_ui && npm run typecheck    # tsc --noEmit
-cd react_ui && npm run build        # type-check + Vite build
+cd renderer && npm run typecheck    # tsc --noEmit
+cd renderer && npm run build        # type-check + Vite build
 ```
 
 ### Evaluation scripts (no prepUS needed — MP4 already preprocessed)
@@ -60,7 +60,7 @@ python scripts/compare_risk_backends.py --input <dir> --output comparison.csv
 
 ```
 User (browser/Electron)
-  → React UI (react_ui/src/StarhePlugin/)
+  → React UI (renderer/src/pages/StarhePlugin.tsx)
     → Go HTTP server (go_server/, port 8082)
       → Python subprocess: python -m starhe_plugin.pipeline <dicom_path> ...
         → pipeline.py (orchestrator)
@@ -110,13 +110,14 @@ mmaction2 is installed `--no-deps` and requires 3 patches to `.venv/lib/.../mmac
 
 ### React UI Structure
 
-`react_ui/src/StarhePlugin/` is the entire frontend:
-- `index.tsx` — root component, all global state (tabs, patients, log)
-- `api.ts` — all fetch calls to the Go server; `getApiBase()` resolves API URL (Electron preload → `window.__STARHE_API_BASE__` → relative proxy)
-- `hooks/usePipelineSSE.ts` — consumes SSE from `/starhe/analyze`, dispatches progress/result events
-- `hooks/usePlayback.ts` — frame-by-frame DICOM animation
-- `components/DicomCanvas.tsx` — canvas rendering, zoom/pan/measure
-- `types.ts` — all shared types (`TabState`, `DicomData`, `Detection`, `SSEPayload`, etc.)
+`renderer/src/` follows the MEDomics renderer layout (components / pages / styles / utilities):
+- `pages/StarhePlugin.tsx` — root component, all global state (tabs, patients, log)
+- `utilities/starhe/api.ts` — all fetch calls to the Go server; `getApiBase()` resolves API URL (Electron preload → `window.__STARHE_API_BASE__` → relative proxy)
+- `utilities/starhe/hooks/usePipelineSSE.ts` — consumes SSE from `/starhe/analyze`, dispatches progress/result events
+- `utilities/starhe/hooks/usePlayback.ts` — frame-by-frame DICOM animation
+- `components/starhe/DicomCanvas.tsx` — canvas rendering, zoom/pan/measure
+- `utilities/starhe/types.ts` — all shared types (`TabState`, `DicomData`, `Detection`, `SSEPayload`, etc.)
+- `styles/starhe/StarhePlugin.css` — global plugin CSS
 
 `SSEPayload.data` mirrors the JSON emitted by `go_result()` in Python. When Python sends `risk_score`/`risk_label`, the React side reads `data.risk?.risk_score`.
 

@@ -13,7 +13,7 @@ The plug-in analyzes abdominal ultrasound DICOM cine-clips to screen for hepatoc
 
 | Mode | Description |
 |---|---|
-| **React UI (standalone)** | React 18 / TypeScript frontend (`react_ui/`) built with Vite, served by a standalone Go server (`go_server/`). Full DICOM viewer, AI pipeline, multi-tab, live analysis. **Current primary UI.** |
+| **React UI (standalone)** | React 18 / TypeScript frontend (`renderer/`) built with Vite, served by a standalone Go server (`go_server/`). Full DICOM viewer, AI pipeline, multi-tab, live analysis. **Current primary UI.** |
 | **Tkinter prototype** | Legacy Tkinter UI (`ui/prototype_tkinter.py`). Used for early validation before porting to React. Launched via `scripts/run_tkinter.sh`. |
 | **MEDomics Integrated** | Integrates into the MEDomics platform as a *Standard Plugin*. An adapter (`run_starhe.py`) translates the `GO_PRINT|…` protocol to the MEDomics protocol (`progress*_*` / `response-ready*_*`). A Go blueprint (`starhe_blueprint.go`) registers routes in the MEDomics server. |
 | **Live Streaming** | Real-time frame-by-frame inference on a live ultrasound feed. The `LivePipeline` (`ai/live_pipeline.py`) processes incoming frames in a background thread. Three input sources: C-STORE DICOM (pynetdicom SCP), local folder watcher, USB HDMI capture card. Live modal available in the React UI. |
@@ -34,7 +34,7 @@ Two AI models are used:
 | Python | 3.13 | tkinter included; 3.14 incompatible (tkinter broken). On macOS Homebrew: `brew install python@3.13 python-tk@3.13` |
 | MongoDB | 4.x+ | Local service on port **54017** (non-standard) |
 | Go | 1.21+ | Required for the REST/SSE server |
-| Node.js | 18+ | Required for the React UI (`react_ui/`). `node_modules/` is **not** in the repository — installed automatically by `npm ci` on first launch |
+| Node.js | 18+ | Required for the React UI (`renderer/`). `node_modules/` is **not** in the repository — installed automatically by `npm ci` on first launch |
 | Java (optional) | 17+ | Activates the `weasis-dcm2png` path (DICOM → PNG with Modality/VOI LUT applied, aligned with training distribution). Without Java, the pipeline falls back to `pydicom` transparently. macOS: `brew install openjdk@17`. |
 | CUDA (optional) | 11.8+ | GPU inference; CPU used if absent |
 
@@ -66,7 +66,7 @@ Two AI models are used:
 
 ## Distribution — Builds Electron (`.dmg` / `.deb` / `.AppImage` / `.exe`)
 
-The plugin is distributed as a **standalone Electron application** (same approach as MEDomics). The full pipeline (React renderer + electron-builder + extraResources) is configured in [react_ui/package.json](react_ui/package.json) under the `"build"` key.
+The plugin is distributed as a **standalone Electron application** (same approach as MEDomics). The full pipeline (React renderer + electron-builder + extraResources) is configured in [renderer/package.json](renderer/package.json) under the `"build"` key.
 
 ### Produced Targets
 
@@ -84,10 +84,10 @@ The plugin is distributed as a **standalone Electron application** (same approac
 
 | File | Role |
 |---|---|
-| [react_ui/electron/main.ts](react_ui/electron/main.ts) | Main process: splash → spawn `go_server` → wait `/health` 200 → main window |
-| [react_ui/electron/preload.ts](react_ui/electron/preload.ts) | Minimal `contextBridge`: native `openDicomFiles()` + `apiBase` |
-| [react_ui/electron/splash.html](react_ui/electron/splash.html) | 480×280 splash shown while the Go server starts |
-| [react_ui/build-resources/](react_ui/build-resources/) | `.icns` / `.ico` / `.png` icons (placeholders for now) |
+| [renderer/electron/main.ts](renderer/electron/main.ts) | Main process: splash → spawn `go_server` → wait `/health` 200 → main window |
+| [renderer/electron/preload.ts](renderer/electron/preload.ts) | Minimal `contextBridge`: native `openDicomFiles()` + `apiBase` |
+| [renderer/electron/splash.html](renderer/electron/splash.html) | 480×280 splash shown while the Go server starts |
+| [renderer/build-resources/](renderer/build-resources/) | `.icns` / `.ico` / `.png` icons (placeholders for now) |
 
 `main.ts`:
 - Spawns `go_server` with env `PORT=8082` + `STARHE_WEASIS_DIR` pointing to the packaged resources
@@ -104,7 +104,7 @@ Copied into `STARHE.app/Contents/Resources/` (macOS) or `resources/` (Linux/Wind
 | `go_server/go_server` | `go_server/go_server` | ~13 MB |
 | `third_party/weasis-dcm2png/dist/` | `weasis-dcm2png/` | ~18 MB JAR + OpenCV native libs |
 | `pythonCode/modules/dist/starhe_worker/` | `starhe_worker/` | ~568 MB (Python + torch + mmdet bundled via PyInstaller) |
-| `react_ui/build-resources/jre-mac-${arch}/` | `jre/` | ~151 MB (Temurin 17 JRE) |
+| `renderer/build-resources/jre-mac-${arch}/` | `jre/` | ~151 MB (Temurin 17 JRE) |
 
 > **MongoDB remains an external prerequisite** (MEDomics consistency) — not bundled. If MongoDB is down, the user sees the "Retry / Quit" dialog with instructions.
 
@@ -117,7 +117,7 @@ Copied into `STARHE.app/Contents/Resources/` (macOS) or `resources/` (Linux/Wind
 | Python 3.13 + venv | — | Compile the PyInstaller worker (`pythonCode/modules/starhe_plugin/.venv/`) |
 | PyInstaller | 6.20+ | `pip install pyinstaller` in the venv |
 | `curl` + `tar` (Unix) or PowerShell (Win) | — | Download the Temurin JRE via `scripts/fetch_jre.{sh,ps1}` |
-| (Optional) `iconutil` / ImageMagick | — | Generate `.icns` / `.ico` from a PNG (see [react_ui/build-resources/README.md](react_ui/build-resources/README.md)) |
+| (Optional) `iconutil` / ImageMagick | — | Generate `.icns` / `.ico` from a PNG (see [renderer/build-resources/README.md](renderer/build-resources/README.md)) |
 
 ### Build locally
 
@@ -136,10 +136,10 @@ pyinstaller ../../scripts/starhe_worker.spec --noconfirm
 cd ../..
 ./scripts/fetch_jre.sh                # auto-detect (mac-arm64, mac-x64, linux-x64)
 # Windows:  .\scripts\fetch_jre.ps1
-# Produces: react_ui/build-resources/jre-<platform>/bin/java(.exe)
+# Produces: renderer/build-resources/jre-<platform>/bin/java(.exe)
 
 # 4. Build the renderer + Electron main + package
-cd react_ui
+cd renderer
 npm install        # first time
 npm run electron:pack         # all targets declared in package.json
 # Or a specific target:
@@ -148,7 +148,7 @@ npx electron-builder --linux deb AppImage --x64
 npx electron-builder --win nsis --x64
 ```
 
-Artifacts generated in [react_ui/release/](react_ui/release/) (gitignored).
+Artifacts generated in [renderer/release/](renderer/release/) (gitignored).
 
 ### Bundled Python Worker (Phase 2)
 
@@ -157,7 +157,7 @@ The Go server automatically detects which Python to use via the `STARHE_WORKER_B
 - **Dev mode** (`STARHE_WORKER_BIN` not set): `python -m starhe_plugin.<module>` from the local venv
 - **Packaged mode** (`STARHE_WORKER_BIN=/path/to/starhe_worker`): `starhe_worker --module <name>` — standalone PyInstaller bundle
 
-Electron automatically passes this variable when spawning the Go server (see [react_ui/electron/main.ts](react_ui/electron/main.ts)). The 5 entry points are dispatched by [pythonCode/modules/starhe_plugin/starhe_worker.py](pythonCode/modules/starhe_plugin/starhe_worker.py) via `runpy.run_module()`:
+Electron automatically passes this variable when spawning the Go server (see [renderer/electron/main.ts](renderer/electron/main.ts)). The 5 entry points are dispatched by [pythonCode/modules/starhe_plugin/starhe_worker.py](pythonCode/modules/starhe_plugin/starhe_worker.py) via `runpy.run_module()`:
 
 | `--module` | Module Python invoqué |
 |---|---|
@@ -195,7 +195,7 @@ To keep the `.dmg` small (325 MB instead of ~1 GB), the two C3D + RTMDet checkpo
 
 **Emplacement** : `app.getPath('userData')/models/` — sur macOS : `~/Library/Application Support/starhe-plugin/models/`.
 
-Le module [react_ui/electron/download-models.ts](react_ui/electron/download-models.ts) résout l'URL de téléchargement dans cet ordre :
+Le module [renderer/electron/download-models.ts](renderer/electron/download-models.ts) résout l'URL de téléchargement dans cet ordre :
 
 | Priority | Condition | Source |
 |---|---|---|
@@ -220,7 +220,7 @@ STARHE_MODELS_BASE_URL=http://localhost:8765 \
 The download window should open and progress to 100%, then the app continues its normal boot (splash → Go server → React UI).
 
 > **Phase 4 limitations**:
-> - The `STARHE_MODELS` GitHub release is currently **private** → priority 3 (public URL) returns 404. For final distribution, make the release public or host the `.pth` files on a CDN (then update `RELEASE_DL_BASE` in [download-models.ts](react_ui/electron/download-models.ts)).
+> - The `STARHE_MODELS` GitHub release is currently **private** → priority 3 (public URL) returns 404. For final distribution, make the release public or host the `.pth` files on a CDN (then update `RELEASE_DL_BASE` in [download-models.ts](renderer/electron/download-models.ts)).
 > - To force a re-download after updating weights: delete the `app.getPath('userData')/models/` folder.
 
 ### Multi-Platform CI (Phase 5)
@@ -240,8 +240,8 @@ Each job: disk cleanup (Linux, ~25 GB) → Go build → Python deps + torch CPU-
 
 ```bash
 # 1. Bump the version
-#    Edit "version" in react_ui/package.json → e.g. "0.6.4"
-git add react_ui/package.json
+#    Edit "version" in renderer/package.json → e.g. "0.6.4"
+git add renderer/package.json
 git commit -m "chore: bump version to 0.6.4"
 git push
 
@@ -344,13 +344,13 @@ go build -o go_server . && ./go_server
 # Listening on http://localhost:8082
 
 # 2. In a separate terminal: start the Vite dev server
-cd react_ui
+cd renderer
 npm ci    # first time only (installs from package-lock.json)
 npm run dev
 # Open http://localhost:5173
 ```
 
-> **Production build**: `cd react_ui && npm run build` — outputs to `react_ui/dist/`.  
+> **Production build**: `cd renderer && npm run build` — outputs to `renderer/dist/`.  
 > The `dist/` folder can be served statically by any HTTP server or embedded in an Electron shell.
 
 The React UI auto-proxies all `/starhe/*` calls to `http://localhost:8082` (configured in `vite.config.ts`). In production or Electron, set `window.__STARHE_API_BASE__ = 'http://localhost:8082'`.
@@ -476,18 +476,23 @@ Go server environment variables:
 ### React UI + standalone Go server (primary mode)
 
 ```
-react_ui/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
-  src/StarhePlugin/
-    index.tsx                 → root component (StarhePlugin), full state management
-    api.ts                    → fetch / SSE calls to the Go server
-    types.ts                  → shared types (DicomData, Detection, TabState, Measure…)
-    colors.ts                 → MEDomics color palette
-    hooks/
-      useDisplaySettings.ts   → persistent display settings (localStorage)
-      usePipelineSSE.ts       → SSE streaming consumer (analysis progress + results)
-      usePlayback.ts          → frame playback (speed, loop, FPS from DICOM FrameTime)
-      useCanvasInteractions.ts → pan / zoom / measure / series scroll (canvas events)
-    components/
+renderer/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
+  src/
+    pages/
+      StarhePlugin.tsx        → root component (StarhePlugin), full state management
+    utilities/starhe/
+      api.ts                  → fetch / SSE calls to the Go server
+      types.ts                → shared types (DicomData, Detection, TabState, Measure…)
+      colors.ts               → MEDomics color palette
+      utils.ts                → pure utility functions (nextTabId, isDicomFile…)
+      hooks/
+        useDisplaySettings.ts   → persistent display settings (localStorage)
+        usePipelineSSE.ts       → SSE streaming consumer (analysis progress + results)
+        usePlayback.ts          → frame playback (speed, loop, FPS from DICOM FrameTime)
+        useCanvasInteractions.ts → pan / zoom / measure / series scroll (canvas events)
+        useTabManager.ts        → tab & patient state management
+        useKeyboardShortcuts.ts → keyboard shortcuts wiring
+    components/starhe/
       Sidebar.tsx             → left sidebar 270 px: DICOM controls, nav, AI, results, metadata
       DicomCanvas.tsx         → main DICOM canvas (frames, bboxes, measures, brightness/contrast)
       DicomUploader.tsx       → DICOM upload component (drag-and-drop, file picker, path input)
@@ -498,6 +503,8 @@ react_ui/  (React 18 / TypeScript / Vite — port 5173 in dev, dist/ in prod)
       SettingsPanel.tsx       → settings overlay (font, colors, analysis mode, console toggle)
       LiveModal.tsx           → live analysis modal (C-STORE / folder / HDMI)
       BatchModal.tsx          → batch analysis modal (multi-file, export/import JSON+CSV, open-in-tab)
+    styles/starhe/
+      StarhePlugin.css        → global plugin CSS
         │ HTTP + SSE (proxied by Vite dev server → port 8082 in dev)
         ▼
   Go Server (port 8082, default — auto-detected by scripts/start_react.sh / scripts/start_react.ps1 via STARHE_PORT)
@@ -579,7 +586,20 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 
 ---
 
-## React UI (`react_ui/`)
+## React UI (`renderer/`)
+
+The `renderer/` folder follows the MEDomics `renderer/` layout convention (page 4 of the MEDomics architecture document):
+
+```
+renderer/src/
+  pages/starhe/          → StarhePlugin.tsx  (root component, global state)
+  components/starhe/     → 14 React components (Sidebar, DicomCanvas, BatchModal…)
+  utilities/starhe/      → api.ts · types.ts · colors.ts · utils.ts
+  utilities/starhe/hooks/→ usePipelineSSE · usePlayback · useCanvasInteractions · …
+  styles/starhe/         → StarhePlugin.css
+renderer/public/images/  → static assets (medomics_logo.png)
+renderer/electron/       → Electron main process (main.ts, preload.ts, splash.html…)
+```
 
 ### Stack
 
@@ -628,10 +648,10 @@ In Tkinter UI mode, the sink can be redirected to a Python callback via `set_log
 # Or manually (macOS / Linux):
 lsof -ti :8082 | xargs kill -9 2>/dev/null
 cd go_server && go build -o go_server . && ./go_server &
-cd react_ui && npm run dev
+cd renderer && npm run dev
 
 # Type-check + production build
-cd react_ui && npm run build
+cd renderer && npm run build
 ```
 
 ### API surface (Go server → React)

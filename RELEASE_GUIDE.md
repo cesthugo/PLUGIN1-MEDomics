@@ -58,9 +58,9 @@ dépendance externe.
   avant d'afficher la fenêtre principale.
 
 **Fichiers clés** :
-- [react_ui/electron/main.ts](react_ui/electron/main.ts)
-- [react_ui/electron/splash.html](react_ui/electron/splash.html)
-- [react_ui/package.json](react_ui/package.json) (section `"build"`)
+- [renderer/electron/main.ts](renderer/electron/main.ts)
+- [renderer/electron/splash.html](renderer/electron/splash.html)
+- [renderer/package.json](renderer/package.json) (section `"build"`)
 
 ### Phase 2 — Worker Python bundlé via PyInstaller (livrée)
 
@@ -93,7 +93,7 @@ dépendance externe.
 **Fichiers clés** :
 - [scripts/fetch_jre.sh](scripts/fetch_jre.sh)
 - [scripts/fetch_jre.ps1](scripts/fetch_jre.ps1)
-- [react_ui/build-resources/jre-mac-arm64/](react_ui/build-resources/) (gitignored, regénéré par fetch_jre)
+- [renderer/build-resources/jre-mac-arm64/](renderer/build-resources/) (gitignored, regénéré par fetch_jre)
 
 ### Phase 4 — Modèles `.pth` téléchargés au 1er lancement (livrée)
 
@@ -109,9 +109,9 @@ dépendance externe.
   les `.pth` via la variable `STARHE_WEIGHTS_DIR` injectée par Electron.
 
 **Fichiers clés** :
-- [react_ui/electron/download-models.ts](react_ui/electron/download-models.ts)
-- [react_ui/electron/download-models.html](react_ui/electron/download-models.html)
-- [react_ui/electron/download-preload.ts](react_ui/electron/download-preload.ts)
+- [renderer/electron/download-models.ts](renderer/electron/download-models.ts)
+- [renderer/electron/download-models.html](renderer/electron/download-models.html)
+- [renderer/electron/download-preload.ts](renderer/electron/download-preload.ts)
 
 ### Phase 5 — CI GitHub Actions multi-plateformes (en cours de validation)
 
@@ -151,7 +151,7 @@ on:
 ### Étapes par job (séquentielles)
 
 1. `actions/checkout@v4`
-2. `actions/setup-node@v4` — Node 20 + cache npm sur `react_ui/package-lock.json`
+2. `actions/setup-node@v4` — Node 20 + cache npm sur `renderer/package-lock.json`
 3. `actions/setup-python@v5` — Python 3.13 + cache pip
 4. `actions/setup-go@v5` — Go 1.22 + cache `go.sum`
 5. **Linux uniquement** : `apt-get install fakeroot dpkg rpm libarchive-tools`
@@ -159,7 +159,7 @@ on:
 7. **Install Python deps** : `pip install pyinstaller==6.20.0 + requirements.txt`
 8. **PyInstaller** : `pyinstaller scripts/starhe_worker.spec --noconfirm`
 9. **Fetch JRE** : `fetch_jre.sh` ou `fetch_jre.ps1` selon l'OS
-10. `npm ci` dans `react_ui/`
+10. `npm ci` dans `renderer/`
 11. **Copie `weasis-dcm2png/target/` → `dist/`** (cf. fix #3 dans le journal)
 12. `npm run build:electron`
 13. `npx electron-builder <flags> --publish never`
@@ -209,11 +209,11 @@ git checkout main
 git pull origin main
 git status   # doit être clean
 
-# 2) Bumper la version dans react_ui/package.json
+# 2) Bumper la version dans renderer/package.json
 #    IMPORTANT : la version dans package.json DOIT correspondre au tag,
 #    sinon electron-builder embarque une version incohérente dans les installeurs.
-# Éditer manuellement "version": "0.6.X" dans react_ui/package.json
-git add react_ui/package.json
+# Éditer manuellement "version": "0.6.X" dans renderer/package.json
+git add renderer/package.json
 git commit -m "chore: bump version to 0.6.X"
 git push origin main
 
@@ -293,7 +293,7 @@ et leurs fixes appliqués.
 **Erreur** :
 ```
 ⨯ ENOENT: no such file or directory, unlink
-'react_ui/release/com.medomics.starhe-plugin.pkg'
+'renderer/release/com.medomics.starhe-plugin.pkg'
 ```
 
 **Cause** : electron-builder tente de produire un `.pkg` (installeur signé
@@ -301,7 +301,7 @@ macOS) qui nécessite un certificat Apple Developer ID Installer. Sans
 certificat, la signature échoue et le fichier final n'est jamais écrit.
 
 **Fix** : retirer la cible `pkg` du `build.mac.target` dans
-[react_ui/package.json](react_ui/package.json). On garde `.dmg` (drag-and-drop)
+[renderer/package.json](renderer/package.json). On garde `.dmg` (drag-and-drop)
 et `.zip` (archive standalone), qui ne nécessitent pas de signature obligatoire.
 
 ```diff
@@ -377,7 +377,7 @@ dupliquer les fichiers dans le repo.
 #### Commit du fix global
 
 ```bash
-git add react_ui/package.json .github/workflows/release.yml
+git add renderer/package.json .github/workflows/release.yml
 git commit -m "ci: fix release workflow (drop .pkg/.AppImage, copy weasis target->dist)"
 git push origin main
 # → commit b066446
@@ -505,11 +505,11 @@ release/                                    # dossier produit par electron-build
 | Fichier | Rôle |
 |---|---|
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Workflow CI multi-plateformes |
-| [react_ui/package.json](react_ui/package.json) | Config electron-builder (section `build`) |
+| [renderer/package.json](renderer/package.json) | Config electron-builder (section `build`) |
 | [scripts/starhe_worker.spec](scripts/starhe_worker.spec) | Spec PyInstaller |
 | [scripts/fetch_jre.sh](scripts/fetch_jre.sh) / [.ps1](scripts/fetch_jre.ps1) | Téléchargement JRE Adoptium |
-| [react_ui/electron/main.ts](react_ui/electron/main.ts) | Boot Electron + spawn Go + env vars |
-| [react_ui/electron/download-models.ts](react_ui/electron/download-models.ts) | Téléchargement modèles au 1er lancement |
+| [renderer/electron/main.ts](renderer/electron/main.ts) | Boot Electron + spawn Go + env vars |
+| [renderer/electron/download-models.ts](renderer/electron/download-models.ts) | Téléchargement modèles au 1er lancement |
 | [pythonCode/modules/starhe_plugin/config.py](pythonCode/modules/starhe_plugin/config.py) | Lit `STARHE_WEIGHTS_DIR` |
 | [TODOLIST.md](TODOLIST.md) | Historique chronologique de toutes les phases |
 | [README.md](README.md) | Doc utilisateur + sections "Distribution" |
@@ -521,7 +521,7 @@ STARHE-${version}-${os}-${arch}.${ext}
 ```
 
 Identique à MEDomics. Configurée via `artifactName` dans `build.dmg`,
-`build.pkg`, `build.nsis` de [package.json](react_ui/package.json).
+`build.pkg`, `build.nsis` de [package.json](renderer/package.json).
 
 ---
 
@@ -534,4 +534,4 @@ Identique à MEDomics. Configurée via `artifactName` dans `build.dmg`,
 
 > Pour toute nouvelle release future, suivre la procédure de la
 > [section 4](#4-procédure-pour-créer-une-release) — l'essentiel est de
-> bumper `react_ui/package.json` AVANT de tagger.
+> bumper `renderer/package.json` AVANT de tagger.

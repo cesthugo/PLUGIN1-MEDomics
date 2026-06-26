@@ -49,10 +49,10 @@ react:
 	$(SHELL_REACT)
 
 electron:
-	cd react_ui && npm run dev:electron
+	cd renderer && npm run dev:electron
 
 build:
-	cd react_ui && npm run build:electron
+	cd renderer && npm run build:electron
 
 pack:
-	cd react_ui && npm run electron:pack
+	cd renderer && npm run electron:pack

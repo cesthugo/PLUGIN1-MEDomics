@@ -62,7 +62,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: react_ui/package-lock.json
+          cache-dependency-path: renderer/package-lock.json
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -146,7 +146,7 @@ jobs:
 
       # ── Étape 5 : installer + builder l'app Electron ─────────────────────────
       - name: Install npm dependencies
-        working-directory: react_ui
+        working-directory: renderer
         run: npm ci
 
       # `third_party/weasis-dcm2png/dist/` est gitignored (règle `dist/` globale)
@@ -166,11 +166,11 @@ jobs:
           ls -la "$dst" "$dst/native"
 
       - name: Build renderer + Electron main
-        working-directory: react_ui
+        working-directory: renderer
         run: npm run build:electron
 
       - name: Run electron-builder
-        working-directory: react_ui
+        working-directory: renderer
         env:
           # Évite que electron-builder essaie de signer/notariser sans certificats.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -186,7 +186,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-artifacts
-          cd react_ui/release
+          cd renderer/release
           # On garde uniquement les installeurs/distribuables finaux.
           shopt -s nullglob
           for f in *.dmg *.pkg *.zip *.deb *.AppImage *.exe; do

@@ -8,7 +8,7 @@
 #   ./scripts/fetch_jre.sh mac-x64
 #   ./scripts/fetch_jre.sh linux-x64
 #
-# Sortie : react_ui/build-resources/jre-<platform>/  (contient bin/java)
+# Sortie : renderer/build-resources/jre-<platform>/  (contient bin/java)
 # Convention package.json : extraResources copie ce dossier vers "jre/"
 # dans STARHE.app/Contents/Resources/jre/bin/java.
 #
@@ -18,7 +18,7 @@ set -euo pipefail
 
 JRE_VERSION="${JRE_VERSION:-17}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT_ROOT="$ROOT/react_ui/build-resources"
+OUT_ROOT="$ROOT/renderer/build-resources"
 
 # ── Détection plateforme ──────────────────────────────────────────────────────
 detect_platform() {

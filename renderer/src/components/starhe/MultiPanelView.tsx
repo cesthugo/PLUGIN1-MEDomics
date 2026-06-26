@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { DicomCanvas } from './DicomCanvas';
-import type { TabState, Measure } from '../types';
+import type { TabState, Measure } from '../../utilities/starhe/types';
 import type { LayoutMode } from './LayoutPickerModal';
 
 export interface MultiPanelViewProps {

@@ -9,14 +9,14 @@
 // À la fin, un tableau récapitulatif affiche risk score + nb lésions / fichier.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { loadDicom, loadDicomFile, loadMp4File, streamAnalysis } from '../api';
-import type { AnalyzeRequest } from '../api';
-import type { Detection } from '../types';
+import { loadDicom, loadDicomFile, loadMp4File, streamAnalysis } from '../../utilities/starhe/api';
+import type { AnalyzeRequest } from '../../utilities/starhe/api';
+import type { Detection } from '../../utilities/starhe/types';
 import {
   SIDEBAR_BG, MAIN_BG, BLUE, SBAR_FG, SBAR_MUTED,
   CARD_BG, CARD_BORDER, CARD_SHADOW,
   RISK_LOW_FG, RISK_HIGH_FG, SUCCESS_FG, DANGER_FG, WARN_FG,
-} from '../colors';
+} from '../../utilities/starhe/colors';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
