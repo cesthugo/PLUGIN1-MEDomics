@@ -3,13 +3,15 @@
 # Fonctionne sur macOS, Linux et Windows (Git Bash ou WSL).
 #
 # Commandes disponibles :
-#   make setup      — installe le venv Python, les dépendances et prepUS
-#   make tkinter    — lance l'interface prototype Tkinter
-#   make react      — compile et démarre le serveur Go + l'UI React/Vite
-#   make electron   — lance l'application Electron en mode développement
-#   make build      — compile les fichiers Electron (sans lancer l'app)
-#   make pack       — compile + package l'installateur distributable
-#   make help       — affiche cette aide
+#   make setup            — installe le venv Python, les dépendances et prepUS
+#   make tkinter          — lance l'interface prototype Tkinter
+#   make react            — compile et démarre le serveur Go + l'UI React/Vite
+#   make electron         — lance l'application Electron en mode développement
+#   make build            — compile les fichiers Electron (sans lancer l'app)
+#   make pack             — compile + package l'installateur distributable
+#   make cross-compile    — cross-compile le serveur Go pour mac/linux/win
+#   make build-worker     — bundle le worker Python (PyInstaller)
+#   make help             — affiche cette aide
 
 # ── Détection OS ──────────────────────────────────────────────────────────────
 ifeq ($(OS),Windows_NT)
@@ -24,19 +26,21 @@ else
 endif
 
 # ── Cibles ────────────────────────────────────────────────────────────────────
-.PHONY: help setup tkinter react electron build pack
+.PHONY: help setup tkinter react electron build pack cross-compile build-worker
 
 help:
 	@echo ""
 	@echo "STARHE — MEDomics Plugin"
 	@echo "========================"
 	@echo ""
-	@echo "  make setup      Installe le venv Python, dépendances et prepUS"
-	@echo "  make tkinter    Lance l'interface prototype Tkinter"
-	@echo "  make react      Démarre le serveur Go + UI React (développement)"
-	@echo "  make electron   Lance l'app Electron en mode développement (Vite + Electron)"
-	@echo "  make build      Compile les fichiers Electron (renderer + main, sans lancer)"
-	@echo "  make pack       Compile + package l'installateur distributable"
+	@echo "  make setup            Installe le venv Python, dépendances et prepUS"
+	@echo "  make tkinter          Lance l'interface prototype Tkinter"
+	@echo "  make react            Démarre le serveur Go + UI React (développement)"
+	@echo "  make electron         Lance l'app Electron en mode développement (Vite + Electron)"
+	@echo "  make build            Compile les fichiers Electron (renderer + main, sans lancer)"
+	@echo "  make pack             Compile + package l'installateur distributable"
+	@echo "  make cross-compile    Cross-compile le serveur Go (mac/linux/win) → renderer/build-resources/go-server/"
+	@echo "  make build-worker     Bundle le worker Python via PyInstaller → renderer/build-resources/starhe_worker/"
 	@echo ""
 
 setup:
@@ -56,3 +60,21 @@ build:
 
 pack:
 	cd renderer && npm run electron:pack
+
+cross-compile:
+	@echo "Cross-compilation du serveur Go pour toutes les plateformes..."
+	@mkdir -p renderer/build-resources/go-server
+	cd go_server && GOOS=darwin  GOARCH=arm64 go build -o ../renderer/build-resources/go-server/go-server-mac-arm64  .
+	cd go_server && GOOS=darwin  GOARCH=amd64 go build -o ../renderer/build-resources/go-server/go-server-mac-x64    .
+	cd go_server && GOOS=linux   GOARCH=amd64 go build -o ../renderer/build-resources/go-server/go-server-linux-x64  .
+	cd go_server && GOOS=windows GOARCH=amd64 go build -o ../renderer/build-resources/go-server/go-server-win-x64.exe .
+	@echo "Done → renderer/build-resources/go-server/"
+	@ls -lh renderer/build-resources/go-server/
+
+build-worker:
+	@echo "Build du worker Python via PyInstaller..."
+	cd pythonCode/modules && \
+	  source starhe_plugin/.venv/bin/activate && \
+	  pyinstaller ../../scripts/starhe_worker.spec --noconfirm \
+	              --distpath ../../renderer/build-resources
+	@echo "Done → renderer/build-resources/starhe_worker/"

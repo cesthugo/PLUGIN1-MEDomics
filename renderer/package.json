@@ -54,7 +54,7 @@
     ],
     "extraResources": [
       {
-        "from": "../third_party/weasis-dcm2png/dist",
+        "from": "build-resources/weasis-dcm2png",
         "to": "weasis-dcm2png",
         "filter": ["**/*"]
       }
@@ -64,8 +64,8 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extraResources": [
-        { "from": "../go_server/go_server", "to": "go_server/go_server" },
-        { "from": "../pythonCode/modules/dist/starhe_worker", "to": "starhe_worker" },
+        { "from": "build-resources/go-server/go-server-mac-${arch}", "to": "go_server/go_server" },
+        { "from": "build-resources/starhe_worker", "to": "starhe_worker" },
         { "from": "build-resources/jre-mac-${arch}", "to": "jre" }
       ],
       "target": [
@@ -83,8 +83,8 @@
       "synopsis": "STARHE — Plugin MEDomics (DICOM hépatique)",
       "maintainer": "MEDomics-UdeS <medomics@usherbrooke.ca>",
       "extraResources": [
-        { "from": "../go_server/go_server", "to": "go_server/go_server" },
-        { "from": "../pythonCode/modules/dist/starhe_worker", "to": "starhe_worker" },
+        { "from": "build-resources/go-server/go-server-linux-x64", "to": "go_server/go_server" },
+        { "from": "build-resources/starhe_worker", "to": "starhe_worker" },
         { "from": "build-resources/jre-linux-${arch}", "to": "jre" }
       ],
       "target": [
@@ -93,8 +93,8 @@
     },
     "win": {
       "extraResources": [
-        { "from": "../go_server/go_server.exe", "to": "go_server/go_server.exe" },
-        { "from": "../pythonCode/modules/dist/starhe_worker", "to": "starhe_worker" },
+        { "from": "build-resources/go-server/go-server-win-x64.exe", "to": "go_server/go_server.exe" },
+        { "from": "build-resources/starhe_worker", "to": "starhe_worker" },
         { "from": "build-resources/jre-win-${arch}", "to": "jre" }
       ],
       "target": [

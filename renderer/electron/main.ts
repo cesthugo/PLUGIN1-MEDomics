@@ -36,16 +36,22 @@ const RESTART_DELAYS = [1_000, 2_000, 5_000, 10_000, 30_000];
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Retourne le chemin vers le binaire go_server selon l'environnement. */
+/** Retourne le chemin vers le binaire go_server selon l'environnement et la plateforme. */
 function getGoServerBin(): string {
-  const ext = process.platform === 'win32' ? '.exe' : '';
-  const bin = `go_server${ext}`;
   if (isDev) {
-    // En développement : binaire compilé dans go_server/ à la racine du repo
-    return path.join(__dirname, '../../go_server', bin);
+    // En développement : auto-détection OS + arch → build-resources/go-server/
+    // __dirname = renderer/electron-dist/  →  ../build-resources/go-server/
+    const os   = process.platform === 'win32' ? 'win'
+               : process.platform === 'darwin' ? 'mac'
+               : 'linux';
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const ext  = process.platform === 'win32' ? '.exe' : '';
+    return path.join(__dirname, '..', 'build-resources', 'go-server',
+                     `go-server-${os}-${arch}${ext}`);
   }
-  // En production : binaire copié dans les ressources packagées
-  return path.join(process.resourcesPath, 'go_server', bin);
+  // En production : binaire copié dans les ressources packagées par electron-builder
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  return path.join(process.resourcesPath, 'go_server', `go_server${ext}`);
 }
 
 /** Ping GET /health — résout au premier 200, rejette après `timeoutMs`. */
@@ -78,7 +84,7 @@ function startGoServer(): void {
 
   if (!fs.existsSync(bin)) {
     console.warn(`[STARHE] Binaire Go introuvable : ${bin}`);
-    console.warn('[STARHE] Compilez-le d\'abord :  cd go_server && go build -o go_server .');
+    console.warn('[STARHE] Compilez-le d\'abord :  cd go_server && make cross-compile');
     return;
   }
 

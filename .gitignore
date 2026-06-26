@@ -40,8 +40,16 @@ renderer/dist/
 renderer/electron-dist/
 renderer/release/
 
-# ── JRE Temurin téléchargées par scripts/fetch_jre.sh (par plateforme, ~130 MB) ──
+# ── Ressources compilées dans renderer/build-resources/ ───────────────────────
+# JRE Temurin téléchargées par scripts/fetch_jre.sh (~130 MB par plateforme)
 renderer/build-resources/jre-*/
+# Bundle PyInstaller (~500 MB, rebuild via `make build-worker` sur chaque OS cible)
+renderer/build-resources/starhe_worker/
+# JAR weasis-dcm2png (copié depuis third_party/weasis-dcm2png/dist après build Maven)
+renderer/build-resources/weasis-dcm2png/
+# go-server/ N'EST PAS gitignored : les 4 binaires cross-compilés (~55 MB total)
+# sont committés pour que `git clone` fonctionne directement sur mac/linux/win.
+# Regénérer avec `make cross-compile` si le code Go change.
 
 # ── Build artifacts de prepUS (généré par pip install / python setup.py build) ─
 third_party/prepUS/build/

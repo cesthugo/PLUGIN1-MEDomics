@@ -3,8 +3,9 @@
 #
 # Build :
 #   cd pythonCode/modules
-#   pyinstaller ../../scripts/starhe_worker.spec --noconfirm
-# Sortie : pythonCode/modules/dist/starhe_worker/
+#   pyinstaller ../../scripts/starhe_worker.spec --noconfirm \
+#               --distpath ../../renderer/build-resources
+# Sortie : renderer/build-resources/starhe_worker/
 #
 # Mode --onedir (et non --onefile) :
 #   - Démarrage ~5× plus rapide (pas de décompression à chaque appel)
