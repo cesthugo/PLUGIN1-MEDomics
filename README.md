@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.6.3` — Last updated: June 25, 2026*
+*Version `0.6.3` — Last updated: June 26, 2026*
 
 ---
 
@@ -84,12 +84,14 @@ The plugin is distributed as a **standalone Electron application** (same approac
 
 | File | Role |
 |---|---|
-| [renderer/electron/main.ts](renderer/electron/main.ts) | Main process: splash → spawn `go_server` → wait `/health` 200 → main window |
+| [renderer/electron/main.ts](renderer/electron/main.ts) | Main process: splash → spawn `go_server` (auto-sélection binaire par plateforme) → wait `/health` 200 → main window |
 | [renderer/electron/preload.ts](renderer/electron/preload.ts) | Minimal `contextBridge`: native `openDicomFiles()` + `apiBase` |
 | [renderer/electron/splash.html](renderer/electron/splash.html) | 480×280 splash shown while the Go server starts |
-| [renderer/build-resources/](renderer/build-resources/) | `.icns` / `.ico` / `.png` icons (placeholders for now) |
+| [renderer/build-resources/](renderer/build-resources/) | Binaires Go cross-compilés, JREs, bundle PyInstaller, JAR weasis, icônes |
 
 `main.ts`:
+- **Dev mode** : auto-sélectionne `renderer/build-resources/go-server/go-server-{os}-{arch}[.exe]` depuis `process.platform` + `process.arch` (mac-arm64, mac-x64, linux-x64, win-x64)
+- **Packaged mode** : utilise `go_server/go_server[.exe]` depuis `process.resourcesPath` (copié par electron-builder)
 - Spawns `go_server` with env `PORT=8082` + `STARHE_WEASIS_DIR` pointing to the packaged resources
 - **Healthcheck**: pings `GET /health` every 300 ms, 30 s timeout — on failure, shows "Retry / Quit" dialog with MongoDB hint
 - **Exponential backoff**: auto-restarts the Go server on crash (1s → 2s → 5s → 10s → 30s)
@@ -97,14 +99,15 @@ The plugin is distributed as a **standalone Electron application** (same approac
 
 ### Bundled Resources (`extraResources`)
 
-Copied into `STARHE.app/Contents/Resources/` (macOS) or `resources/` (Linux/Windows):
+Copied into `STARHE.app/Contents/Resources/` (macOS) or `resources/` (Linux/Windows).  
+Toutes les ressources sont dans `renderer/build-resources/` — plus aucune référence extérieure à `renderer/` dans `package.json` :
 
-| Source | Destination | Size |
+| Source (`renderer/build-resources/`) | Destination dans le paquet | Taille |
 |---|---|---|
-| `go_server/go_server` | `go_server/go_server` | ~13 MB |
-| `third_party/weasis-dcm2png/dist/` | `weasis-dcm2png/` | ~18 MB JAR + OpenCV native libs |
-| `pythonCode/modules/dist/starhe_worker/` | `starhe_worker/` | ~568 MB (Python + torch + mmdet bundled via PyInstaller) |
-| `renderer/build-resources/jre-mac-${arch}/` | `jre/` | ~151 MB (Temurin 17 JRE) |
+| `go-server/go-server-{os}-{arch}[.exe]` | `go_server/go_server[.exe]` | ~13 MB par plateforme (4 binaires cross-compilés, **committés dans le repo**) |
+| `weasis-dcm2png/` | `weasis-dcm2png/` | ~31 MB JAR + libs OpenCV natives (macOS — rebuild Maven sur Linux/Windows) |
+| `starhe_worker/` | `starhe_worker/` | ~568 MB (Python + torch + mmdet — PyInstaller, **gitignored**, rebuild via `make build-worker`) |
+| `jre-{os}-{arch}/` | `jre/` | ~130–151 MB Temurin 17 JRE (**gitignored**, fetch via `scripts/fetch_jre.sh`) |
 
 > **MongoDB remains an external prerequisite** (MEDomics consistency) — not bundled. If MongoDB is down, the user sees the "Retry / Quit" dialog with instructions.
 
@@ -113,7 +116,7 @@ Copied into `STARHE.app/Contents/Resources/` (macOS) or `resources/` (Linux/Wind
 | Tool | Version | Why |
 |---|---|---|
 | Node.js | 18+ | electron-builder + Vite |
-| Go | 1.21+ | Compile `go_server` before packaging |
+| Go | 1.21+ | Only needed if Go source changed — run `make cross-compile` to regenerate the 4 cross-compiled binaries. Pre-built binaries are **committed in the repo** (not required for a simple `git clone`). |
 | Python 3.13 + venv | — | Compile the PyInstaller worker (`pythonCode/modules/starhe_plugin/.venv/`) |
 | PyInstaller | 6.20+ | `pip install pyinstaller` in the venv |
 | `curl` + `tar` (Unix) or PowerShell (Win) | — | Download the Temurin JRE via `scripts/fetch_jre.{sh,ps1}` |
@@ -122,15 +125,17 @@ Copied into `STARHE.app/Contents/Resources/` (macOS) or `resources/` (Linux/Wind
 ### Build locally
 
 ```bash
-# 1. Compile the Go binary for the current platform
-(cd go_server && go build -o go_server .)        # Mac/Linux
-# Windows: go build -o go_server.exe .
+# 1. (Optional) Re-cross-compile Go binaries — only if go_server/ source changed.
+#    Pre-built binaries for mac/linux/win are already committed in the repo.
+make cross-compile
+# Produces: renderer/build-resources/go-server/go-server-{mac-arm64,mac-x64,linux-x64,win-x64.exe}
 
 # 2. Bundle the Python worker (--onedir, ~5-10 min, ~530 MB)
 cd pythonCode/modules
-pyinstaller ../../scripts/starhe_worker.spec --noconfirm
-# Produces: pythonCode/modules/dist/starhe_worker/starhe_worker
-# Test:     ./dist/starhe_worker/starhe_worker --module pipeline --help
+pyinstaller ../../scripts/starhe_worker.spec --noconfirm \
+            --distpath ../../renderer/build-resources
+# Produces: renderer/build-resources/starhe_worker/starhe_worker
+# Test:     ../../renderer/build-resources/starhe_worker/starhe_worker --module pipeline --help
 
 # 3. Download the Temurin 17 JRE for the current platform (~130 MB)
 cd ../..
@@ -234,7 +239,7 @@ The [.github/workflows/release.yml](.github/workflows/release.yml) workflow buil
 | `ubuntu-latest` | `linux-x64` | `.deb` | ~12 min (torch CPU-only) |
 | `windows-latest` | `win-x64` | `.exe` (NSIS) | ~9 min |
 
-Each job: disk cleanup (Linux, ~25 GB) → Go build → Python deps + torch CPU-only (Linux) + `pyinstaller starhe_worker.spec` (cached on hit) → `fetch_jre.{sh,ps1} <platform>` → `npm ci` + `npm run build:electron` → `npx electron-builder <flags>` → upload installers. The final `release` job aggregates artifacts, computes `SHA256SUMS.txt`, and creates a **draft GitHub release** via `softprops/action-gh-release@v2`.
+Each job: disk cleanup (Linux, ~25 GB) → Python deps + torch CPU-only (Linux) + `pyinstaller starhe_worker.spec --distpath ../../renderer/build-resources` (cached on hit) → `fetch_jre.{sh,ps1} <platform>` → `npm ci` + `npm run build:electron` → `npx electron-builder <flags>` → upload installers. Go binaries are **pre-built and committed** — no Go compilation step needed in CI. The final `release` job aggregates artifacts, computes `SHA256SUMS.txt`, and creates a **draft GitHub release** via `softprops/action-gh-release@v2`.
 
 **Trigger a new release**:
 
@@ -592,13 +597,14 @@ The `renderer/` folder follows the MEDomics `renderer/` layout convention (page 
 
 ```
 renderer/src/
-  pages/starhe/          → StarhePlugin.tsx  (root component, global state)
+  pages/                 → StarhePlugin.tsx  (root component, global state)
   components/starhe/     → 14 React components (Sidebar, DicomCanvas, BatchModal…)
   utilities/starhe/      → api.ts · types.ts · colors.ts · utils.ts
   utilities/starhe/hooks/→ usePipelineSSE · usePlayback · useCanvasInteractions · …
   styles/starhe/         → StarhePlugin.css
 renderer/public/images/  → static assets (medomics_logo.png)
 renderer/electron/       → Electron main process (main.ts, preload.ts, splash.html…)
+renderer/build-resources/→ go-server/ · starhe_worker/ · weasis-dcm2png/ · jre-{os}-{arch}/
 ```
 
 ### Stack
@@ -647,8 +653,15 @@ renderer/electron/       → Electron main process (main.ts, preload.ts, splash.
 ```bash
 # Or manually (macOS / Linux):
 lsof -ti :8082 | xargs kill -9 2>/dev/null
-cd go_server && go build -o go_server . && ./go_server &
+# Go binaries are pre-built in renderer/build-resources/go-server/ — pick your platform:
+./renderer/build-resources/go-server/go-server-mac-arm64 &   # macOS Apple Silicon
+# ./renderer/build-resources/go-server/go-server-mac-x64 &   # macOS Intel
+# ./renderer/build-resources/go-server/go-server-linux-x64 & # Linux
 cd renderer && npm run dev
+
+# Windows (PowerShell):
+# Start-Process renderer\build-resources\go-server\go-server-win-x64.exe
+# cd renderer; npm run dev
 
 # Type-check + production build
 cd renderer && npm run build
