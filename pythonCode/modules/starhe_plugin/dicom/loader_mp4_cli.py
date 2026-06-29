@@ -18,7 +18,7 @@ Format de sortie identique à loader_cli.py :
   "base_fps":           25.0,
   "original_sensitive": [],
   "kept_metadata":      [["FPS", "25.00"], ["Frames", "100"], ["Durée", "4.00 s"]],
-  "patient_name":       "Vidéo MP4",
+  "patient_name":       "MP4 Video",
   "study_date":         "",
   "frames_b64":         ["<jpeg-base64>", ...]
 }
@@ -105,7 +105,7 @@ def load_mp4_and_encode(
         "base_fps":           fps,
         "original_sensitive": [],
         "kept_metadata":      kept_metadata,
-        "patient_name":       "Vidéo MP4",
+        "patient_name":       "MP4 Video",
         "study_date":         "",
         "frames_b64":         frames_b64,
     }

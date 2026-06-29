@@ -139,7 +139,7 @@ const Spinner: React.FC = () => {
   useEffect(() => { injectSpinKeyframes(); }, []);
   return (
     <div
-      aria-label="Chargement"
+      aria-label="Loading"
       style={{
         width: 30, height: 30,
         border: `3px solid ${CARD_BORDER}`,
@@ -186,7 +186,7 @@ const FilePreview: React.FC<{ files: File[]; max: number }> = ({ files, max }) =
       ))}
       {rest > 0 && (
         <li style={{ fontSize: 11, color: '#475569', paddingTop: 3 }}>
-          … et {rest} autre{rest > 1 ? 's' : ''}
+          … and {rest} more
         </li>
       )}
     </ul>
@@ -295,7 +295,7 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
       <div
         role="button"
         tabIndex={0}
-        aria-label="Zone d'import DICOM — clic ou glisser-déposer"
+        aria-label="DICOM import area — click or drag & drop"
         aria-busy={loading}
         style={zoneStyle}
         onClick={handleClick}
@@ -312,10 +312,10 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
           <>
             <Spinner />
             <span style={{ color: SBAR_FG, fontSize: 13, fontWeight: 600 }}>
-              Scan en cours…
+              Scanning…
             </span>
             <span style={{ color: SBAR_MUTED, fontSize: 11 }}>
-              Lecture récursive des sous-dossiers
+              Recursively reading subfolders
             </span>
           </>
         )}
@@ -325,11 +325,11 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
           <>
             <span style={{ fontSize: 26, lineHeight: 1 }}>✅</span>
             <span style={{ color: SUCCESS_FG, fontSize: 14, fontWeight: 700 }}>
-              {files.length} fichier{files.length > 1 ? 's' : ''} DICOM chargé{files.length > 1 ? 's' : ''}
+              {files.length} DICOM file{files.length > 1 ? 's' : ''} loaded
             </span>
             <FilePreview files={files} max={maxPreview} />
             <span style={{ color: SBAR_MUTED, fontSize: 10, marginTop: 4 }}>
-              Cliquer ou déposer à nouveau pour remplacer
+              Click or drop again to replace
             </span>
           </>
         )}
@@ -346,8 +346,8 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
 
             <span style={{ color: SBAR_FG, fontSize: 14, fontWeight: 600, textAlign: 'center' }}>
               {isDragOver
-                ? 'Relâcher pour importer le dossier'
-                : 'Déposer un dossier ou sélectionner des fichiers'}
+                ? 'Release to import folder'
+                : 'Drop a folder or select files'}
             </span>
 
             <span style={{ color: SBAR_MUTED, fontSize: 11, textAlign: 'center', lineHeight: 1.6 }}>
@@ -356,17 +356,17 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
                 background: 'rgba(147,197,253,0.10)', color: '#93c5fd',
                 borderRadius: 3, padding: '1px 4px', fontSize: 10,
               }}>.dcm</code>
-              {' '}· Dossiers entiers avec sous-dossiers récursifs
+              {' '}· Entire folders with recursive subfolders
             </span>
 
             {/* Bouton principal (stopPropagation pour éviter le double déclenchement) */}
             <UploadButton
-              label="Sélectionner des fichiers"
+              label="Select files"
               onClick={(e) => { e.stopPropagation(); handleClick(); }}
             />
 
             <span style={{ color: '#334155', fontSize: 10 }}>
-              ou glisser-déposer un dossier DICOM ici
+              or drag & drop a DICOM folder here
             </span>
           </>
         )}

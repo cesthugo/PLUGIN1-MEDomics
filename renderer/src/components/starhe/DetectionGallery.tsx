@@ -23,7 +23,7 @@ function FrameThumb({ b64, dets, frameIdx, imgW, imgH, onClick }: ThumbProps) {
   return (
     <div
       onClick={onClick}
-      title={`Frame ${frameIdx + 1} — ${dets.length} lésion(s)`}
+      title={`Frame ${frameIdx + 1} — ${dets.length} lesion(s)`}
       style={{
         margin: '5px 7px',
         cursor: 'pointer',
@@ -98,7 +98,7 @@ function FrameThumb({ b64, dets, frameIdx, imgW, imgH, onClick }: ThumbProps) {
           Frame {frameIdx + 1}
         </span>
         <span style={{ fontSize: 10, color: '#f59e0b' }}>
-          {dets.length} lésion{dets.length > 1 ? 's' : ''}
+          {dets.length} lesion{dets.length > 1 ? 's' : ''}
         </span>
       </div>
     </div>
@@ -155,13 +155,13 @@ export function DetectionGallery({
             color: textColor ?? '#9ca3af',
             letterSpacing: '0.05em', textTransform: 'uppercase',
           }}>
-            Frames détectées
+            Detected frames
           </span>
         </div>
         <div style={{ fontSize: 10, color: SBAR_MUTED, marginTop: 4, paddingLeft: 9 }}>
           {detFrames.length === 0
-            ? 'Aucune lésion détectée'
-            : `${detFrames.length} frame${detFrames.length > 1 ? 's' : ''} avec lésion${detFrames.length > 1 ? 's' : ''}`}
+            ? 'No lesion detected'
+            : `${detFrames.length} frame${detFrames.length > 1 ? 's' : ''} with lesion${detFrames.length > 1 ? 's' : ''}`}
         </div>
       </div>
 
@@ -175,7 +175,7 @@ export function DetectionGallery({
             textAlign: 'center',
             lineHeight: 1.6,
           }}>
-            Lancez l'analyse<br />STARHE DETECT<br />pour voir les résultats.
+            Run STARHE DETECT<br />analysis to see<br />results.
           </div>
         ) : (
           detFrames.map(({ i, dets }) => (

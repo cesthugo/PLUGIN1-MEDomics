@@ -228,13 +228,13 @@ export function Sidebar({
       <div style={S.scrollArea}>
 
         {/* FICHIER DICOM */}
-        <SH title="Fichier DICOM" />
+        <SH title="DICOM file" />
         <div style={{ padding: '6px 10px 3px' }}>
           {/* Bouton fractionné : dossier entier | fichiers individuels */}
           <div style={{ display: 'flex', width: '100%', gap: 0 }}>
             <button
               onClick={onLoadDicom}
-              title="Sélectionner un dossier — charge tous les fichiers DICOM à l'intérieur"
+              title="Select a folder — loads all DICOM files inside"
               style={{
                 flex: 1, display: 'flex', alignItems: 'center', gap: 6,
                 background: '#131f2e', border: '1px solid #1e2d45',
@@ -246,12 +246,12 @@ export function Sidebar({
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#1a2d44'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#2563eb'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#131f2e'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#1e2d45'; }}
             >
-              <span style={{ fontSize: 14 }}>📁</span> Dossier DICOM
+              <span style={{ fontSize: 14 }}>📁</span> DICOM Folder
             </button>
             <div style={{ width: 1, background: '#1e2d45', flexShrink: 0 }} />
             <button
               onClick={onLoadDicomFiles}
-              title="Sélectionner manuellement un ou plusieurs fichiers DICOM"
+              title="Manually select one or more DICOM files"
               style={{
                 flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: '#131f2e', border: '1px solid #1e2d45',
@@ -266,15 +266,15 @@ export function Sidebar({
             </button>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 2px 0' }}>
-            <span style={{ fontSize: 9, color: '#475569', flex: 1, textAlign: 'center' }}>Dossier entier</span>
-            <span style={{ fontSize: 9, color: '#475569', width: 36, textAlign: 'center' }}>Fichiers</span>
+            <span style={{ fontSize: 9, color: '#475569', flex: 1, textAlign: 'center' }}>Entire folder</span>
+            <span style={{ fontSize: 9, color: '#475569', width: 36, textAlign: 'center' }}>Files</span>
           </div>
           {/* Bouton MP4 */}
           {onLoadMp4 && (
             <div style={{ marginTop: 5 }}>
               <button
                 onClick={onLoadMp4}
-                title="Charger un fichier MP4 directement (sans DICOM)"
+                title="Load an MP4 file directly (without DICOM)"
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: 6,
                   background: '#141e14', border: '1px solid #1e3d1e',
@@ -285,7 +285,7 @@ export function Sidebar({
                 onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#1a3020'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#22c55e'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#141e14'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#1e3d1e'; }}
               >
-                <span style={{ fontSize: 14 }}>📹</span> Charger MP4
+                <span style={{ fontSize: 14 }}>📹</span> Load MP4
               </button>
             </div>
           )}
@@ -304,13 +304,13 @@ export function Sidebar({
               <input
                 value={pathInput}
                 onChange={e => setPathInput(e.target.value)}
-                placeholder="/chemin/absolu/fichier.dcm"
+                placeholder="/absolute/path/file.dcm"
                 style={{
                   flex: 1, background: '#0d0d14', border: '1px solid #2a3245',
                   borderRadius: 3, color: SBAR_FG, fontSize: 10,
                   padding: '3px 6px', outline: 'none',
                 }}
-                title="Mode dev — saisir le chemin absolu du fichier DICOM"
+                title="Dev mode — enter the absolute path of the DICOM file"
               />
               <button
                 type="submit"
@@ -324,12 +324,12 @@ export function Sidebar({
           </div>
         )}
         <div style={{ padding: '2px 14px 0', fontSize: 11, color: data ? SBAR_FG : SBAR_MUTED, wordBreak: 'break-all' }}>
-          {data ? data.fileName : 'Aucun fichier sélectionné'}
+          {data ? data.fileName : 'No file selected'}
         </div>
         {data && (
           <div style={{ padding: '2px 14px 6px', fontSize: 11, color: SBAR_MUTED, fontFamily: "'Consolas', monospace", lineHeight: 1.7 }}>
-            Modalité : {data.modality}{'\n'}
-            Taille   : {data.rows}×{data.cols}{'\n'}
+            Modality : {data.modality}{'\n'}
+            Size     : {data.rows}×{data.cols}{'\n'}
             Frames   : {data.frameCount}{'\n'}
             Pixel    : {data.pixelSpacing ? `${data.pixelSpacing[0].toFixed(3)} mm/px` : 'N/A'}
           </div>
@@ -372,12 +372,12 @@ export function Sidebar({
             onChange={e => onLoopChange(e.target.checked)}
             style={{ accentColor: BLUE }}
           />
-          Boucle
+          Loop
         </label>
 
         <div style={{ padding: '2px 10px 0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 4px', fontSize: 11, color: SBAR_MUTED }}>
-            <span>Vitesse :</span>
+            <span>Speed:</span>
             <span style={{ color: SBAR_FG }}>×{speed.toFixed(2)}</span>
           </div>
           <input
@@ -392,11 +392,11 @@ export function Sidebar({
         </div>
 
         <div style={{ padding: '0 10px 6px' }}>
-          <SBtn onClick={onResetVideo} small>⏮   Revenir au début</SBtn>
+          <SBtn onClick={onResetVideo} small>⏮   Go to start</SBtn>
         </div>
 
         {/* ANALYSE IA */}
-        <SH title="Analyse IA" />
+        <SH title="AI Analysis" />
 
         {/* ── Sélecteur de modèles (dropdown) ────────────────────────── */}
         <div style={{ padding: '6px 10px 2px' }}>
@@ -412,7 +412,7 @@ export function Sidebar({
             }}
           >
             <span>
-              🤖&nbsp;&nbsp;Modèles&nbsp;:
+              🤖&nbsp;&nbsp;Models&nbsp;:
               <span style={{ color: '#93c5fd', marginLeft: 6, fontWeight: 700 }}>
                 {analysisMode === 'both'        ? 'RISK + DETECT'
                  : analysisMode === 'risk_only' ? 'RISK'
@@ -429,8 +429,8 @@ export function Sidebar({
               padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 8,
             }}>
               {([
-                { key: 'risk',   label: 'STARHE RISK',   desc: 'Risque CHC (C3D)' },
-                { key: 'detect', label: 'STARHE DETECT', desc: 'Détection lésions (RTMDet)' },
+                { key: 'risk',   label: 'STARHE RISK',   desc: 'HCC risk (C3D)' },
+                { key: 'detect', label: 'STARHE DETECT', desc: 'Lesion detection (RTMDet)' },
               ] as const).map(({ key, label, desc }) => {
                 const checked = key === 'risk'
                   ? analysisMode !== 'detect_only'
@@ -472,25 +472,25 @@ export function Sidebar({
             primary
           >
             {'\uD83E\uDDE0\u2003'}
-            {analysisMode === 'both'        ? 'Lancer STARHE RISK + DETECT' :
-             analysisMode === 'risk_only'   ? 'Lancer STARHE RISK' :
-                                             'Lancer STARHE DETECT'}
+            {analysisMode === 'both'        ? 'Run STARHE RISK + DETECT' :
+             analysisMode === 'risk_only'   ? 'Run STARHE RISK' :
+                                             'Run STARHE DETECT'}
           </SBtn>
         </div>
         <div style={{ padding: '0 10px 4px' }}>
           <SBtn onClick={onResetAnalysis} disabled={!data} small>
-            🗑   Réinitialiser l'analyse
+            🗑   Reset analysis
           </SBtn>
         </div>
         <div style={{ padding: '0 10px 4px' }}>
-          <SBtn onClick={onOpenLive} accent>📡   Analyse en direct</SBtn>
+          <SBtn onClick={onOpenLive} accent>📡   Live analysis</SBtn>
         </div>
         <div style={{ padding: '0 10px 10px' }}>
-          <SBtn onClick={onOpenBatch} accent>📋   Analyse en lot (batch)</SBtn>
+          <SBtn onClick={onOpenBatch} accent>📋   Batch analysis</SBtn>
         </div>
 
         {/* RÉSULTATS */}
-        <SH title="Résultats" />
+        <SH title="Results" />
         <ResultRow
           label="Mode :"
           value={
@@ -503,24 +503,24 @@ export function Sidebar({
         />
         {analysisMode !== 'detect_only' && (
           <ResultRow
-            label="Risque CHC (STARHE RISK) :"
+            label="HCC Risk (STARHE RISK):"
             value={result?.riskText || (mode ? '—' : '—')}
             fg={result?.riskFg ?? SBAR_MUTED}
           />
         )}
         {analysisMode !== 'risk_only' && (
           <ResultRow
-            label="Lésions (STARHE DETECT) :"
-            value={result?.detText ?? (analysisStatus === 'running' ? '⏳ analyse…' : '—')}
+            label="Lesions (STARHE DETECT):"
+            value={result?.detText ?? (analysisStatus === 'running' ? '⏳ analyzing…' : '—')}
             fg={result?.detFg ?? SBAR_MUTED}
           />
         )}
 
         {/* MÉTADONNÉES CONSERVÉES */}
-        <SH title="Métadonnées conservées" />
+        <SH title="Preserved metadata" />
         <div style={S.mono}>
           {keptMeta.length === 0
-            ? '  (aucune métadonnée trouvée)'
+            ? '  (no metadata found)'
             : keptMeta.map(([lbl, val]) => {
               const valS = val.length > 24 ? val.slice(0, 21) + '…' : val;
               return `  ${lbl.padEnd(14)} ${valS}\n`;
@@ -528,10 +528,10 @@ export function Sidebar({
         </div>
 
         {/* TAGS ANONYMISÉS */}
-        <SH title="Tags anonymisés" />
+        <SH title="Anonymized tags" />
         <div style={S.monoRed}>
           {origSensitive.length === 0
-            ? '  (aucun tag sensible trouvé)'
+            ? '  (no sensitive tag found)'
             : origSensitive.map(([name, val]) => {
               const valS = val.length > 22 ? val.slice(0, 19) + '…' : val;
               return `  ✗ ${name.padEnd(20)} ${valS}\n`;
@@ -543,7 +543,7 @@ export function Sidebar({
       {/* ── Pied de sidebar : thème ──────────────────────────────────────── */}
       <div style={S.footer}>
         <SBtn onClick={onToggleTheme} small>
-          {darkMode ? '☀   Thème clair' : '🌙   Thème sombre'}
+          {darkMode ? '☀   Light theme' : '🌙   Dark theme'}
         </SBtn>
       </div>
     </div>

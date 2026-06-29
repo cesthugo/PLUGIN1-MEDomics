@@ -60,7 +60,7 @@ function makeDefaultTab(): TabState {
   return {
     id:              nextTabId(),
     label:           '—',
-    patientName:     'Patient inconnu',
+    patientName:     'Unknown patient',
     dicomPath:       '',
     data:            null,
     frameIdx:        0,
@@ -247,7 +247,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
     });
     setActivePatientName(data.patientName);
-    addLog(`DICOM chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
+    addLog(`DICOM loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
   // ── Injection d'un onglet MP4 après chargement réussi ────────────────────
@@ -260,7 +260,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     const newTab: TabState = {
       ...makeDefaultTab(),
       label,
-      patientName: 'Vidéo MP4',
+      patientName: 'MP4 Video',
       dicomPath: serverPath,
       isMp4: true,
       data,
@@ -268,22 +268,22 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newTab.id);
     setPatients(prev => {
-      const existIdx = prev.findIndex(p => p.name === 'Vidéo MP4');
+      const existIdx = prev.findIndex(p => p.name === 'MP4 Video');
       if (existIdx >= 0) {
         const updated = [...prev];
         updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
         return updated;
       }
-      return [...prev, { name: 'Vidéo MP4', tabIds: [newTab.id] }];
+      return [...prev, { name: 'MP4 Video', tabIds: [newTab.id] }];
     });
-    setActivePatientName('Vidéo MP4');
-    addLog(`MP4 chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
+    setActivePatientName('MP4 Video');
+    addLog(`MP4 loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
   // ── Ouverture d'un résultat batch en onglet (helper partagé) ─────────────
   const openBatchResultAsTab = useCallback(async (result: BatchResultToOpen): Promise<number> => {
     const name = result.name;
-    addLog(`Chargement : ${name}`, 'info');
+    addLog(`Loading: ${name}`, 'info');
     const data = await loadDicom(result.serverPath);
     const label = makeTabLabel(data.studyDate, data.fileName);
     const newTab: TabState = {
@@ -296,7 +296,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       resultsBy: result.risk ? { original: {
         riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
         riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
-        detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lésion(s)`,
+        detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lesion(s)`,
         detFg:    '#facc15',
       }} : {},
     };
@@ -311,7 +311,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
     });
     setActivePatientName(data.patientName);
-    addLog(`DICOM chargé avec résultats — ${data.frameCount} frame(s).`, 'success');
+    addLog(`DICOM loaded with results — ${data.frameCount} frame(s).`, 'success');
     return newTab.id;
   }, [addLog]);
 
@@ -319,13 +319,13 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const doLoadPath = useCallback(async (path: string, displayName: string) => {
     if (loadingPaths.has(path)) return;
     setLoadingPaths(prev => new Set([...prev, path]));
-    addLog(`Chargement : ${displayName}`, 'info');
+    addLog(`Loading: ${displayName}`, 'info');
     try {
       const data = await loadDicom(path);
       addTab(displayName, path, data);
     } catch (err: unknown) {
       const msg = err instanceof Error
-        ? (err.message || err.name || 'Erreur inconnue')
+        ? (err.message || err.name || 'Unknown error')
         : String(err);
       const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
       addLog(`ERREUR chargement ${displayName} : ${msg}${hint}`, 'error');
@@ -338,13 +338,13 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const doLoadFile = useCallback(async (file: File) => {
     if (loadingPaths.has(file.name)) return;
     setLoadingPaths(prev => new Set([...prev, file.name]));
-    addLog(`Chargement : ${file.name}`, 'info');
+    addLog(`Loading: ${file.name}`, 'info');
     try {
       const data = await loadDicomFile(file);
       addTab(file.name, data.serverPath || file.name, data);
     } catch (err: unknown) {
       const msg = err instanceof Error
-        ? (err.message || err.name || 'Erreur inconnue')
+        ? (err.message || err.name || 'Unknown error')
         : String(err);
       const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
       addLog(`ERREUR chargement ${file.name} : ${msg}${hint}`, 'error');
@@ -419,13 +419,13 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const doLoadMp4File = useCallback(async (file: File) => {
     if (loadingPaths.has(file.name)) return;
     setLoadingPaths(prev => new Set([...prev, file.name]));
-    addLog(`Chargement MP4 : ${file.name}`, 'info');
+    addLog(`Loading MP4: ${file.name}`, 'info');
     try {
       const data = await loadMp4File(file);
       addMp4Tab(file.name, data.serverPath || file.name, data);
     } catch (err: unknown) {
       const msg = err instanceof Error
-        ? (err.message || err.name || 'Erreur inconnue')
+        ? (err.message || err.name || 'Unknown error')
         : String(err);
       const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
       addLog(`ERREUR chargement MP4 ${file.name} : ${msg}${hint}`, 'error');
@@ -518,14 +518,14 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const onResetAnalysis = useCallback(async () => {
     if (!activeTab?.dicomPath) return;
     const ok = window.confirm(
-      `Supprimer les résultats STARHE en cache pour :\n${activeTab.dicomPath} ?`
+      `Delete cached STARHE results for:\n${activeTab.dicomPath}?`
     );
     if (!ok) return;
     try {
       const { deleted } = await deleteCache(activeTab.dicomPath);
-      addLog(`✓  Résultat MongoDB supprimé (${deleted} doc).`, 'success');
+      addLog(`✓  MongoDB result deleted (${deleted} doc).`, 'success');
     } catch {
-      addLog('⚠  Aucun résultat en cache à supprimer.', 'warning');
+      addLog('⚠  No cached result to delete.', 'warning');
     }
     updateActiveTab(t => ({
       ...t,
@@ -823,7 +823,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         <div style={{ marginLeft: 'auto', paddingRight: 12 }}>
           <button
             onClick={() => setShowSettings(v => !v)}
-            title="Réglages d'affichage"
+            title="Display settings"
             style={{
               background: showSettings ? SIDEBAR_HOV : 'none',
               border: '1px solid ' + (showSettings ? '#3a4860' : 'transparent'),
@@ -839,7 +839,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             onMouseEnter={e => { if (!showSettings) (e.currentTarget as HTMLElement).style.background = '#1e1d2f'; }}
             onMouseLeave={e => { if (!showSettings) (e.currentTarget as HTMLElement).style.background = 'none'; }}
           >
-            ⚙&nbsp;Réglages
+            ⚙&nbsp;Settings
           </button>
         </div>
       </div>
@@ -910,12 +910,12 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
               }}
             >
               <span style={{ fontSize: 12, fontWeight: 700, color: cardTitleFg }}>
-                Visionneuse DICOM
+                DICOM Viewer
               </span>
               {/* Bouton disposition multi-panneaux */}
               <button
                 onClick={onOpenLayoutPicker}
-                title="Choisir la disposition des panneaux"
+                title="Choose panel layout"
                 style={{
                   marginLeft: 10, background: multiPanel ? '#1e3a5f' : 'none',
                   border: `1px solid ${multiPanel ? '#3b82f6' : 'transparent'}`,
@@ -928,7 +928,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
                 onMouseEnter={e => { if (!multiPanel) (e.currentTarget as HTMLElement).style.background = '#1e293b'; }}
                 onMouseLeave={e => { if (!multiPanel) (e.currentTarget as HTMLElement).style.background = 'none'; }}
               >
-                ⊞ Disposition
+                ⊞ Layout
               </button>
               {/* Boutons zoom */}
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2, paddingRight: 8 }}>
@@ -1029,7 +1029,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       {/* ── Dialogues flottants ────────────────────────────────────────────── */}
       {showContrast && (
         <AdjustDialog
-          title="Contraste"
+          title="Contrast"
           initial={activeTab?.contrast ?? 1}
           min={0.1} max={3} neutral={1}
           onClose={() => setShowContrast(false)}
@@ -1038,7 +1038,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       )}
       {showBrightness && (
         <AdjustDialog
-          title="Luminosité"
+          title="Brightness"
           initial={activeTab?.brightness ?? 0}
           min={-50} max={100} neutral={0}
           onClose={() => setShowBrightness(false)}
@@ -1097,7 +1097,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             setShowBatch(false);
             // Charge le DICOM pour obtenir les frames
             const name = result.name;
-            addLog(`Chargement : ${name}`, 'info');
+            addLog(`Loading: ${name}`, 'info');
             try {
               const data = await (result.serverPath
                 ? (await import('../utilities/starhe/api')).loadDicom(result.serverPath)
@@ -1117,7 +1117,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
                   ? { original: {
                       riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
                       riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
-                      detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lésion(s)`,
+                      detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lesion(s)`,
                       detFg:    '#facc15',
                     }}
                   : {},
@@ -1134,7 +1134,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
                 return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
               });
               setActivePatientName(data.patientName);
-              addLog(`DICOM chargé avec résultats — ${data.frameCount} frame(s).`, 'success');
+              addLog(`DICOM loaded with results — ${data.frameCount} frame(s).`, 'success');
             } catch (err: unknown) {
               const msg = err instanceof Error ? err.message : String(err);
               addLog(`ERREUR ouverture ${name} : ${msg}`, 'error');

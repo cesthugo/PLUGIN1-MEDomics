@@ -134,7 +134,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
     if (source === 'hdmi')    body.device      = Number(hdmiDevice);
 
     setState(s => ({ ...s, running: true, fps: 0, frames: 0 }));
-    addLog('Démarrage de l\'analyse en direct…', 'info');
+    addLog('Starting live analysis…', 'info');
 
     try {
       const res = await fetch(`${getApiBase()}/starhe/live`, {
@@ -190,7 +190,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
               const nDet = dets.length;
               setState(s => ({
                 ...s, lastDets: dets,
-                detText: `${nDet} détection(s)`,
+                detText: `${nDet} detection(s)`,
                 detFg:   nDet > 0 ? WARN_FG : SUCCESS_FG,
               }));
             }
@@ -220,7 +220,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
     lastFrameB64Ref.current = null;
     lastDetsRef.current = [];
     setState(s => ({ ...s, running: false }));
-    addLog('Analyse en direct arrêtée.', 'info');
+    addLog('Live analysis stopped.', 'info');
   }, [addLog]);
 
   // ── Rendu ─────────────────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
 
             {source === 'folder' && (
               <>
-                <SH title="Dossier à surveiller" />
+                <SH title="Folder to monitor" />
                 <div style={{ padding: '4px 10px 8px' }}>
                   <input
                     type="text" value={folderPath}
@@ -343,7 +343,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
 
             {source === 'hdmi' && (
               <>
-                <SH title="Périphérique HDMI" />
+                <SH title="HDMI device" />
                 <div style={{ padding: '4px 10px 8px' }}>
                   <input
                     type="number" value={hdmiDevice}
@@ -362,7 +362,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
               </>
             )}
 
-            <SH title="Contrôles" />
+            <SH title="Controls" />
             <div style={{ padding: '4px 10px 8px' }}>
               {!state.running
                 ? <LBtn onClick={startLive} primary>▶   Démarrer</LBtn>
@@ -376,7 +376,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
               Frames : {state.frames}
             </div>
 
-            <SH title="Résultats" />
+            <SH title="Results" />
             <div style={{ padding: '4px 14px 8px' }}>
               <div style={{ fontSize: 11, color: SBAR_MUTED }}>
                 Risque CHC :{' '}

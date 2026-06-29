@@ -265,7 +265,7 @@ export function DicomCanvas({
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(
-        'Aucun DICOM chargé — utilisez « Charger un fichier DICOM » dans le panneau latéral',
+        'No DICOM loaded — use "Load DICOM file" in the sidebar',
         canvasSize.w / 2, canvasSize.h / 2,
       );
       ctx.textAlign = 'left';
@@ -414,7 +414,7 @@ export function DicomCanvas({
               fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
             }}
           >
-            {viewMode === 'pan' ? '✋ Pan' : viewMode === 'measure' ? '📏 Mesure' : '↕ Série'}
+            {viewMode === 'pan' ? '✋ Pan' : viewMode === 'measure' ? '📏 Measure' : '↕ Series'}
           </span>
         )}
       </div>

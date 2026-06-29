@@ -115,7 +115,7 @@ export function AdjustDialog({
             borderRadius: 3,
           }}
         >
-          Réinitialiser
+          Reset
         </button>
       </div>
     </div>

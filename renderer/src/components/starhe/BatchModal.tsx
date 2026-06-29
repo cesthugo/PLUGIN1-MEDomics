@@ -105,7 +105,7 @@ function BatchRow({ item, onRemove }: { item: BatchItem; onRemove: () => void })
         </div>
         <div style={{ fontSize: 11, color: statusColor(item.status) }}>
           {item.status === 'done'
-            ? `Risque : ${item.riskLabel ?? '—'}${item.riskScore !== undefined ? ` (${(item.riskScore * 100).toFixed(1)} %)` : ''} · ${item.detCount ?? 0} lésion(s)`
+            ? `Risk: ${item.riskLabel ?? '—'}${item.riskScore !== undefined ? ` (${(item.riskScore * 100).toFixed(1)} %)` : ''} · ${item.detCount ?? 0} lesion(s)`
             : item.status === 'error'
             ? item.error
             : item.progress || '—'}
@@ -261,14 +261,14 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      update(item.id, { status: 'error', error: `Chargement échoué : ${msg}` });
+      update(item.id, { status: 'error', error: `Loading failed: ${msg}` });
       return;
     }
 
     if (cancelledRef.current) return;
 
     // 2. Analyse SSE
-    update(item.id, { status: 'analyzing', progress: 'Démarrage de l\'analyse…' });
+    update(item.id, { status: 'analyzing', progress: 'Starting analysis…' });
     const req: AnalyzeRequest = item.isMp4
       ? {
           mp4Path:            serverPath,
@@ -314,7 +314,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
         () => {
           abortMapRef.current.delete(item.id);
           update(item.id, {
-            status: 'done', progress: 'Terminé', serverPath,
+            status: 'done', progress: 'Done', serverPath,
             riskScore, riskLabel,
             detCount:   detCount ?? 0,
             detections: detections ?? [],
@@ -388,22 +388,22 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     const includeDetect = batchMode !== 'risk_only';
 
     const header = [
-      'Fichier',
-      'Statut',
-      ...(includeRisk   ? ['Risque CHC', 'Score risque (%)']      : []),
-      ...(includeDetect ? ['Nombre de lésions détectées']          : []),
-      'Mode analyse',
-      'Date export',
+      'File',
+      'Status',
+      ...(includeRisk   ? ['HCC Risk', 'Risk score (%)']          : []),
+      ...(includeDetect ? ['Number of detected lesions']           : []),
+      'Analysis mode',
+      'Export date',
     ];
 
     const now = new Date();
-    const dateStr = now.toLocaleDateString('fr-FR') + ' ' + now.toLocaleTimeString('fr-FR');
+    const dateStr = now.toLocaleDateString('en-US') + ' ' + now.toLocaleTimeString('en-US');
 
     const rows = items.map(it => [
       it.name,
-      it.status === 'done'  ? 'Terminé' :
-      it.status === 'error' ? 'Erreur'  :
-      it.status === 'analyzing' ? 'En cours' : 'En attente',
+      it.status === 'done'  ? 'Done'        :
+      it.status === 'error' ? 'Error'       :
+      it.status === 'analyzing' ? 'In progress' : 'Pending',
       ...(includeRisk   ? [it.riskLabel ?? '', it.riskScore !== undefined ? (it.riskScore * 100).toFixed(2) : ''] : []),
       ...(includeDetect ? [it.status === 'done' ? String(it.detCount ?? 0) : '']                                  : []),
       analysisLabel,
@@ -442,16 +442,16 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
         try {
           const payload = JSON.parse(reader.result as string);
           if (!payload?.starhe_batch || !Array.isArray(payload.results)) {
-            alert('Fichier JSON invalide — pas un export STARHE batch.');
+            alert('Invalid JSON file — not a STARHE batch export.');
             return;
           }
           const imported: BatchItem[] = (payload.results as any[]).map(r => ({
             id:         uid(),
-            name:       r.file_name ?? r.server_path ?? 'inconnu',
+            name:       r.file_name ?? r.server_path ?? 'unknown',
             serverPath: r.server_path ?? '',
             file:       undefined,
             status:     'done' as ItemStatus,
-            progress:   'Importé depuis JSON',
+            progress:   'Imported from JSON',
             riskScore:  r.risk?.score,
             riskLabel:  r.risk?.label,
             detCount:   (r.detections_per_frame as Detection[][])
@@ -538,17 +538,17 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
           background: SIDEBAR_BG, flexShrink: 0,
         }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: SBAR_FG }}>
-            📋  Analyse batch
+            📋  Batch analysis
           </span>
           <button
             onClick={importJSON}
-            title="Importer un fichier JSON exporté précédemment (recharge les résultats + bboxes)"
+            title="Import a previously exported JSON file (reloads results + bboxes)"
             style={{
               background: '#1e3a5f', border: '1px solid #1d4ed8',
               borderRadius: 4, padding: '3px 10px',
               color: '#93c5fd', fontSize: 11, cursor: 'pointer', fontWeight: 600,
             }}
-          >⬆ Importer JSON</button>
+          >⬆ Import JSON</button>
           {/* Sélecteur de mode d'analyse */}
           <div style={{ display: 'flex', gap: 4 }}>
             {(['both', 'risk_only', 'detect_only'] as const).map(m => {
@@ -559,7 +559,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                   key={m}
                   onClick={() => !running && setBatchMode(m)}
                   disabled={running}
-                  title={m === 'both' ? 'STARHE RISK + DETECT' : m === 'risk_only' ? 'STARHE RISK uniquement' : 'STARHE DETECT uniquement'}
+                  title={m === 'both' ? 'STARHE RISK + DETECT' : m === 'risk_only' ? 'STARHE RISK only' : 'STARHE DETECT only'}
                   style={{
                     background: active ? BLUE : 'transparent',
                     border: `1px solid ${active ? BLUE : CARD_BORDER}`,
@@ -606,9 +606,9 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
               inp.click();
             }}
           >
-            📂  Glisser-déposer des fichiers DICOM ou MP4 ici, ou cliquer pour sélectionner
+            📂  Drag & drop DICOM or MP4 files here, or click to select
             <div style={{ fontSize: 11, marginTop: 4, color: '#4a5568' }}>
-              Accepte : <code>.dcm</code> · <code>.dicom</code> · fichiers sans extension (ex : A0000) · <code>.mp4</code>
+              Accepts: <code>.dcm</code> · <code>.dicom</code> · files without extension (e.g. A0000) · <code>.mp4</code>
             </div>
           </div>
           <div style={{ marginBottom: 10, display: 'flex', gap: 6 }}>
@@ -621,7 +621,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                 cursor: 'pointer', textAlign: 'center',
               }}
             >
-              📁  Charger un dossier DICOM
+              📁  Load DICOM folder
             </button>
             <button
               onClick={onPickMp4Files}
@@ -632,7 +632,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                 cursor: 'pointer', textAlign: 'center',
               }}
             >
-              📹  Charger des MP4
+              📹  Load MP4 files
             </button>
           </div>
 
@@ -641,7 +641,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
             <input
               ref={pathRef}
               type="text"
-              placeholder="/chemin/absolu/fichier.dcm"
+              placeholder="/absolute/path/file.dcm"
               onKeyDown={e => { if (e.key === 'Enter') onAddPath(); }}
               style={{
                 flex: 1, background: '#0a0e18', border: `1px solid ${CARD_BORDER}`,
@@ -655,7 +655,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                 background: BLUE, border: 'none', borderRadius: 4, padding: '5px 12px',
                 color: '#fff', fontSize: 12, cursor: 'pointer', fontWeight: 600,
               }}
-            >Ajouter</button>
+            >Add</button>
           </div>
         </div>
 
@@ -663,7 +663,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
         <div style={{ flex: 1, overflowY: 'auto', background: MAIN_BG }}>
           {items.length === 0 ? (
             <div style={{ padding: 24, textAlign: 'center', color: SBAR_MUTED, fontSize: 13 }}>
-              Aucun fichier ajouté
+              No files added
             </div>
           ) : (
             items.map(item => (
@@ -692,7 +692,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
               </>
             )}
             {done && errCount === 0 && doneCount > 0 && (
-              <span style={{ color: SUCCESS_FG, marginLeft: 8 }}>Batch terminé !</span>
+              <span style={{ color: SUCCESS_FG, marginLeft: 8 }}>Batch complete!</span>
             )}
           </div>
 
@@ -702,22 +702,22 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
               <>
                 <button
                   onClick={exportJSON}
-                  title="Télécharger les résultats + bounding boxes au format JSON (rechargeable)"
+                  title="Download results + bounding boxes as JSON (reloadable)"
                   style={{
                     background: '#1e3a5f', border: '1px solid #1d4ed8',
                     borderRadius: 4, padding: '6px 14px',
                     color: '#93c5fd', fontSize: 12, cursor: 'pointer', fontWeight: 600,
                   }}
-                >⬇  Générer JSON</button>
+                >⬇  Export JSON</button>
                 <button
                   onClick={exportCSV}
-                  title="Télécharger les résultats au format CSV"
+                  title="Download results as CSV"
                   style={{
                     background: '#14532d', border: '1px solid #166534',
                     borderRadius: 4, padding: '6px 14px',
                     color: '#86efac', fontSize: 12, cursor: 'pointer', fontWeight: 600,
                   }}
-                >⬇  Générer CSV</button>
+                >⬇  Export CSV</button>
               </>
             )}
             {running ? (
@@ -728,17 +728,17 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                   padding: '6px 16px', color: '#fca5a5', fontSize: 12,
                   cursor: 'pointer', fontWeight: 600,
                 }}
-              >⏹  Annuler</button>
+              >⏹  Cancel</button>
             ) : (
               <>
                 {/* Sélecteur de parallélisme */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginRight: 4 }}>
-                  <span style={{ fontSize: 11, color: SBAR_MUTED, whiteSpace: 'nowrap' }}>Parallèles :</span>
+                  <span style={{ fontSize: 11, color: SBAR_MUTED, whiteSpace: 'nowrap' }}>Parallel:</span>
                   {([1, 2, 3, 4] as const).map(n => (
                     <button
                       key={n}
                       onClick={() => setConcurrency(n)}
-                      title={n === 1 ? 'Séquentiel (1 à la fois)' : `${n} analyses simultanées`}
+                      title={n === 1 ? 'Sequential (1 at a time)' : `${n} simultaneous analyses`}
                       style={{
                         background: concurrency === n ? BLUE : 'transparent',
                         border: `1px solid ${concurrency === n ? BLUE : CARD_BORDER}`,
@@ -758,7 +758,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                     borderRadius: 4, padding: '6px 14px', color: SBAR_MUTED,
                     fontSize: 12, cursor: items.length === 0 ? 'not-allowed' : 'pointer',
                   }}
-                >Vider</button>
+                >Clear</button>
                 <button
                   onClick={runBatch}
                   disabled={items.filter(it => it.status === 'waiting' || it.status === 'error').length === 0}
@@ -768,7 +768,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                     cursor: 'pointer', fontWeight: 700,
                     opacity: items.filter(it => it.status === 'waiting' || it.status === 'error').length === 0 ? 0.4 : 1,
                   }}
-                >▶  Lancer le batch ({items.filter(it => it.status === 'waiting' || it.status === 'error').length})</button>
+                >▶  Run batch ({items.filter(it => it.status === 'waiting' || it.status === 'error').length})</button>
               </>
             )}
           </div>
@@ -782,7 +782,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: SBAR_MUTED, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                Récapitulatif
+                Summary
               </span>
               {!running && (() => {
                 const doneItems = items.filter(it => it.status === 'done');
@@ -809,26 +809,26 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                     {selItems.length > 0 && (
                       <button
                         onClick={openSel}
-                        title={`Ouvrir les ${selItems.length} fichier(s) sélectionné(s) dans des onglets`}
+                        title={`Open ${selItems.length} selected file(s) in tabs`}
                         style={{
                           background: '#1e3a5f', border: '1px solid #1d4ed8',
                           borderRadius: 3, padding: '2px 10px',
                           color: '#93c5fd', fontSize: 11, cursor: 'pointer', fontWeight: 600,
                         }}
-                      >↗ Ouvrir sélection ({selItems.length})</button>
+                      >↗ Open selection ({selItems.length})</button>
                     )}
                     <button
                       onClick={openAll}
-                      title={`Ouvrir tous les ${doneItems.length} fichiers dans des onglets`}
+                      title={`Open all ${doneItems.length} files in tabs`}
                       style={{
                         background: '#1c2a1c', border: '1px solid #166534',
                         borderRadius: 3, padding: '2px 10px',
                         color: '#86efac', fontSize: 11, cursor: 'pointer', fontWeight: 600,
                       }}
-                    >↗ Tout ouvrir ({doneItems.length})</button>
+                    >↗ Open all ({doneItems.length})</button>
                     <button
                       onClick={exportJSON}
-                      title="Télécharger les résultats + bounding boxes au format JSON"
+                      title="Download results + bounding boxes as JSON"
                       style={{
                         background: '#1e3a5f', border: '1px solid #1d4ed8',
                         borderRadius: 3, padding: '2px 10px',
@@ -837,7 +837,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                     >⬇ JSON</button>
                     <button
                       onClick={exportCSV}
-                      title="Télécharger les résultats au format CSV"
+                      title="Download results as CSV"
                       style={{
                         background: '#14532d', border: '1px solid #166534',
                         borderRadius: 3, padding: '2px 10px',
@@ -854,7 +854,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                   <th style={{ padding: '3px 6px', width: 28, textAlign: 'center' }}>
                     <input
                       type="checkbox"
-                      title="Tout sélectionner / désélectionner"
+                      title="Select all / deselect all"
                       checked={items.filter(it => it.status === 'done').every(it => selected.has(it.id)) && items.some(it => it.status === 'done')}
                       onChange={e => {
                         const doneIds = items.filter(it => it.status === 'done').map(it => it.id);
@@ -863,11 +863,11 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                       style={{ cursor: 'pointer', accentColor: '#3b82f6' }}
                     />
                   </th>
-                  <th style={{ textAlign: 'left', padding: '3px 6px', fontWeight: 600 }}>Fichier</th>
-                  <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>Risque CHC</th>
+                  <th style={{ textAlign: 'left', padding: '3px 6px', fontWeight: 600 }}>File</th>
+                  <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>HCC Risk</th>
                   <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>Score</th>
-                  <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>Lésions</th>
-                  <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>Ouvrir</th>
+                  <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>Lesions</th>
+                  <th style={{ textAlign: 'center', padding: '3px 6px', fontWeight: 600 }}>Open</th>
                 </tr>
               </thead>
               <tbody>
@@ -910,7 +910,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                           roi:         it.roi,
                           file:        it.file,
                         })}
-                        title="Ouvrir dans un onglet"
+                        title="Open in tab"
                         style={{
                           background: 'none', border: `1px solid ${CARD_BORDER}`,
                           borderRadius: 3, padding: '2px 8px', color: BLUE,

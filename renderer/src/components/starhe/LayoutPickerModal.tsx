@@ -67,10 +67,10 @@ interface LayoutOption {
 }
 
 const OPTIONS: LayoutOption[] = [
-  { mode: 'single',  label: '1 fichier',     description: 'Vue plein écran',  slots: 1 },
-  { mode: 'split-v', label: '2 côte à côte', description: 'Gauche / Droite',  slots: 2 },
-  { mode: 'split-h', label: '2 superposés',  description: 'Haut / Bas',       slots: 2 },
-  { mode: 'quad',    label: '4 fichiers',    description: 'Grille 2×2',       slots: 4 },
+  { mode: 'single',  label: '1 file',         description: 'Full screen',    slots: 1 },
+  { mode: 'split-v', label: '2 side by side', description: 'Left / Right',   slots: 2 },
+  { mode: 'split-h', label: '2 stacked',      description: 'Top / Bottom',   slots: 2 },
+  { mode: 'quad',    label: '4 files',        description: '2×2 Grid',          slots: 4 },
 ];
 
 // ── Composant ────────────────────────────────────────────────────────────────
@@ -103,12 +103,12 @@ export function LayoutPickerModal({ count, onPick, onCancel }: Props) {
         {/* Titre */}
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: SBAR_FG, marginBottom: 5 }}>
-            Disposition des panneaux
+            Panel layout
           </div>
           <div style={{ fontSize: 12, color: SBAR_MUTED }}>
-            {count} fichier{count !== 1 ? 's' : ''} sélectionné{count !== 1 ? 's' : ''} — choisissez comment les afficher.
+            {count} file{count !== 1 ? 's' : ''} selected — choose how to display them.
             <br />
-            <span style={{ color: '#64748b' }}>La disposition est fixe après sélection.</span>
+            <span style={{ color: '#64748b' }}>The layout is fixed after selection.</span>
           </div>
         </div>
 
@@ -129,7 +129,7 @@ export function LayoutPickerModal({ count, onPick, onCancel }: Props) {
             fontSize: 12, cursor: 'pointer',
           }}
         >
-          Annuler
+          Cancel
         </button>
       </div>
     </div>

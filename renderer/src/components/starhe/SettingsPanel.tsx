@@ -11,7 +11,7 @@ import { SIDEBAR_BG, SBAR_FG, SBAR_MUTED } from '../../utilities/starhe/colors';
 // ── Options de polices proposées ──────────────────────────────────────────────
 
 const FONT_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Segoe UI (défaut)',  value: "'Segoe UI', system-ui, sans-serif" },
+  { label: 'Segoe UI (default)', value: "'Segoe UI', system-ui, sans-serif" },
   { label: 'Arial',              value: 'Arial, sans-serif' },
   { label: 'Georgia',            value: 'Georgia, serif' },
   { label: 'Courier New',        value: "'Courier New', monospace" },
@@ -59,7 +59,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
     <div
       ref={panelRef}
       role="dialog"
-      aria-label="Réglages d'affichage"
+      aria-label="Display settings"
       style={{
         position:     'fixed',
         top:          54,
@@ -85,11 +85,11 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
         }}
       >
         <span style={{ color: SBAR_FG, fontSize: 13, fontWeight: 700 }}>
-          ⚙&nbsp; Réglages d'affichage
+          ⚙&nbsp; Display settings
         </span>
         <button
           onClick={onClose}
-          title="Fermer (Échap)"
+          title="Close (Esc)"
           style={{
             background: 'none', border: 'none', cursor: 'pointer',
             color: SBAR_MUTED, fontSize: 20, lineHeight: 1, padding: '0 4px',
@@ -107,7 +107,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
         }}
       >
         {/* Agrandissement du texte */}
-        <SettingRow label="Taille du texte">
+        <SettingRow label="Text size">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: SBAR_MUTED, fontSize: 11 }}>A</span>
             <input
@@ -141,7 +141,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
         </SettingRow>
 
         {/* Police du texte */}
-        <SettingRow label="Police du texte">
+        <SettingRow label="Text font">
           <select
             value={settings.fontFamily}
             onChange={e => onUpdate({ fontFamily: e.target.value })}
@@ -163,7 +163,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
         </SettingRow>
 
         {/* Couleur du texte */}
-        <SettingRow label="Couleur du texte">
+        <SettingRow label="Text color">
           <ColorRow
             value={settings.textColor}
             defaultValue={DISPLAY_DEFAULTS.textColor}
@@ -171,13 +171,13 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
           />
           {settings.textColor !== DISPLAY_DEFAULTS.textColor && (
             <p style={{ color: SBAR_MUTED, fontSize: 10, margin: '5px 0 0', lineHeight: 1.4 }}>
-              ⚠️ Remplace toutes les couleurs de texte, y compris les indicateurs (risque, erreurs).
+              ⚠️ Overrides all text colors, including indicators (risk, errors).
             </p>
           )}
         </SettingRow>
 
         {/* Couleur panneau latéral */}
-        <SettingRow label="Couleur panneau latéral">
+        <SettingRow label="Sidebar color">
           <ColorRow
             value={settings.sidebarBg}
             defaultValue={DISPLAY_DEFAULTS.sidebarBg}
@@ -186,7 +186,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
         </SettingRow>
 
         {/* Couleur zone principale */}
-        <SettingRow label="Couleur zone principale">
+        <SettingRow label="Main area color">
           <ColorRow
             value={settings.mainBg}
             defaultValue={DISPLAY_DEFAULTS.mainBg}
@@ -205,8 +205,8 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
             style={{ accentColor: '#1565C0', width: 14, height: 14, flexShrink: 0 }}
           />
           <div>
-            <div style={{ color: SBAR_FG, fontSize: 12, fontWeight: 700 }}>Afficher la console</div>
-            <div style={{ color: SBAR_MUTED, fontSize: 10, marginTop: 1 }}>Journal des événements en bas de l'interface</div>
+            <div style={{ color: SBAR_FG, fontSize: 12, fontWeight: 700 }}>Show console</div>
+            <div style={{ color: SBAR_MUTED, fontSize: 10, marginTop: 1 }}>Event log at the bottom of the interface</div>
           </div>
         </label>
 
@@ -223,7 +223,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1a1a2e'; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '#0d1117'; }}
         >
-          ↺&nbsp; Réinitialiser les réglages
+          ↺&nbsp; Reset settings
         </button>
       </div>
     </div>
@@ -286,7 +286,7 @@ function ColorRow({
       {value !== defaultValue && (
         <button
           onClick={() => onChange(defaultValue)}
-          title="Valeur par défaut"
+          title="Default value"
           style={{
             background: 'none', border: 'none', cursor: 'pointer',
             color: SBAR_MUTED, fontSize: 14, padding: '0 2px',

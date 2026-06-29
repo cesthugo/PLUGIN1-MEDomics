@@ -43,7 +43,7 @@ export function FileThumbnailStrip({
         <button
           onClick={onOpenNew}
           style={{ background: 'none', color: '#374151', border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 700, padding: '0 10px' }}
-          title="Ajouter un fichier"
+          title="Add a file"
         >+</button>
       </div>
     );
@@ -168,7 +168,7 @@ export function FileThumbnailStrip({
       {/* Bouton ajouter un fichier */}
       <div
         onClick={onOpenNew}
-        title="Ouvrir un nouveau fichier DICOM"
+        title="Open a new DICOM file"
         style={{
           width: 28, minWidth: 28, alignSelf: 'stretch',
           display: 'flex', alignItems: 'center', justifyContent: 'center',

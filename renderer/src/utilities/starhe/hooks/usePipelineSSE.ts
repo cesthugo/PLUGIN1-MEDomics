@@ -46,8 +46,8 @@ export function usePipelineSSE(
 
     setStatus('running');
     setLastResult(null);
-    setProgress('Démarrage de l\'analyse…');
-    addLog('Lancement de l\'analyse STARHE (flux SSE)…', 'info');
+    setProgress('Starting analysis…');
+    addLog('Starting STARHE analysis (SSE stream)…', 'info');
 
     // Ce que l'utilisateur a demandé — sert à filtrer les événements SSE
     // (le backend peut retourner des données RISK même si on ne l'a pas demandé,
@@ -101,7 +101,7 @@ export function usePipelineSSE(
         const nDet = finalDetections.filter(d => d.length > 0).length;
         const total = finalDetections.length;
         const detFg  = nDet > 0 ? WARN_FG : SUCCESS_FG;
-        const detText = `${nDet}/${total} frames avec lésion(s)`;
+        const detText = `${nDet}/${total} frame(s) with lesion(s)`;
         finalResult = finalResult
           ? { ...finalResult, detText, detFg }
           : { riskText: '', riskFg: SBAR_MUTED, detText, detFg };
@@ -114,7 +114,7 @@ export function usePipelineSSE(
 
     const onDone = () => {
       commitResult();
-      addLog('Analyse terminée.', 'success');
+      addLog('Analysis complete.', 'success');
     };
 
     const onError = (err: Error) => {

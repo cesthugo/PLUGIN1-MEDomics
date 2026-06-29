@@ -99,14 +99,14 @@ export function buildCanvasContextMenu({
   onResetView:     () => void;
 }): ContextMenuItem[] {
   return [
-    { label: 'Déplacer / Zoomer', onClick: onTogglePan,     checked: viewMode === 'pan' },
-    { label: 'Mesurer',           onClick: onToggleMeasure,  checked: viewMode === 'measure' },
+    { label: 'Pan / Zoom',        onClick: onTogglePan,     checked: viewMode === 'pan' },
+    { label: 'Measure',           onClick: onToggleMeasure,  checked: viewMode === 'measure' },
     { label: '', onClick: () => {}, separator: true },
-    { label: 'Contraste…',        onClick: onContrast },
-    { label: 'Luminosité…',       onClick: onBrightness },
+    { label: 'Contrast…',         onClick: onContrast },
+    { label: 'Brightness…',       onClick: onBrightness },
     { label: '', onClick: () => {}, separator: true },
     { label: 'Series Scroll',     onClick: onToggleSeries,  checked: viewMode === 'series' },
     { label: '', onClick: () => {}, separator: true },
-    { label: 'Réinitialiser la vue', onClick: onResetView },
+    { label: 'Reset view',           onClick: onResetView },
   ];
 }

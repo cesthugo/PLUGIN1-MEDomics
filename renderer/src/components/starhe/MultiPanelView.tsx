@@ -74,11 +74,11 @@ export function MultiPanelView({
           Vue multiple
         </span>
         <span style={{ fontSize: 10, color: '#334155' }}>
-          {layout === 'split-v' ? 'Gauche / Droite' : layout === 'split-h' ? 'Haut / Bas' : 'Grille 2×2'}
+          {layout === 'split-v' ? 'Left / Right' : layout === 'split-h' ? 'Top / Bottom' : '2×2 Grid'}
         </span>
         <button
           onClick={onExit}
-          title="Quitter la vue multiple et revenir à la vue normale"
+          title="Exit multi-panel view and return to normal"
           style={{
             marginLeft: 'auto', background: 'transparent',
             border: '1px solid #374151', borderRadius: 4,
@@ -88,7 +88,7 @@ export function MultiPanelView({
           onMouseEnter={e => (e.currentTarget.style.borderColor = '#ef4444')}
           onMouseLeave={e => (e.currentTarget.style.borderColor = '#374151')}
         >
-          ✕ Quitter
+          ✕ Exit
         </button>
       </div>
 
@@ -156,7 +156,7 @@ export function MultiPanelView({
                     background: '#080d14',
                   }}>
                     <span style={{ color: isDragTarget ? '#f59e0b' : '#1e293b', fontSize: 12 }}>
-                      {isDragTarget ? '⊕ Déposer ici' : 'Panneau vide'}
+                      {isDragTarget ? '⊕ Drop here' : 'Empty panel'}
                     </span>
                   </div>
                 )}
@@ -189,7 +189,7 @@ export function MultiPanelView({
                   <span style={{
                     fontSize: 13, fontWeight: 700, color: '#fbbf24',
                     background: 'rgba(0,0,0,0.7)', padding: '4px 10px', borderRadius: 4,
-                  }}>⇄ Remplacer</span>
+                  }}>⇄ Replace</span>
                 </div>
               )}
 
@@ -289,7 +289,7 @@ export function MultiPanelView({
           }}
         >
           <span style={{ fontSize: 14 }}>⊕</span>
-          <span>{dragOverExpand ? 'Déposer pour ajouter un panneau' : 'Glisser ici pour agrandir la vue'}</span>
+          <span>{dragOverExpand ? 'Drop to add a panel' : 'Drag here to expand view'}</span>
         </div>
       )}
     </div>

@@ -164,9 +164,9 @@ def load_and_encode(
     # ── Nom patient (pour groupement d'onglets) ───────────────────────────────
     patient_name_raw = next(
         (v for n, v in original_sensitive if n == "PatientName" and v != "— absent"),
-        "Patient inconnu",
+        "Unknown patient",
     )
-    patient_name = patient_name_raw.replace("^", " ").strip() or "Patient inconnu"
+    patient_name = patient_name_raw.replace("^", " ").strip() or "Unknown patient"
 
     study_date = next(
         (v for n, v in original_sensitive if n == "StudyDate" and v != "— absent"),

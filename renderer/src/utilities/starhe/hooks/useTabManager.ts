@@ -20,7 +20,7 @@ function makeDefaultTab(): TabState {
   return {
     id:              nextTabId(),
     label:           '—',
-    patientName:     'Patient inconnu',
+    patientName:     'Unknown patient',
     dicomPath:       '',
     data:            null,
     frameIdx:        0,
@@ -124,7 +124,7 @@ export function useTabManager({
     setActiveTabId(newTab.id);
     setPatients(prev => upsertPatient(prev, data.patientName, newTab.id));
     setActivePatientName(data.patientName);
-    addLog(`DICOM chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
+    addLog(`DICOM loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
   const addMp4Tab = useCallback((
@@ -133,17 +133,17 @@ export function useTabManager({
     data:        DicomData,
   ) => {
     const label = displayName.replace(/\.[^.]+$/, '').slice(0, 20);
-    const newTab: TabState = { ...makeDefaultTab(), label, patientName: 'Vidéo MP4', dicomPath: serverPath, isMp4: true, data };
+    const newTab: TabState = { ...makeDefaultTab(), label, patientName: 'MP4 Video', dicomPath: serverPath, isMp4: true, data };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newTab.id);
-    setPatients(prev => upsertPatient(prev, 'Vidéo MP4', newTab.id));
-    setActivePatientName('Vidéo MP4');
-    addLog(`MP4 chargé — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
+    setPatients(prev => upsertPatient(prev, 'MP4 Video', newTab.id));
+    setActivePatientName('MP4 Video');
+    addLog(`MP4 loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
   /** Charge un fichier (DICOM ou MP4) depuis un résultat batch et retourne l'ID du nouvel onglet */
   const openBatchResultAsTab = useCallback(async (result: BatchResultToOpen): Promise<number> => {
-    addLog(`Chargement : ${result.name}`, 'info');
+    addLog(`Loading: ${result.name}`, 'info');
 
     if (result.isMp4) {
       // ── Cas MP4 ────────────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ export function useTabManager({
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (result.file && /introuvable|not found|no such file/i.test(msg)) {
-          addLog(`Fichier temporaire MP4 expiré — re-upload de ${result.name}…`, 'info');
+          addLog(`MP4 temporary file expired — re-uploading ${result.name}…`, 'info');
           data = await loadMp4File(result.file);
         } else {
           throw err;
@@ -163,7 +163,7 @@ export function useTabManager({
       const newTab: TabState = {
         ...makeDefaultTab(),
         label,
-        patientName: 'Vidéo MP4',
+        patientName: 'MP4 Video',
         dicomPath:   result.serverPath,
         isMp4:       true,
         data,
@@ -172,15 +172,15 @@ export function useTabManager({
           original: {
             riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
             riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
-            detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lésion(s)`,
+            detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lesion(s)`,
             detFg:    '#facc15',
           },
         } : {},
       };
       setTabs(prev => [...prev, newTab]);
-      setPatients(prev => upsertPatient(prev, 'Vidéo MP4', newTab.id));
-      setActivePatientName('Vidéo MP4');
-      addLog(`MP4 chargé avec résultats — ${data.frameCount} frame(s).`, 'success');
+      setPatients(prev => upsertPatient(prev, 'MP4 Video', newTab.id));
+      setActivePatientName('MP4 Video');
+      addLog(`MP4 loaded with results — ${data.frameCount} frame(s).`, 'success');
       return newTab.id;
     }
 
@@ -192,7 +192,7 @@ export function useTabManager({
       // Temp file expiré — on re-uploade le fichier original si disponible
       const msg = err instanceof Error ? err.message : String(err);
       if (result.file && /introuvable|not found|no such file/i.test(msg)) {
-        addLog(`Fichier temporaire expiré — re-upload de ${result.name}…`, 'info');
+        addLog(`Temporary file expired — re-uploading ${result.name}…`, 'info');
         data = await loadDicomFile(result.file);
       } else {
         throw err;
@@ -210,7 +210,7 @@ export function useTabManager({
         original: {
           riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
           riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
-          detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lésion(s)`,
+          detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lesion(s)`,
           detFg:    '#facc15',
         },
       } : {},
@@ -218,7 +218,7 @@ export function useTabManager({
     setTabs(prev => [...prev, newTab]);
     setPatients(prev => upsertPatient(prev, data.patientName, newTab.id));
     setActivePatientName(data.patientName);
-    addLog(`DICOM chargé avec résultats — ${data.frameCount} frame(s).`, 'success');
+    addLog(`DICOM loaded with results — ${data.frameCount} frame(s).`, 'success');
     return newTab.id;
     // Note : setActiveTabId est intentionnellement absent ici.
     // Le caller est responsable d'activer l'onglet (cas batch multi ou unique).
