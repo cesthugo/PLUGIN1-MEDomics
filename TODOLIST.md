@@ -605,6 +605,41 @@
 
 ---
 
+### 🔬 STARHE-DETECT — `_preprocess()` Fix + Bit-Exact Validation (June 29–30, 2026)
+
+> Context: STARHE-DETECT was producing results that differed from the official mmdet reference (`init_detector` + `inference_detector`) by up to several tens of pixels in bbox coordinates. Goal: identify root cause in `_rtmdet_runner.py`, fix it, and produce a definitive validation CSV proving bit-exact equivalence on the full test dataset.
+
+- [x] **Root cause identified — `_preprocess()` in `_rtmdet_runner.py`**:
+  - **Wrong resize kernel**: `F.interpolate(float32, mode='bilinear')` instead of `cv2.resize(uint8, INTER_LINEAR)`. The official mmcv `Resize` transform calls `mmcv.imresize(backend='cv2')` on uint8 images. PyTorch's bilinear interpolation on float32 uses a different kernel normalization, producing pixel-level differences that accumulate through 50+ convolutional layers.
+  - **Wrong rounding**: `int(round(x * scale))` (Python banker's rounding = round-half-to-even) instead of `int(x * scale + 0.5)` (round-half-up, matching `mmcv._scale_size`). A 1 px difference in resize target dimensions produces different content across the entire resized image.
+  - **`img_shape` was correct**: a hypothesis that `img_shape` in the meta dict should be `(new_H, new_W)` (resize output) rather than `(640, 640)` (padded canvas) was **verified incorrect** by reading `mmcv.transforms.Pad._pad_img` source code — the `Pad` transform's last line overwrites `img_shape` with the padded dimensions, so `(640, 640)` is the value that flows to `predict_by_feat` → `DistancePointBBoxCoder.decode(max_shape=img_shape)`. Changing it to `(new_H, new_W)` was reverted.
+
+- [x] **Fix applied** — `ai/models/_rtmdet_runner.py`:
+  - `cv2.resize(frame, (new_W, new_H), interpolation=cv2.INTER_LINEAR)` on uint8 input
+  - `int(orig_W * scale + 0.5)` / `int(orig_H * scale + 0.5)` (round-half-up)
+  - `img_shape: (640, 640)` unchanged (correct)
+
+- [x] **Bit-exact batch path verification** — `_infer_batch_frames` (used in production) confirmed numerically identical to `_infer_one_frame` on 4 representative frames: max_diff = 0.
+
+- [x] **`scripts/compare_detect_vs_reference.py` created** — Standalone comparison script using `init_detector` + `inference_detector` (official mmdet API) as reference vs our `_build_model` + `_infer_one_frame`. Applies the same NMS patch to both so NMS is not a variable of confusion. Per-video greedy IoU-matching (threshold > 0.5, score ≥ 0.05). Outputs CSV with per-video and TOTAL summary row.
+
+- [x] **Full 24-video validation on data_test (plugin vs official mmdet reference)**:
+
+  | Metric | Result |
+  |---|---|
+  | Videos compared | 24/24 |
+  | Frames analyzed (stride=4) | **1 453 / 1 453** |
+  | Frames bit-exact | **1 453 / 1 453 (100%)** |
+  | max_bbox_diff | **0.0000 px** |
+  | max_score_diff | **0.000000** |
+  | Statut | **IDENTIQUE on all 24 videos** |
+
+- [x] **`comparaison_detect.csv` generated** — `/Users/hugo/Desktop/STAGE/comparaison_detect.csv` — 24-video recap + TOTAL row. All 24 videos: statut=IDENTIQUE.
+
+- [x] **README.md — Comprehensive STARHE-DETECT RTMDet Pipeline documentation** — New section "## STARHE-DETECT: RTMDet Detection Pipeline": checkpoint, training distribution, RTMDet architecture (CSPNeXt→CSPNeXtPAFPN→RTMDetSepBNHead), subprocess architecture with code diagram, forward pass, score threshold with 6-decimal rounding rationale, temporal subsampling and propagation (DETECT_EVERY_N), batch inference, warmup strategy, adaptive batch size, reproducibility (float64, single-threaded), backend selection (rtmdet vs dino), output format.
+
+---
+
 ## 🚧 In-Progress Tasks
 
 ### 🐍 Python Backend

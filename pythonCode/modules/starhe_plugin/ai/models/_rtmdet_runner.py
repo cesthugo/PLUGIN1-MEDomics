@@ -67,7 +67,6 @@ _inspect.getmodule = _safe_getmodule
 
 # ─── 4. Patch NMSop.forward → torchvision.ops.nms ───────────────────────────
 import torch
-import torch.nn.functional as F
 
 # ── Reproductibilité cross-plateforme ─────────────────────────────────────────
 # Sur les GPU NVIDIA Ampere+ (RTX 30xx/40xx), PyTorch active TF32 par défaut :
@@ -150,7 +149,6 @@ _InstData.__getitem__ = _mps_safe_getitem
 
 # ─── Constantes prétraitement ─────────────────────────────────────────────────
 _INPUT_SIZE = 640
-_PAD_VAL    = 114.0
 # Précalcul des variants float32 / float64 pour _preprocess (évite .to() à chaque appel)
 _MEAN_F32 = torch.tensor([103.53, 116.28, 123.675]).view(3, 1, 1)          # float32
 _STD_F32  = torch.tensor([ 57.375,  57.12,  58.395]).view(3, 1, 1)          # float32
@@ -172,25 +170,33 @@ def _replace_syncbn(d):
 def _preprocess(frame: np.ndarray, use_double: bool = False):
     orig_H, orig_W = frame.shape[:2]
     scale = min(_INPUT_SIZE / orig_H, _INPUT_SIZE / orig_W)
-    new_H, new_W = int(round(orig_H * scale)), int(round(orig_W * scale))
+    # Arrondi round-half-up (`int(x*scale + 0.5)`), identique à
+    # mmcv.image.geometric._scale_size — PAS Python round() (banker's
+    # rounding), qui peut différer de ±1 px sur les tailles à .5 exact.
+    new_W = int(orig_W * scale + 0.5)
+    new_H = int(orig_H * scale + 0.5)
     np_dtype = np.float64 if use_double else np.float32
     mean      = _MEAN_F64 if use_double else _MEAN_F32
     std       = _STD_F64  if use_double else _STD_F32
-    # F.interpolate : noyau C++ identique x86/ARM.
-    # use_double=True : frame converti en float64 AVANT l'interpolation,
-    # éliminant les 1-2 ULP de différence AVX2/NEON float32 qui survivent
-    # jusqu'au score même après le cast tardif.
-    t = torch.from_numpy(
-        np.ascontiguousarray(frame, dtype=np_dtype)
-    ).permute(2, 0, 1).unsqueeze(0)                    # (1, 3, H, W)
-    resized = F.interpolate(t, size=(new_H, new_W), mode='bilinear', align_corners=False)
-    resized = resized.squeeze(0).permute(1, 2, 0).numpy()  # (new_H, new_W, 3)
-    canvas = np.full((_INPUT_SIZE, _INPUT_SIZE, 3), _PAD_VAL, dtype=np_dtype)
+    # cv2.resize bilinéaire sur uint8 : reproduit exactement le backend
+    # mmcv.imresize (Resize transform officiel, backend='cv2',
+    # interpolation='bilinear') utilisé à l'entraînement et par
+    # inference_detector — bit-identique à la référence STARHE-DETECT.
+    resized = cv2.resize(frame, (new_W, new_H), interpolation=cv2.INTER_LINEAR)
+    canvas = np.full((_INPUT_SIZE, _INPUT_SIZE, 3), 114, dtype=np.uint8)
     canvas[:new_H, :new_W] = resized
-    tensor = torch.from_numpy(np.ascontiguousarray(canvas.transpose(2, 0, 1)))
+    tensor = torch.from_numpy(
+        np.ascontiguousarray(canvas.transpose(2, 0, 1), dtype=np_dtype)
+    )
     tensor = (tensor - mean) / std
     tensor = tensor.unsqueeze(0)
     meta = {
+        # img_shape = taille PADDÉE (640, 640), pas (new_H, new_W) : le
+        # transform officiel mmcv.transforms.Pad écrase results['img_shape']
+        # avec padded_img.shape[:2] APRÈS Resize (Pad._pad_img, dernière
+        # ligne). C'est cette valeur (640, 640) qui atterrit dans le meta
+        # PackDetInputs et sert de max_shape au bbox_coder.decode() côté
+        # référence — vérifié en lisant le code source mmcv installé.
         "img_shape":         (_INPUT_SIZE, _INPUT_SIZE),
         "ori_shape":         (orig_H, orig_W),
         "scale_factor":      (float(new_W / orig_W), float(new_H / orig_H)),

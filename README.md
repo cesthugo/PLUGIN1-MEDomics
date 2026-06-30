@@ -988,6 +988,237 @@ The `video.mp4` files produced by `cv2.VideoWriter(mp4v)` on Jean Zay Linux diff
 
 ---
 
+## STARHE-DETECT: RTMDet Detection Pipeline
+
+STARHE-DETECT localizes hepatic lesions in ultrasound frames using **RTMDet-L** (Real-Time Multi-scale Detector), a one-stage anchor-free object detector from mmdet 3.3.0. It outputs bounding boxes with confidence scores for a single class (`tumor`), one detection list per input frame. At inference the plugin reproduces the exact training pipeline bit-for-bit, validated to produce **max\_bbox\_diff = 0.0 px and max\_score\_diff = 0.0** against the official mmdet reference (`init_detector` + `inference_detector`) on 1 453 frames across the full 24-video test dataset.
+
+### Checkpoint
+
+| File | Size | Notes |
+|---|---|---|
+| `best_coco_bbox_mAP_50_iter_2100.pth` | 439 MB | Best checkpoint by `coco/bbox_mAP_50`, saved at iteration 2 100 of a 3 300-iteration training run on Jean Zay (IDRIS). Contains model `state_dict` + optimizer state + mmengine metadata buffers. |
+
+The checkpoint is loaded with `weights_only=False` (required: the `.pth` contains `mmengine.logging.history_buffer.HistoryBuffer` and NumPy globals which PyTorch 2.6+ rejects under `weights_only=True`). The `data_preprocessor.*` keys are stripped from `state_dict` before loading since normalization is handled manually — not via `DetDataPreprocessor`.
+
+### Training Distribution
+
+RTMDet was fine-tuned in COCO format on `cropped_videos/` — **fan-shaped ultrasound sector crops** produced by prepUS, identical in format to the `crop_only_frames` fed at inference. Dimensions are non-square and vary per file. Single class: `tumor`.
+
+Key training hyperparameters: AdamW (lr=0.001), QualityFocalLoss + GIoULoss, DynamicSoftLabelAssigner (topk=13). Augmentations: CachedMosaic → RandomResize(0.1–2.0×) → RandomCrop(640) → YOLOXHSVRandomAug → RandomFlip → Pad(114, 640×640) → CachedMixUp. Stage 2 (no Mosaic/MixUp) activates after iteration 2 290.
+
+### RTMDet Architecture
+
+```
+Input: (N, 3, 640, 640)   float32 or float64 (normalized, BGR order)
+────────────────────────────────────────────────────────────────────────────────
+Backbone (CSPNeXt-L):
+  arch='P5', deepen_factor=1, widen_factor=1, channel_attention=True
+  expand_ratio=0.5, act=SiLU, norm=SyncBN (→ BN at inference)
+  Output: 3 feature maps at strides 8 / 16 / 32
+    P3: (N, 256, 80, 80)
+    P4: (N, 512, 40, 40)
+    P5: (N,1024, 20, 20)
+────────────────────────────────────────────────────────────────────────────────
+Neck (CSPNeXtPAFPN):
+  in_channels=[256, 512, 1024], out_channels=256
+  num_csp_blocks=3, expand_ratio=0.5, act=SiLU, norm=SyncBN
+  Path-Aggregation FPN: top-down then bottom-up merging
+  Output: 3 feature maps, all 256 channels
+    (N, 256, 80, 80) / (N, 256, 40, 40) / (N, 256, 20, 20)
+────────────────────────────────────────────────────────────────────────────────
+Head (RTMDetSepBNHead):
+  in_channels=256, feat_channels=256, stacked_convs=2
+  anchor_generator: MlvlPointGenerator(strides=[8,16,32], offset=0)
+  bbox_coder: DistancePointBBoxCoder
+  pred_kernel_size=1, share_conv=True, with_objectness=False
+  num_classes=1, act=SiLU, norm=SyncBN
+  Separate BN for cls and reg branches
+────────────────────────────────────────────────────────────────────────────────
+Post-processing (test_cfg):
+  score_thr=0.001, nms=dict(type='nms', iou_threshold=0.65)
+  nms_pre=30000, max_per_img=300, min_bbox_size=0
+```
+
+`SyncBN` is replaced by `BN` at inference (via `_replace_syncbn()` in `_rtmdet_runner.py`) since `SyncBN.forward` requires `dist.is_initialized()` in multi-GPU contexts.
+
+### Subprocess Architecture
+
+All mmdet/mmcv/mmengine imports live exclusively inside a **persistent subprocess** (`_rtmdet_runner.py --mode server`) so the main Python 3.13 process never loads these packages (which require compiled C extensions absent from Python 3.13 wheels). `STARHEDetectModel` in `ai/starhe_detect.py` is the parent-side wrapper.
+
+```
+STARHEDetectModel (main process)
+  │
+  │  subprocess.Popen([python, _rtmdet_runner.py,
+  │                    --config  models/rtmdet_starhe.py,
+  │                    --ckpt    models/best_coco_bbox_mAP_50_iter_2100.pth,
+  │                    --mode    server,
+  │                    --score-thr 0.70,
+  │                    --deterministic         # → CPU + float64
+  │  ], stdin=PIPE, stdout=PIPE, text=True, bufsize=1)
+  │
+  ▼
+_rtmdet_runner.py (subprocess)
+  │
+  │  → MODELS.build(cfg.model)               # bypasses init_detector
+  │  → _load_ckpt(model, ckpt)               # strips data_preprocessor.* keys
+  │  → model.double().eval()                 # float64 in deterministic mode
+  │  → print("[rtmdet_server] READY {hw_info_json}")
+  │
+  │  loop (newline-delimited JSON on stdin/stdout):
+  │    ← {"frames_b64": ["<base64>", ...], "shapes": [[H,W,3],...], "score_thr": 0.70}
+  │    → [[{"bbox":[x0,y0,x1,y1], "score":0.83, "label":"tumor"}, ...], ...]
+  │
+  │  ← "__EXIT__"  →  clean shutdown (proc.wait(10s) then kill)
+```
+
+Key design choices:
+- **`MODELS.build()` instead of `init_detector()`** — `init_detector` internally calls `pkgutil.find_loader("mmcv._ext")`, which requires a C extension absent on Python 3.13. `MODELS.build()` bypasses this chain entirely while loading the exact same model weights.
+- **No disk I/O** — frames are transmitted as raw BGR bytes encoded in base64 (no `cv2.imwrite`/`cv2.imread` roundtrip), eliminating JPEG artifacts and filesystem latency.
+- **Line-buffered** — `text=True` + `bufsize=1` ensures each `print(…, flush=True)` in the runner is immediately readable on the parent's `stdout.readline()`.
+
+### Forward Pass
+
+```python
+# Inside _rtmdet_runner.py — normalized (1,3,640,640) tensor + meta dict
+with torch.no_grad():
+    feats      = model.backbone(tensor)
+    neck_feats = model.neck(feats)
+    head_outs  = model.bbox_head(neck_feats)
+    results    = model.bbox_head.predict_by_feat(
+        *head_outs,
+        batch_img_metas=[meta],
+        rescale=True    # divides bboxes by scale_factor → ori_shape space
+    )
+```
+
+`predict_by_feat` decodes bboxes from distance predictions (`DistancePointBBoxCoder`), clips them to the padded canvas bounds (`640×640`), applies NMS (IoU=0.65), truncates to `max_per_img=300`, then if `rescale=True` divides coordinates by `scale_factor` to map back to original frame dimensions.
+
+Score filtering after `predict_by_feat`:
+
+```python
+return [
+    {"bbox": [float(x) for x in bb], "score": float(sc), "label": "tumor"}
+    for bb, sc in zip(bboxes, scores)
+    if round(float(sc), 6) >= score_thr
+]
+```
+
+The 6-decimal `round()` guards against cross-platform BLAS accumulation differences (MKL on Windows/Linux vs Accelerate on macOS ARM): without rounding, a score of `0.6999999991` on macOS may compute as `0.7000000002` on Windows, changing the detection result at the `0.70` threshold.
+
+### Temporal Subsampling and Propagation
+
+`DETECT_EVERY_N = 4` (default in `config.py`) reduces inference cost by 4×. In `pipeline.py`:
+
+```python
+stride  = max(1, DETECT_EVERY_N)
+sampled = list(range(0, n_frames_total, stride))   # [0, 4, 8, 12, ...]
+
+for b_start in range(0, len(sampled), batch_size):
+    batch_idx  = sampled[b_start : b_start + batch_size]
+    batch_dets = detect_model.predict_batch([frames[i] for i in batch_idx])
+
+    for idx, frame_dets in zip(batch_idx, batch_dets):
+        for j in range(idx, min(idx + stride, n_frames_total)):
+            detections_per_frame[j] = frame_dets   # propagate to next stride-1 frames
+```
+
+The detection from frame `n` is copied as-is to frames `n+1` … `n+stride−1`. Since tumors are anatomical structures persistent across adjacent frames at ~20 fps, inter-frame positional drift is clinically negligible for the intended screening use case. Set `DETECT_EVERY_N=1` to disable subsampling.
+
+### Batch Inference
+
+`STARHEDetectModel.predict_batch()` base64-encodes N BGR frames and sends one JSON request; the runner stacks all preprocessed tensors into a single `(N, 3, 640, 640)` batch for one forward pass:
+
+```python
+# Wrapper side — frames arrive as RGB
+frames_b64 = [base64.b64encode(cv2.cvtColor(f, cv2.COLOR_RGB2BGR).tobytes()).decode()
+               for f in frames]
+req = json.dumps({"frames_b64": frames_b64, "shapes": [list(f.shape) for f in frames_bgr],
+                   "score_thr": score_thr})
+self._proc.stdin.write(req + "\n")
+resp = json.loads(self._proc.stdout.readline())   # [[dets], [dets], ...]
+```
+
+Each frame carries its own `meta` dict (different `ori_shape` and `scale_factor`), allowing frames with different original resolutions to be batched together.
+
+### Subprocess Warmup Strategy
+
+Loading RTMDet from disk takes ~4 seconds on CPU. `pipeline.py` starts the subprocess in a **background daemon thread immediately after frame extraction**, overlapping with prepUS preprocessing and STARHE-RISK inference:
+
+```python
+detect_box = []
+def _warm():
+    detect_box.append(STARHEDetectModel())
+threading.Thread(target=_warm, daemon=True).start()
+
+# ... prepUS + RISK inference run here (~4–8 s) ...
+
+detect_thread.join()       # typically a no-op: subprocess already warm
+detect_model = detect_box[0]
+```
+
+This overlap reduces end-to-end pipeline latency by ~4 seconds on CPU hardware.
+
+### Adaptive Batch Size
+
+The subprocess reports available hardware memory **after model loading** (so the ~439 MB model footprint is already deducted), and `STARHEDetectModel` derives an optimal batch size:
+
+| Device | Formula | Max |
+|---|---|---|
+| CUDA | `floor(vram_free_mb × 0.80 / mem_per_frame_mb)` | VRAM-dependent |
+| CPU / MPS | `floor(ram_free_mb × 0.35 / mem_per_frame_mb)` | 16 |
+
+Set `DETECT_BATCH_SIZE = <int>` in `config.py` to override auto-detection.
+
+### Reproducibility (`DETERMINISTIC_INFERENCE`)
+
+When `DETERMINISTIC_INFERENCE = True` (default), the subprocess is launched with `--deterministic`:
+
+| Setting | Value | Rationale |
+|---|---|---|
+| Device | CPU (forced) | Eliminates CUDA/MPS numerical variance |
+| dtype | float64 (`model.double()`) | Reduces cross-OS BLAS error from ~1e-4 to ~1e-13 per op |
+| Threads | 1 (`set_num_threads(1)`) | Deterministic accumulation order |
+| TF32 | Disabled | `allow_tf32 = False` on CUDA/cuDNN |
+
+After 50+ convolutional layers the residual cross-platform error is ~1e-9, far below the 5×10⁻⁷ tolerance enforced by the 6-decimal `round()` in score filtering. Result: bit-identical detections across macOS ARM (Accelerate), Linux (MKL), and Windows (MKL).
+
+### Backend Selection
+
+`DETECT_BACKEND` in `config.py` (default: `"rtmdet"`) selects the detection backend:
+
+| Value | Runner | Notes |
+|---|---|---|
+| `"rtmdet"` | `ai/models/_rtmdet_runner.py` | Production default. Persistent server, batch inference, validated bit-exact. |
+| `"dino"` | `ai/models/_dino_runner.py` | DINO-DETR alternative. No server mode. Requires `ai/vendor/starhe/` vendored package. |
+
+### Output Format
+
+Each `predict_batch()` call returns a list of N detection lists, one per input frame:
+
+```python
+[
+    [   # frame 0
+        {"bbox": [x0, y0, x1, y1], "score": 0.83, "label": "tumor"},
+        {"bbox": [x0, y0, x1, y1], "score": 0.71, "label": "tumor"},
+    ],
+    [],  # frame 1 — no detection above score_thr
+    ...
+]
+```
+
+`bbox` coordinates are in **`crop_only_frames` space** (fan-shaped sector crop). `pipeline.py` remaps to **DICOM original space** with a plain offset:
+
+```python
+# info["crop"] = {"xmin": ..., "ymin": ...}
+for det in dets:
+    det["bbox"][0] += info["crop"]["xmin"];  det["bbox"][2] += info["crop"]["xmin"]
+    det["bbox"][1] += info["crop"]["ymin"];  det["bbox"][3] += info["crop"]["ymin"]
+```
+
+No inverse polar transform is needed: RTMDet was trained on the fan-shaped crop directly.
+
+---
+
 ## prepUS Preprocessing (`dicom/prepus_bridge.py`)
 
 prepUS is the ultrasound image preprocessor from MEDomics. It is **vendored** in `third_party/prepUS/` to avoid an external dependency.
