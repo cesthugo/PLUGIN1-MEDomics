@@ -24,7 +24,6 @@ Remappage : simple offset (xmin/ymin) pour revenir dans l'espace DICOM.
 """
 
 import threading
-import cv2
 import numpy as np
 
 from starhe_plugin.dicom.reader         import load_dicom, extract_frames, frame_to_uint8
@@ -37,6 +36,7 @@ from starhe_plugin.ai.starhe_detect    import STARHEDetectModel
 from starhe_plugin.db.mongo_client     import save_result
 from starhe_plugin.utils.go_print      import go_print, go_progress, go_result
 from starhe_plugin.config              import DETECT_EVERY_N
+
 
 
 
@@ -166,7 +166,7 @@ def run_pipeline(dicom_path: str,
     roi = None
     if info and "crop" in info:
         c = info["crop"]
-        roi = (c["xmin"], c["ymin"], c["xmax"], c["ymax"])
+        roi = (int(c["xmin"]), int(c["ymin"]), int(c["xmax"]), int(c["ymax"]))
 
     # ── 5. STARHE-RISK ────────────────────────────────────────────────────────
     risk_result: dict | None = None

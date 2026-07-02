@@ -117,7 +117,7 @@ DETERMINISTIC_INFERENCE: bool = True
 #         d'entraînement (qui a vu des crops avec artefacts mp4v).
 # False : pipeline historique (preprocess_with_prepus) — reproduit exactement
 #         le chemin d'entraînement de Jérémy sur la même plateforme.
-PREPUS_BYPASS_MP4: bool = False
+PREPUS_BYPASS_MP4: bool = True
 
 # ── Décodage DICOM via weasis-dcm2png ────────────────────────────────────────
 # `pydicom.pixel_array` n'applique ni la Modality LUT ni la VOI LUT du DICOM,

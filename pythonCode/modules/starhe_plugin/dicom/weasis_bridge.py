@@ -65,7 +65,8 @@ def _java_bin() -> str | None:
     import platform
     arch = "arm64" if platform.machine() == "arm64" else "x64"
     os_name = "mac" if sys.platform == "darwin" else ("win" if sys.platform == "win32" else "linux")
-    bundled = Path(PROJECT_ROOT) / "renderer" / "build-resources" / f"jre-{os_name}-{arch}" / "bin" / "java"
+    java_exe = "java.exe" if sys.platform == "win32" else "java"
+    bundled = Path(PROJECT_ROOT) / "renderer" / "build-resources" / f"jre-{os_name}-{arch}" / "bin" / java_exe
     if bundled.is_file():
         try:
             r = subprocess.run([str(bundled), "-version"],

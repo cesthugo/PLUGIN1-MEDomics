@@ -22,7 +22,7 @@ Two AI models are used:
 
 | Model | Architecture | Task | Checkpoint |
 |---|---|---|---|
-| **STARHE-RISK** | C3D (3D-CNN via mmaction2 subprocess) | Binary classification: low / high HCC risk | `models/epoch_45.pth` |
+| **STARHE-RISK** | C3D (3D-CNN via mmaction2 subprocess) | Binary classification: low / high HCC risk | `models/best_acc_mean_cls_f1_epoch_14.pth` |
 | **STARHE-DETECT** | RTMDet (mmdet) or DINO-DETR | Detection and localization of hepatic lesions | `models/best_coco_bbox_mAP_50_iter_2100.pth` |
 
 ---
@@ -195,7 +195,7 @@ To keep the `.dmg` small (325 MB instead of ~1 GB), the two C3D + RTMDet checkpo
 
 | Fichier | Taille | Modèle |
 |---|---|---|
-| `epoch_45.pth` | 312 MB | C3D — STARHE-RISK (final-epoch checkpoint, used for reference predictions) |
+| `best_acc_mean_cls_f1_epoch_14.pth` | 312 MB | C3D — STARHE-RISK (best validation mean-class-F1 checkpoint) |
 | `best_coco_bbox_mAP_50_iter_2100.pth` | 439 MB | RTMDet — STARHE-DETECT |
 
 **Emplacement** : `app.getPath('userData')/models/` — sur macOS : `~/Library/Application Support/starhe-plugin/models/`.
@@ -729,15 +729,11 @@ STARHE-RISK classifies a hepatic ultrasound video clip as **low or high HCC risk
 
 | File | Size | Notes |
 |---|---|---|
-| `epoch_45.pth` | 312 MB | State dict only — stripped from the 596 MB full training checkpoint (which includes optimizer state). This is the checkpoint used to generate `pred_test.pkl` (reference predictions), confirmed by the eval config `c3d_starhe.py` (`load_from = '.../epoch_45.pth'`). |
+| `best_acc_mean_cls_f1_epoch_14.pth` | 312 MB | Best checkpoint by validation mean-class F1 (early stopping). `STARHE_RISK_CHECKPOINT` in `config.py` points to this file, and Electron's `download-models.ts` fetches it on first launch. |
 
-The stripped checkpoint was produced with:
-```python
-ckpt = torch.load('epoch_45_full.pth', map_location='cpu', weights_only=False)
-torch.save({'state_dict': ckpt['state_dict']}, 'epoch_45.pth')
-```
+The plugin's copy is **byte-identical** (MD5 `2b212cc522f102d71f14ca740e64f108`) to the original training checkpoint at `starhe_share/models/classification/best_acc_mean_cls_f1_epoch_14.pth`, and reproduces its scores bit-for-bit on the 24-patient test set (see [Validation](#validation-june-22-2026)).
 
-> **`epoch_45.pth` vs `best_acc_mean_cls_f1_epoch_14.pth`**: `epoch_14` is the early-stopping best checkpoint by validation F1; `epoch_45` is the final-epoch checkpoint used to produce the reference `pred_test.pkl`. They are different models. The plugin uses `epoch_45` to reproduce the published reference results exactly. `STARHE_RISK_CHECKPOINT` in `config.py` points to `epoch_45.pth`.
+> **Note on `epoch_45.pth`**: the training project also ships a final-epoch checkpoint `epoch_45.pth` (624 MB full checkpoint incl. optimizer state). It is **not** used by the plugin — the plugin loads the validation-F1 best `best_acc_mean_cls_f1_epoch_14.pth`. The original eval config `c3d_starhe.py` has `load_from = None` (it trains from the Sports-1M pretrained backbone, not from another checkpoint).
 
 ### Subprocess Architecture (`_c3d_runner.py`)
 
@@ -747,7 +743,7 @@ mmcv's C extension (`mmcv._ext`) is not compiled for Python 3.13. All mmaction2 
 STARHERiskModel (main process, Python 3.13)
   │
   │  subprocess.Popen([python, ai/models/_c3d_runner.py,
-  │                    --ckpt  models/epoch_45.pth,
+  │                    --ckpt  models/best_acc_mean_cls_f1_epoch_14.pth,
   │                    --device cpu, --deterministic])
   ▼
 _c3d_runner.py (subprocess)
@@ -973,7 +969,7 @@ DICOM → ffmpeg MP4 → prepUS.removeLayoutFile
       → Resize(scale=(-1,128)) → CenterCrop(112) → FormatShape(NCTHW)
       → ActionDataPreprocessor(mean=[104,117,128], std=[1,1,1], to_rgb=False)
       → C3D backbone + I3DHead → cross-entropy loss
-Checkpoint selected: epoch_45.pth
+Checkpoint selected: best_acc_mean_cls_f1_epoch_14.pth (best validation mean-class F1)
 ```
 
 The `video.mp4` files produced by `cv2.VideoWriter(mp4v)` on Jean Zay Linux differ bit-for-bit from files produced on macOS ARM (different FFmpeg linked to OpenCV). This is the sole source of ~10% MAE vs `pred_test.pkl` when using locally regenerated prepUS crops — not a code defect. The MP4 bypass mode (`PREPUS_BYPASS_MP4=True`) reduces this to ~8% by eliminating the VideoWriter roundtrip; see [prepUS Preprocessing](#prepus-preprocessing-dicomprepus_bridgepy) below.

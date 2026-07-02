@@ -48,7 +48,15 @@ _SCRIPT_DIR  = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parent
 _WEASIS_JAR   = _PROJECT_ROOT / "third_party" / "weasis-dcm2png" / "dist" / "weasis-dcm2png.jar"
 _WEASIS_NATIVE = _PROJECT_ROOT / "third_party" / "weasis-dcm2png" / "dist" / "native"
-_BUNDLED_JAVA = _PROJECT_ROOT / "renderer" / "build-resources" / "jre-mac-arm64" / "bin" / "java"
+
+def _resolve_bundled_java() -> Path:
+    import platform as _plat
+    arch    = "arm64" if _plat.machine() == "arm64" else "x64"
+    os_name = "mac" if sys.platform == "darwin" else ("win" if sys.platform == "win32" else "linux")
+    java_exe = "java.exe" if sys.platform == "win32" else "java"
+    return _PROJECT_ROOT / "renderer" / "build-resources" / f"jre-{os_name}-{arch}" / "bin" / java_exe
+
+_BUNDLED_JAVA = _resolve_bundled_java()
 
 
 # ── FPS resolution ─────────────────────────────────────────────────────────────
@@ -99,11 +107,7 @@ def target_dimensions(rows: int, cols: int) -> tuple[int, int]:
     else:
         th = 360
     tw_raw = cols * th / rows
-    # Round to nearest even number (avoids banker's-rounding edge cases).
-    # floor(tw/2)*2 is the nearest-or-equal lower even; add 2 if the raw value
-    # is closer to the higher even.
-    tw_lo = math.floor(tw_raw / 2) * 2
-    tw = tw_lo if (tw_raw - tw_lo) <= 1.0 else tw_lo + 2
+    tw = math.ceil(tw_raw / 2) * 2
     return tw, th
 
 
@@ -178,8 +182,21 @@ def export_pngs_weasis(dicom_path: str, out_dir: str, java: str) -> tuple[float,
 
 # ── ffmpeg encode ──────────────────────────────────────────────────────────────
 
+def _best_av1_codec() -> str:
+    """Return 'libsvtav1' if available, else fall back to 'libx264'."""
+    try:
+        r = subprocess.run(["ffmpeg", "-encoders"], capture_output=True, text=True, timeout=10)
+        if "libsvtav1" in r.stdout:
+            return "libsvtav1"
+    except Exception:
+        pass
+    return "libx264"
+
+_DEFAULT_CODEC = _best_av1_codec()
+
+
 def pngs_to_mp4_av1(png_dir: str, fps: float, out_mp4: str,
-                     width: int, height: int, codec: str = "libsvtav1",
+                     width: int, height: int, codec: str = _DEFAULT_CODEC,
                      max_frames: int | None = None) -> None:
     """
     Encode sorted PNGs to AV1 MP4, scaling to (width, height).
@@ -221,7 +238,7 @@ def avi_to_mp4_av1(avi_path: str, fps: float, out_mp4: str,
         "-i", avi_path,
         "-vf", vf,
         "-r", str(fps),
-        "-c:v", "libsvtav1", "-crf", "30", "-preset", "8",
+        "-c:v", _DEFAULT_CODEC, "-crf", "30", "-preset", "8",
         "-pix_fmt", "yuv420p",
     ] + frames_arg + [out_mp4]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -364,7 +381,7 @@ def convert_one(input_path: str, out_mp4: str, java: str | None,
         codec = "libx264"
     else:
         tw, th = target_dimensions(rows, cols)
-        codec = "libsvtav1"
+        codec = _DEFAULT_CODEC
 
     result.update({"fps": fps, "width": tw, "height": th,
                    "frames_dicom": n_frames, "codec": codec})

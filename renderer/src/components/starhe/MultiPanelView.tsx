@@ -62,7 +62,15 @@ export function MultiPanelView({
   const NOOP_CTX = React.useCallback((_a: number, _b: number) => {}, []);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+    <div
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}
+      // Suivi du drag au niveau du conteneur (englobe la grille ET la zone
+      // d'expansion) : la zone reste montée tant que le curseur est dans la vue,
+      // même en quittant la grille — sinon elle se démonte avant le drop.
+      onDragEnter={() => setDragDepth(d => d + 1)}
+      onDragLeave={() => setDragDepth(d => Math.max(0, d - 1))}
+      onDrop={() => { setDragDepth(0); setDragOverExpand(false); }}
+    >
 
       {/* Barre d'en-tête du mode multi-panneaux */}
       <div style={{
@@ -100,9 +108,6 @@ export function MultiPanelView({
           overflow: 'hidden', minHeight: 0,
           position: 'relative',
         }}
-        onDragEnter={() => setDragDepth(d => d + 1)}
-        onDragLeave={() => setDragDepth(d => d - 1)}
-        onDrop={() => setDragDepth(0)}
       >
         {Array.from({ length: slots }, (_, i) => {
           const tabId      = tabIds[i];
@@ -130,6 +135,7 @@ export function MultiPanelView({
                 e.preventDefault();
                 e.stopPropagation();
                 setDragOverSlot(null);
+                setDragDepth(0);
                 const raw = e.dataTransfer.getData('text/plain');
                 if (!raw.startsWith('starhe-tab:')) return;
                 const droppedId = parseInt(raw.replace('starhe-tab:', ''), 10);
@@ -278,7 +284,7 @@ export function MultiPanelView({
           }}
           onDragEnter={e => { e.stopPropagation(); setDragOverExpand(true); }}
           onDragLeave={() => setDragOverExpand(false)}
-          onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; }}
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; }}
           onDrop={e => {
             e.preventDefault(); e.stopPropagation();
             setDragDepth(0); setDragOverExpand(false);

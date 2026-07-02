@@ -58,26 +58,59 @@ def _ensure_importable() -> None:
     )
 
 
+def _fallback_crop_only(frames: np.ndarray) -> "tuple[np.ndarray, dict]":
+    """
+    Fallback ultime si prepUS (Mode A et B) échoue sur find_linear_fov.
+    Utilise crop.py (analyse temporelle de variabilité) pour détecter la
+    bounding-box du cône US. Pas de masque UI — uniquement un crop géométrique.
+
+    Retourne les frames en niveaux de gris rognées avec le même format
+    de tuple que preprocess_with_prepus / preprocess_with_prepus_inmem.
+    """
+    from starhe_plugin.dicom.crop import detect_ultrasound_roi_temporal
+
+    if frames.ndim == 4:
+        T, H, W, _ = frames.shape
+        gray = np.stack([
+            cv2.cvtColor(f.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+            for f in frames
+        ])
+    else:
+        T, H, W = frames.shape
+        gray = frames.astype(np.uint8)
+
+    x0, y0, x1, y1 = detect_ultrasound_roi_temporal(gray)
+    crop_frames = gray[:, y0:y1, x0:x1]
+    info = {
+        "crop": {"xmin": x0, "ymin": y0, "xmax": x1, "ymax": y1},
+        "original_shape": {"width": W, "height": H},
+        "threshold": -1.0,
+        "fallback": "crop.py",
+    }
+    go_print("warning",
+             f"prepus_bridge[crop.py]: crop {crop_frames.shape} "
+             "(fallback — prepUS find_linear_fov a échoué sur ce DICOM ; "
+             "pas de masque UI appliqué)")
+    return crop_frames, info
+
+
 def map_detections_to_dicom_coords(
     detections_per_frame: list,
     prepus_info: "dict | None",
 ) -> list:
-    """
-    Remappe les bboxes de l'espace crop vers l'espace image DICOM original
-    via un simple décalage (xmin, ymin).
-    """
+    """Remappe les bboxes de l'espace crop vers l'espace image DICOM original."""
     if prepus_info is None or "crop" not in prepus_info:
         return detections_per_frame
     crop = prepus_info["crop"]
-    xmin = int(crop.get("xmin", 0))
-    ymin = int(crop.get("ymin", 0))
+    cx = int(crop.get("xmin", 0))
+    cy = int(crop.get("ymin", 0))
     mapped: list = []
     for frame_dets in detections_per_frame:
         mapped_dets: list = []
         for det in frame_dets:
             new_det = dict(det)
             x0, y0, x1, y1 = det["bbox"]
-            new_det["bbox"] = [x0 + xmin, y0 + ymin, x1 + xmin, y1 + ymin]
+            new_det["bbox"] = [x0 + cx, y0 + cy, x1 + cx, y1 + cy]
             mapped_dets.append(new_det)
         mapped.append(mapped_dets)
     return mapped
@@ -159,6 +192,15 @@ def preprocess_with_prepus(
     --------
     crop_frames : (T, H_crop, W_crop) uint8 niveaux de gris — video.mp4
     info        : dict depuis info.json (clés "crop", "backscan", …) ou None
+
+    Chaîne de fallback
+    ------------------
+    Mode A (ce chemin) → si video.mp4 absent/vide → Mode B (bypass numpy)
+                       → si find_linear_fov échoue aussi → crop.py
+
+    Motif du fallback Mode A : removeLayoutFile() retourne None silencieusement
+    quand find_linear_fov épuise ses retries (thresh ≤ 0.005), sans lever
+    d'exception et sans écrire video.mp4.
     """
     _ensure_importable()
     from prepUS.cli import removeLayoutFile  # type: ignore[import]
@@ -166,8 +208,8 @@ def preprocess_with_prepus(
     if frames.ndim != 4 or frames.shape[3] != 3:
         raise ValueError(f"frames doit être (T, H, W, 3), reçu {frames.shape}")
 
-    T, H, W, _ = frames.shape
     work_dir = tempfile.mkdtemp(prefix="starhe_prepus_")
+    _mode_a_result: "tuple[np.ndarray, dict | None] | None" = None
 
     try:
         # ── 1. Encoder les frames → MP4 via ffmpeg (codec mpeg4, qscale 1) ───
@@ -197,31 +239,52 @@ def preprocess_with_prepus(
 
         # ── 4. Lire video.mp4 (cône rogné, masqué) ───────────────────────────
         video_mp4 = os.path.join(out_dir, "video.mp4")
-        if not os.path.exists(video_mp4):
-            raise RuntimeError(
-                f"video.mp4 absent de {out_dir}. "
-                "prepUS a peut-être échoué (find_linear_fov)."
-            )
+        if os.path.exists(video_mp4):
+            cap = cv2.VideoCapture(video_mp4)
+            buf: list = []
+            while True:
+                ok, frm = cap.read()
+                if not ok:
+                    break
+                gray = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY) if frm.ndim == 3 else frm
+                buf.append(gray)
+            cap.release()
 
-        cap = cv2.VideoCapture(video_mp4)
-        buf: list = []
-        while True:
-            ok, frm = cap.read()
-            if not ok:
-                break
-            gray = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY) if frm.ndim == 3 else frm
-            buf.append(gray)
-        cap.release()
-
-        if not buf:
-            raise RuntimeError("video.mp4 est vide — prepUS a peut-être échoué.")
-
-        crop_frames = np.stack(buf, axis=0)  # (T, H_crop, W_crop) uint8
-        go_print("info", f"prepus_bridge: crop {crop_frames.shape} depuis video.mp4")
-        return crop_frames, info
+            if buf:
+                crop_frames = np.stack(buf, axis=0)  # (T, H_crop, W_crop) uint8
+                go_print("info", f"prepus_bridge: crop {crop_frames.shape} depuis video.mp4")
+                _mode_a_result = (crop_frames, info)
+            else:
+                go_print("warning",
+                         "prepUS Mode A : video.mp4 vide — "
+                         "find_linear_fov a probablement échoué sur ce DICOM")
+        else:
+            go_print("warning",
+                     "prepUS Mode A : video.mp4 absent — removeLayoutFile a retourné "
+                     "silencieusement (find_linear_fov a épuisé ses retries)")
 
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+    if _mode_a_result is not None:
+        return _mode_a_result
+
+    # ── Fallback Mode B : bypass numpy (même algorithme, sans roundtrip MP4) ──
+    go_print("warning",
+             "prepUS Mode A échoué — fallback Mode B (bypass numpy)")
+    try:
+        return preprocess_with_prepus_inmem(
+            frames,
+            fps=fps,
+            thresh=thresh,
+            backscan_width=backscan_width,
+            backscan_height=backscan_height,
+        )
+    except RuntimeError as exc_b:
+        go_print("warning",
+                 f"prepUS Mode B aussi échoué ({exc_b}) — "
+                 "fallback crop.py (crop géométrique, pas de masque UI)")
+        return _fallback_crop_only(frames)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -387,13 +450,19 @@ def preprocess_with_prepus_inmem(
 
     go_print("info", f"prepus_bridge[inmem]: {T} frames RGB → gray (bypass MP4)")
 
-    crop_frames, info = _remove_layout_inmem(
-        gray_frames,
-        fps=fps,
-        thresh=thresh,
-        FOV_tresh=FOV_tresh,
-        backscan_width=backscan_width,
-        backscan_height=backscan_height,
-    )
+    try:
+        crop_frames, info = _remove_layout_inmem(
+            gray_frames,
+            fps=fps,
+            thresh=thresh,
+            FOV_tresh=FOV_tresh,
+            backscan_width=backscan_width,
+            backscan_height=backscan_height,
+        )
+    except RuntimeError as exc:
+        go_print("warning",
+                 f"prepUS in-mem échoué ({exc}) — "
+                 "fallback crop.py (crop géométrique, pas de masque UI)")
+        return _fallback_crop_only(frames)
     go_print("info", f"prepus_bridge[inmem]: crop {crop_frames.shape} (numpy direct)")
     return crop_frames, info

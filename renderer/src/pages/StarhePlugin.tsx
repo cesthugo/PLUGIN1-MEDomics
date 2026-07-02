@@ -205,8 +205,14 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const [showLive,  setShowLive]  = useState(false);
   const [showBatch, setShowBatch] = useState(false);
 
+  // ── Repli des sidebars (gauche : contrôles DICOM · droite : galerie détections) ─
+  const [leftSidebarOpen,  setLeftSidebarOpen]  = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+
+  // ── Drag & drop d'un fichier sur la vue simple → passage en split côte à côte ─
+  const [singleViewDragOver, setSingleViewDragOver] = useState(false);
+
   // ── Vue multi-panneaux ─────────────────────────────────────────────────────
-  const [pendingLayoutOpen, setPendingLayoutOpen] = useState<BatchResultToOpen[] | null>(null);
   const [multiPanel, setMultiPanel] = useState<{ layout: LayoutMode; tabIds: number[] } | null>(null);
   const [showLayoutPicker, setShowLayoutPicker] = useState(false);
 
@@ -635,15 +641,32 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const onDropToPanel = useCallback((slotIdx: number, tabId: number) => {
     setMultiPanel(prev => {
       if (!prev) return prev;
-      const next = [...prev.tabIds]; next[slotIdx] = tabId;
+      const next = [...prev.tabIds];
+      // Anti-doublon : si le fichier est déjà affiché ailleurs, on échange les
+      // deux cases (l'ancien occupant migre vers la case source) plutôt que de
+      // laisser le même fichier dans deux panneaux.
+      const from = next.findIndex((id, idx) => id === tabId && idx !== slotIdx);
+      const displaced = next[slotIdx];
+      next[slotIdx] = tabId;
+      if (from >= 0) next[from] = displaced;
       return { ...prev, tabIds: next };
     });
     switchTab(tabId);
   }, [switchTab]);
 
+  // Drop d'un fichier sur la vue simple → passage en split côte à côte
+  // [fichier courant, fichier déposé]. No-op si on redépose le fichier courant.
+  const onDropToSingleView = useCallback((droppedId: number) => {
+    if (!activeTab || droppedId === activeTab.id) return;
+    setMultiPanel({ layout: 'split-v', tabIds: [activeTab.id, droppedId] });
+    switchTab(droppedId);
+  }, [activeTab, switchTab]);
+
   const onExpandLayout = useCallback((tabId: number) => {
     setMultiPanel(prev => {
       if (!prev) return prev;
+      // Anti-doublon : ne rien faire si le fichier est déjà dans un panneau.
+      if (prev.tabIds.includes(tabId)) return prev;
       const nextLayout: LayoutMode =
         prev.layout === 'split-v' || prev.layout === 'split-h' ? 'quad' : prev.layout;
       const next = [...prev.tabIds];
@@ -847,37 +870,43 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       {/* ── Corps : sidebar + zone principale ─────────────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-        {/* Sidebar */}
-        <Sidebar
-          tab={activeTab}
-          analysisStatus={analysisStatus}
-          darkMode={darkMode}
-          sidebarBg={displaySettings.sidebarBg}
-          textColor={displaySettings.textColor}
-          analysisMode={displaySettings.analysisMode}
-          onLoadDicom={onLoadDicom}
-          onLoadDicomFiles={onLoadDicomFiles}
-          onLoadMp4={onLoadMp4}
-          onLoadPath={onLoadPath}
-          onPrevFrame={onPrevFrame}
-          onNextFrame={onNextFrame}
-          onTogglePlay={onTogglePlay}
-          isPlaying={isPlaying}
-          onFrameScale={onFrameScale}
-          onSpeedChange={onSpeedChange}
-          onLoopChange={onLoopChange}
-          onResetVideo={onResetVideo}
-          onRunPipeline={onRunPipeline}
-          onResetAnalysis={onResetAnalysis}
-          onOpenLive={() => setShowLive(true)}
-          onOpenBatch={() => setShowBatch(true)}
-          onGotoFrame={onGotoFrame}
-          onToggleTheme={() => setDarkMode(d => !d)}
-          onAnalysisModeChange={mode => updateSettings({ analysisMode: mode })}
-        />
+        {/* Sidebar gauche (repliable) */}
+        {leftSidebarOpen && (
+          <Sidebar
+            tab={activeTab}
+            analysisStatus={analysisStatus}
+            darkMode={darkMode}
+            sidebarBg={displaySettings.sidebarBg}
+            textColor={displaySettings.textColor}
+            analysisMode={displaySettings.analysisMode}
+            onLoadDicom={onLoadDicom}
+            onLoadDicomFiles={onLoadDicomFiles}
+            onLoadMp4={onLoadMp4}
+            onLoadPath={onLoadPath}
+            onPrevFrame={onPrevFrame}
+            onNextFrame={onNextFrame}
+            onTogglePlay={onTogglePlay}
+            isPlaying={isPlaying}
+            onFrameScale={onFrameScale}
+            onSpeedChange={onSpeedChange}
+            onLoopChange={onLoopChange}
+            onResetVideo={onResetVideo}
+            onRunPipeline={onRunPipeline}
+            onResetAnalysis={onResetAnalysis}
+            onOpenLive={() => setShowLive(true)}
+            onOpenBatch={() => setShowBatch(true)}
+            onGotoFrame={onGotoFrame}
+            onToggleTheme={() => setDarkMode(d => !d)}
+            onAnalysisModeChange={mode => updateSettings({ analysisMode: mode })}
+          />
+        )}
 
-        {/* Séparateur 1 px */}
-        <div style={{ width: 1, background: '#0a0a14', flexShrink: 0 }} />
+        {/* Toggle repli sidebar gauche (remplace le séparateur 1 px) */}
+        <SidebarToggle
+          side="left"
+          open={leftSidebarOpen}
+          onToggle={() => setLeftSidebarOpen(v => !v)}
+        />
 
         {/* Zone principale */}
         <div
@@ -980,17 +1009,51 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
                 onContextMenu={(x, y) => setCtxMenu({ x, y })}
               />
             ) : (
-              <DicomCanvas
-                tab={activeTab}
-                onZoomPan={onZoomPan}
-                onContrastBright={onContrastBright}
-                onFrameChange={onCanvasFrameChange}
-                onMeasureAdd={onMeasureAdd}
-                onMeasureMove={onMeasureMove}
-                onMeasureLabelMove={onMeasureLabelMove}
-                onMeasureSelect={onMeasureSelect}
-                onContextMenu={(x, y) => setCtxMenu({ x, y })}
-              />
+              <div
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minHeight: 0 }}
+                // Déposer un autre fichier ici → vue côte à côte (split-v).
+                onDragOver={e => {
+                  if (!activeTab) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (!singleViewDragOver) setSingleViewDragOver(true);
+                }}
+                onDragLeave={() => setSingleViewDragOver(false)}
+                onDrop={e => {
+                  e.preventDefault();
+                  setSingleViewDragOver(false);
+                  const raw = e.dataTransfer.getData('text/plain');
+                  if (!raw.startsWith('starhe-tab:')) return;
+                  onDropToSingleView(parseInt(raw.replace('starhe-tab:', ''), 10));
+                }}
+              >
+                <DicomCanvas
+                  tab={activeTab}
+                  onZoomPan={onZoomPan}
+                  onContrastBright={onContrastBright}
+                  onFrameChange={onCanvasFrameChange}
+                  onMeasureAdd={onMeasureAdd}
+                  onMeasureMove={onMeasureMove}
+                  onMeasureLabelMove={onMeasureLabelMove}
+                  onMeasureSelect={onMeasureSelect}
+                  onContextMenu={(x, y) => setCtxMenu({ x, y })}
+                />
+                {/* Indicateur de dépôt (visible pendant le glisser) */}
+                {singleViewDragOver && activeTab && (
+                  <div style={{
+                    position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 30,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(59,130,246,0.10)',
+                    outline: '2px dashed #3b82f6', outlineOffset: -6,
+                  }}>
+                    <span style={{
+                      fontSize: 13, fontWeight: 700, color: '#93c5fd',
+                      background: 'rgba(0,0,0,0.7)', padding: '6px 14px', borderRadius: 6,
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}>⊞ Drop to compare side by side</span>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Bande de vignettes — visible dans les deux modes, draggable vers les panneaux */}
@@ -1009,19 +1072,25 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           )}
         </div>
 
-        {/* ── Panel galerie détections (droit) ──────────────────────────── */}
+        {/* ── Panel galerie détections (droit, repliable) ───────────────── */}
         {displaySettings.analysisMode !== 'risk_only' && activeTab && (
           <>
-            <div style={{ width: 1, background: '#0a0a14', flexShrink: 0 }} />
-            <DetectionGallery
-              framesB64={activeTab.data?.framesB64 ?? []}
-              detections={activeTab.detectionsBy.original ?? []}
-              imgW={activeTab.data?.cols ?? 512}
-              imgH={activeTab.data?.rows ?? 512}
-              onGotoFrame={onGotoFrame}
-              sidebarBg={displaySettings.sidebarBg}
-              textColor={displaySettings.textColor}
+            <SidebarToggle
+              side="right"
+              open={rightSidebarOpen}
+              onToggle={() => setRightSidebarOpen(v => !v)}
             />
+            {rightSidebarOpen && (
+              <DetectionGallery
+                framesB64={activeTab.data?.framesB64 ?? []}
+                detections={activeTab.detectionsBy.original ?? []}
+                imgW={activeTab.data?.cols ?? 512}
+                imgH={activeTab.data?.rows ?? 512}
+                onGotoFrame={onGotoFrame}
+                sidebarBg={displaySettings.sidebarBg}
+                textColor={displaySettings.textColor}
+              />
+            )}
           </>
         )}
       </div>
@@ -1072,8 +1141,11 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             setShowLayoutPicker(false);
             if (layout === 'single') { setMultiPanel(null); return; }
             const slots = layout === 'quad' ? 4 : 2;
-            const ids = Array.from({ length: slots }, (_, i) => tabs[i]?.id ?? -1);
-            ids[0] = activeTabId;
+            // Onglet actif en premier, puis les autres onglets distincts —
+            // sans doublon (un même fichier n'apparaît pas dans deux panneaux).
+            const others = tabs.map(t => t.id).filter(id => id !== activeTabId);
+            const ids = [activeTabId, ...others].slice(0, slots);
+            while (ids.length < slots) ids.push(-1);
             setMultiPanel({ layout, tabIds: ids });
           }}
           onCancel={() => setShowLayoutPicker(false)}
@@ -1095,49 +1167,12 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
           analysisMode={displaySettings.analysisMode}
           onOpenInTab={async (result: BatchResultToOpen) => {
             setShowBatch(false);
-            // Charge le DICOM pour obtenir les frames
-            const name = result.name;
-            addLog(`Loading: ${name}`, 'info');
             try {
-              const data = await (result.serverPath
-                ? (await import('../utilities/starhe/api')).loadDicom(result.serverPath)
-                : Promise.reject(new Error('Chemin serveur absent')));
-              const label  = makeTabLabel(data.studyDate, data.fileName);
-              const newTab: TabState = {
-                ...makeDefaultTab(),
-                label,
-                patientName: data.patientName,
-                dicomPath:   result.serverPath,
-                data,
-                // Injection immédiate des résultats pré-calculés
-                detectionsBy: result.detections?.length
-                  ? { original: result.detections }
-                  : {},
-                resultsBy: result.risk
-                  ? { original: {
-                      riskText: `${result.risk.label} (${(result.risk.score * 100).toFixed(1)} %)`,
-                      riskFg:   /élevé|high/i.test(result.risk.label) ? '#f87171' : '#4ade80',
-                      detText:  `${result.detections?.reduce((a, fd) => a + fd.length, 0) ?? 0} lesion(s)`,
-                      detFg:    '#facc15',
-                    }}
-                  : {},
-              };
-              setTabs(prev => [...prev, newTab]);
-              setActiveTabId(newTab.id);
-              setPatients(prev => {
-                const existIdx = prev.findIndex(p => p.name === data.patientName);
-                if (existIdx >= 0) {
-                  const updated = [...prev];
-                  updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
-                  return updated;
-                }
-                return [...prev, { name: data.patientName, tabIds: [newTab.id] }];
-              });
-              setActivePatientName(data.patientName);
-              addLog(`DICOM loaded with results — ${data.frameCount} frame(s).`, 'success');
+              const newTabId = await openBatchResultAsTab(result);
+              setActiveTabId(newTabId);
             } catch (err: unknown) {
               const msg = err instanceof Error ? err.message : String(err);
-              addLog(`ERREUR ouverture ${name} : ${msg}`, 'error');
+              addLog(`ERREUR ouverture ${result.name} : ${msg}`, 'error');
             }
           }}
         />
@@ -1207,6 +1242,50 @@ function PatientTab({ name, active, onClick }: { name: string; active: boolean; 
       }}
     >
       {name}
+    </div>
+  );
+}
+
+// ── Bouton de repli d'une sidebar ──────────────────────────────────────────────
+// Fin bandeau vertical discret (remplace le séparateur 1 px) avec un chevron.
+// Toujours visible — permet de masquer puis réafficher le panneau adjacent.
+
+function SidebarToggle({
+  side,
+  open,
+  onToggle,
+}: {
+  side: 'left' | 'right';
+  open: boolean;
+  onToggle: () => void;
+}) {
+  // Chevron : « rentrer » le panneau quand ouvert, « sortir » quand fermé.
+  const char = side === 'left'
+    ? (open ? '‹' : '›')
+    : (open ? '›' : '‹');
+  const IDLE = '#0a0a14';
+  const HOVER = '#1e1d2f';
+  return (
+    <div
+      onClick={onToggle}
+      title={open ? 'Masquer le panneau' : 'Afficher le panneau'}
+      style={{
+        width: 14, minWidth: 14, flexShrink: 0,
+        background: IDLE, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#6b7280',
+        transition: 'background 0.15s, color 0.15s',
+      }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLElement).style.background = HOVER;
+        (e.currentTarget as HTMLElement).style.color = '#cbd5e1';
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLElement).style.background = IDLE;
+        (e.currentTarget as HTMLElement).style.color = '#6b7280';
+      }}
+    >
+      <span style={{ fontSize: 14, fontWeight: 700, lineHeight: 1 }}>{char}</span>
     </div>
   );
 }
