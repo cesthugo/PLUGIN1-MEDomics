@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.6.3` — Last updated: June 26, 2026*
+*Version `0.7.0-beta.1` — Last updated: July 9, 2026*
 
 ---
 
@@ -40,7 +40,7 @@ Two AI models are used:
 
 > **DICOM compressed formats**: JPEG Baseline, JPEG Lossless, and JPEG 2000 (lossless/lossy) are all supported via `pylibjpeg` (installed automatically with `requirements.txt`). No additional system library is needed.
 
-> **AI model weights**: the `.pth` checkpoint files (~200 MB each) are **not included** in the repository. They are downloaded automatically by `scripts/run_tkinter.sh` / `scripts/run_tkinter.ps1` from the [GitHub Release STARHE_MODELS](https://github.com/cesthugo/PLUGIN1-MEDomics/releases/tag/STARHE_MODELS). To download them manually: `python scripts/download_models.py`.
+> **AI model weights**: the `.pth` checkpoint files (~200 MB each) are **not included** in the repository. They are downloaded automatically by `scripts/run_tkinter.sh` / `scripts/run_tkinter.ps1` from the dedicated **public** repo [GitHub Release STARHE_MODELS](https://github.com/cesthugo/starhe-models/releases/tag/STARHE_MODELS) — no GitHub token required. To download them manually: `python scripts/download_models.py`.
 >
 > **Private repo — GitHub token required**: since this repository is private, downloading the weights requires a GitHub Personal Access Token.
 >
@@ -205,8 +205,9 @@ Le module [renderer/electron/download-models.ts](renderer/electron/download-mode
 | Priority | Condition | Source |
 |---|---|---|
 | 1 | `STARHE_MODELS_BASE_URL` set | `${STARHE_MODELS_BASE_URL}/<name>` (test override / custom hosting) |
-| 2 | `GITHUB_TOKEN` set | GitHub API `/repos/cesthugo/PLUGIN1-MEDomics/releases/tags/STARHE_MODELS` (private repo) |
-| 3 | default | `https://github.com/cesthugo/PLUGIN1-MEDomics/releases/download/STARHE_MODELS/<name>` (public release) |
+| 2 | `STARHE_MODELS_CDN_URL` set | `${STARHE_MODELS_CDN_URL}/<name>` (baked-in public CDN default) |
+| 3 | `GITHUB_TOKEN` set | GitHub API `/repos/cesthugo/starhe-models/releases/tags/STARHE_MODELS` (optional, public repo) |
+| 4 | default | `https://github.com/cesthugo/starhe-models/releases/download/STARHE_MODELS/<name>` (**public** release — no token) |
 
 On the Python side, [config.py](pythonCode/modules/starhe_plugin/config.py) reads `STARHE_WEIGHTS_DIR` (set by Electron when spawning the Go server in packaged mode) to resolve `.pth` paths. In dev mode, the variable is absent and the code falls back to `MODELS_DIR` (= `pythonCode/modules/starhe_plugin/models/` in the repo).
 
@@ -224,8 +225,8 @@ STARHE_MODELS_BASE_URL=http://localhost:8765 \
 
 The download window should open and progress to 100%, then the app continues its normal boot (splash → Go server → React UI).
 
-> **Phase 4 limitations**:
-> - The `STARHE_MODELS` GitHub release is currently **private** → priority 3 (public URL) returns 404. For final distribution, make the release public or host the `.pth` files on a CDN (then update `RELEASE_DL_BASE` in [download-models.ts](renderer/electron/download-models.ts)).
+> **Phase 4 status**:
+> - **Resolved (July 2026)**: the `.pth` weights are now hosted in the dedicated **public** repo [`cesthugo/starhe-models`](https://github.com/cesthugo/starhe-models/releases/tag/STARHE_MODELS). Any tester downloads them on first launch with **no GitHub token**. The code repo stays private.
 > - To force a re-download after updating weights: delete the `app.getPath('userData')/models/` folder.
 
 ### Multi-Platform CI (Phase 5)

@@ -5,6 +5,12 @@ data/
 diagnostic_crossplatform.py
 diagnostic_*.py
 
+# ── Assistant / internal notes (not distributed) ──────────────────────────────
+CLAUDE.md
+.claude/
+.cursorrules
+memory/
+
 # ── Compiled binaries ─────────────────────────────────────────────────────────
 *.exe
 # Go binaries (compiled locally, OS-specific)

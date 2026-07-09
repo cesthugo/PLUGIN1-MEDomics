@@ -23,7 +23,8 @@ import urllib.request
 from pathlib import Path
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-_REPO    = "https://github.com/cesthugo/PLUGIN1-MEDomics"
+# Weights are hosted in a dedicated PUBLIC repo so no GitHub token is needed.
+_REPO    = "https://github.com/cesthugo/starhe-models"
 _TAG     = "STARHE_MODELS"
 _BASE    = f"{_REPO}/releases/download/{_TAG}"
 
@@ -43,7 +44,7 @@ WEIGHTS = [
 
 # ── GitHub token (private repo) ───────────────────────────────────────────────
 _GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-_API_BASE     = "https://api.github.com/repos/cesthugo/PLUGIN1-MEDomics"
+_API_BASE     = "https://api.github.com/repos/cesthugo/starhe-models"
 
 
 def _make_request(url: str) -> urllib.request.Request:

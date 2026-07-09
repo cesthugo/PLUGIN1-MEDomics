@@ -21,8 +21,10 @@ import * as http  from 'http';
 import { URL } from 'url';
 
 // ── Manifest: 1 source of truth, aligned with scripts/download_models.py ──
+// The weights live in a dedicated PUBLIC repo so any tester can download them
+// on first launch without a GitHub token; the code repo stays private.
 const REPO_OWNER  = 'cesthugo';
-const REPO_NAME   = 'PLUGIN1-MEDomics';
+const REPO_NAME   = 'starhe-models';
 const RELEASE_TAG = 'STARHE_MODELS';
 
 /** Files to download (name in the GitHub Release). */
@@ -33,6 +35,16 @@ export const REQUIRED_MODELS = [
 
 const RELEASE_DL_BASE = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${RELEASE_TAG}`;
 const RELEASE_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/tags/${RELEASE_TAG}`;
+
+/**
+ * Public CDN/host base URL for the `.pth` weights (no auth, no GitHub token).
+ * When set, this is the default download source so **any** tester can fetch the
+ * models on first launch without a GitHub Personal Access Token.
+ * The `.pth` files must be reachable at `${MODELS_CDN_BASE}/<file-name>`.
+ * Overridable at runtime via `STARHE_MODELS_CDN_URL`. Leave empty to fall back
+ * to the GitHub release URL (only works if the STARHE_MODELS release is public).
+ */
+const MODELS_CDN_BASE = (process.env.STARHE_MODELS_CDN_URL || '').replace(/\/$/, '');
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
 
@@ -105,6 +117,11 @@ function httpGet(urlStr: string, headers: Record<string, string>): Promise<{ res
 async function resolveAssetUrl(name: string): Promise<string> {
   if (TEST_BASE_URL) {
     return `${TEST_BASE_URL.replace(/\/$/, '')}/${name}`;
+  }
+  // Public CDN takes precedence over the token-less GitHub path so testers
+  // without a GitHub token can still fetch the weights on first launch.
+  if (MODELS_CDN_BASE) {
+    return `${MODELS_CDN_BASE}/${name}`;
   }
   if (!GITHUB_TOKEN) {
     return `${RELEASE_DL_BASE}/${name}`;

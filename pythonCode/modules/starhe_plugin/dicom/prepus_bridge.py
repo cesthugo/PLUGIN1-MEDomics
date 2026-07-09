@@ -170,6 +170,110 @@ def _frames_to_mp4_cv2(frames: np.ndarray, fps: float, out_mp4: str) -> None:
     go_print("info", f"prepus_bridge: cv2.VideoWriter(mp4v) {T} frames → {os.path.basename(out_mp4)}")
 
 
+def _read_video_mp4_gray(video_mp4: str) -> "np.ndarray | None":
+    """Reads a video.mp4 produced by prepUS → (T, H_crop, W_crop) uint8 grayscale."""
+    if not os.path.exists(video_mp4):
+        return None
+    cap = cv2.VideoCapture(video_mp4)
+    buf: list = []
+    while True:
+        ok, frm = cap.read()
+        if not ok:
+            break
+        gray = cv2.cvtColor(frm, cv2.COLOR_BGR2GRAY) if frm.ndim == 3 else frm
+        buf.append(gray)
+    cap.release()
+    return np.stack(buf, axis=0) if buf else None
+
+
+def preprocess_with_prepus_from_video(
+    video_path: str,
+    thresh: float = -1.0,
+    backscan_width: int = 512,
+    backscan_height: int = 512,
+) -> "tuple[np.ndarray, dict | None]":
+    """
+    Aligned prepUS path: runs prepUS.removeLayoutFile DIRECTLY on an existing
+    video file (mp4), WITHOUT the intermediate mpeg4 re-encode used by
+    `preprocess_with_prepus`.
+
+    Rationale
+    ---------
+    The training ground-truth (Jérémy) fed prepUS the video file produced at
+    step 1 (DICOM → PNG → ffmpeg → mp4). Re-encoding the decoded frames to
+    mpeg4 (`_frames_to_mp4_ffmpeg`) before prepUS alters the pixels, shifting
+    prepUS's unique-pixel static map / auto-threshold → different UI mask and
+    crop bbox → different C3D input. Reading the step-1 mp4 directly removes
+    that divergence.
+
+    Parameters
+    ----------
+    video_path : path to the source video (mp4/mov/avi) — read directly by
+                 prepUS via sonocrop.loadvideo (no re-encode).
+    thresh     : variability threshold; -1 = automatic (prepUS default).
+    backscan_width / backscan_height : backscan dimensions.
+
+    Returns
+    -------
+    crop_frames : (T, H_crop, W_crop) uint8 grayscale — video.mp4
+    info        : dict from info.json or None
+
+    Fallback : if find_linear_fov fails (no video.mp4) → crop.py geometric crop.
+    """
+    _ensure_importable()
+    from prepUS.cli import removeLayoutFile  # type: ignore[import]
+
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Vidéo prepUS introuvable : {video_path}")
+
+    work_dir = tempfile.mkdtemp(prefix="starhe_prepus_direct_")
+    try:
+        out_dir = os.path.join(work_dir, "out")
+        removeLayoutFile(
+            input_file=video_path,
+            output_dir=out_dir,
+            thresh=thresh,
+            back_scan_conversion=True,
+            backscan_width=backscan_width,
+            backscan_height=backscan_height,
+            save_mask=False,
+            save_cropped_mask=False,
+            save_info=True,
+        )
+
+        info: "dict | None" = None
+        info_path = os.path.join(out_dir, "info.json")
+        if os.path.exists(info_path):
+            with open(info_path, encoding="utf-8") as fh:
+                info = json.load(fh)
+
+        crop_frames = _read_video_mp4_gray(os.path.join(out_dir, "video.mp4"))
+        if crop_frames is not None:
+            go_print("info",
+                     f"prepus_bridge[direct]: crop {crop_frames.shape} depuis video.mp4 "
+                     "(lecture mp4 directe, sans ré-encodage mpeg4)")
+            return crop_frames, info
+
+        go_print("warning",
+                 "prepUS direct : video.mp4 absent (find_linear_fov a échoué) — "
+                 "fallback crop.py")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+    # Fallback: geometric crop on the decoded frames (no UI mask)
+    import cv2 as _cv2
+    cap = _cv2.VideoCapture(video_path)
+    buf = []
+    while True:
+        ok, frm = cap.read()
+        if not ok:
+            break
+        buf.append(_cv2.cvtColor(frm, _cv2.COLOR_BGR2RGB))
+    cap.release()
+    frames_rgb = np.stack(buf, axis=0) if buf else np.zeros((0, 0, 0, 3), np.uint8)
+    return _fallback_crop_only(frames_rgb)
+
+
 def preprocess_with_prepus(
     frames: np.ndarray,
     fps: float = 22.0,
