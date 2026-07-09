@@ -1,19 +1,19 @@
-// LayoutPickerModal.tsx — Sélecteur de disposition pour la vue multi-panneaux STARHE
+// LayoutPickerModal.tsx — Layout picker for the STARHE multi-panel view
 //
-// Affiché lorsque l'utilisateur ouvre plusieurs fichiers simultanément depuis le
-// BatchModal. L'utilisateur choisit un des 4 layouts puis la vue multi-panneaux
-// s'ouvre (disposition fixe — ne peut pas être modifiée après sélection).
+// Shown when the user opens several files simultaneously from the
+// BatchModal. The user picks one of the 4 layouts then the multi-panel view
+// opens (fixed layout — cannot be changed after selection).
 
 import React from 'react';
 import {
   CARD_BG, CARD_BORDER, SBAR_FG, SBAR_MUTED,
 } from '../../utilities/starhe/colors';
 
-// ── Type exporté ─────────────────────────────────────────────────────────────
+// ── Exported type ─────────────────────────────────────────────────────────────
 
 export type LayoutMode = 'single' | 'split-v' | 'split-h' | 'quad';
 
-// ── Icônes SVG des layouts ───────────────────────────────────────────────────
+// ── SVG icons of the layouts ──────────────────────────────────────────────────
 
 function LayoutIcon({ mode }: { mode: LayoutMode }) {
   const W = 64, H = 46, P = 4, G = 3, R = 2;
@@ -57,7 +57,7 @@ function LayoutIcon({ mode }: { mode: LayoutMode }) {
   );
 }
 
-// ── Données des options ──────────────────────────────────────────────────────
+// ── Option data ───────────────────────────────────────────────────────────────
 
 interface LayoutOption {
   mode:        LayoutMode;
@@ -73,10 +73,10 @@ const OPTIONS: LayoutOption[] = [
   { mode: 'quad',    label: '4 files',        description: '2×2 Grid',          slots: 4 },
 ];
 
-// ── Composant ────────────────────────────────────────────────────────────────
+// ── Component ────────────────────────────────────────────────────────────────
 
 interface Props {
-  /** Nombre de fichiers que l'utilisateur souhaite ouvrir */
+  /** Number of files the user wants to open */
   count: number;
   onPick:   (layout: LayoutMode) => void;
   onCancel: () => void;

@@ -1,16 +1,16 @@
 /**
- * electron/download-models.ts — Téléchargement des poids IA STARHE au 1er lancement
+ * electron/download-models.ts — Download of the STARHE AI weights on first launch
  *
- * Source de vérité du manifeste : repo GitHub Release `STARHE_MODELS` du même
- * dépôt que `scripts/download_models.py` (cesthugo/PLUGIN1-MEDomics).
+ * Source of truth for the manifest: the `STARHE_MODELS` GitHub Release of the same
+ * repo as `scripts/download_models.py` (cesthugo/PLUGIN1-MEDomics).
  *
- * En mode dev : pas de téléchargement (les .pth sont supposés présents dans
+ * In dev mode: no download (the .pth files are assumed present in
  *               pythonCode/modules/starhe_plugin/models/).
- * En mode packagé : si `app.getPath('userData')/models/<file>.pth` est absent,
- *                   afficher une fenêtre avec barre de progression et télécharger.
+ * In packaged mode: if `app.getPath('userData')/models/<file>.pth` is missing,
+ *                   show a window with a progress bar and download.
  *
- * GitHub privé : passer `GITHUB_TOKEN=ghp_xxx` dans l'env Electron pour activer
- *                l'auth Bearer. Sans token et avec un repo privé : 404.
+ * Private GitHub: pass `GITHUB_TOKEN=ghp_xxx` in the Electron env to enable
+ *                Bearer auth. Without a token and with a private repo: 404.
  */
 
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
@@ -20,12 +20,12 @@ import * as https from 'https';
 import * as http  from 'http';
 import { URL } from 'url';
 
-// ── Manifeste : 1 source de vérité, alignée avec scripts/download_models.py ──
+// ── Manifest: 1 source of truth, aligned with scripts/download_models.py ──
 const REPO_OWNER  = 'cesthugo';
 const REPO_NAME   = 'PLUGIN1-MEDomics';
 const RELEASE_TAG = 'STARHE_MODELS';
 
-/** Fichiers à télécharger (nom dans la Release GitHub). */
+/** Files to download (name in the GitHub Release). */
 export const REQUIRED_MODELS = [
   'best_acc_mean_cls_f1_epoch_14.pth',     // C3D classification ~312 MB
   'best_coco_bbox_mAP_50_iter_2100.pth',   // RTMDet detection   ~439 MB
@@ -36,19 +36,19 @@ const RELEASE_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
 
-/** Override pour tests : si défini, sert les modèles depuis ce préfixe d'URL
- *  (ex. `http://localhost:8000` pointant vers un dossier contenant les .pth).
- *  Ignoré dès qu'une release publique GitHub est disponible. */
+/** Test override: if set, serves the models from this URL prefix
+ *  (e.g. `http://localhost:8000` pointing to a folder containing the .pth files).
+ *  Ignored as soon as a public GitHub release is available. */
 const TEST_BASE_URL = process.env.STARHE_MODELS_BASE_URL || '';
 
-// ── Chemins ───────────────────────────────────────────────────────────────────
+// ── Paths ─────────────────────────────────────────────────────────────────────
 
-/** Dossier où les poids `.pth` doivent être présents avant de booter le pipeline. */
+/** Directory where the `.pth` weights must be present before booting the pipeline. */
 export function getWeightsDir(): string {
   return path.join(app.getPath('userData'), 'models');
 }
 
-/** True si tous les fichiers du manifeste existent et font > 1 MB (sanity). */
+/** True if all the manifest files exist and are > 1 MB (sanity check). */
 export function modelsReady(): boolean {
   const dir = getWeightsDir();
   return REQUIRED_MODELS.every((name) => {
@@ -100,8 +100,8 @@ function httpGet(urlStr: string, headers: Record<string, string>): Promise<{ res
   });
 }
 
-/** Pour un repo privé, GET /releases/download/ renvoie 404. Il faut passer par
- *  l'API et récupérer l'URL `assets[].url` avec header Accept: octet-stream. */
+/** For a private repo, GET /releases/download/ returns 404. Must go through
+ *  the API and fetch the `assets[].url` URL with the Accept: octet-stream header. */
 async function resolveAssetUrl(name: string): Promise<string> {
   if (TEST_BASE_URL) {
     return `${TEST_BASE_URL.replace(/\/$/, '')}/${name}`;
@@ -143,7 +143,7 @@ async function resolveAssetUrl(name: string): Promise<string> {
   });
 }
 
-// ── Téléchargement avec progression ──────────────────────────────────────────
+// ── Download with progress ────────────────────────────────────────────────────
 
 async function downloadOne(
   name: string,
@@ -178,7 +178,7 @@ async function downloadOne(
   fs.renameSync(tmp, dest);
 }
 
-// ── Fenêtre de téléchargement + orchestration ────────────────────────────────
+// ── Download window + orchestration ───────────────────────────────────────────
 
 let downloadWin: BrowserWindow | null = null;
 
@@ -203,15 +203,15 @@ function createDownloadWindow(): BrowserWindow {
   return win;
 }
 
-/** Télécharge tous les modèles manquants avec UI Electron.
- *  Résout quand tous les fichiers sont présents. Rejette si l'utilisateur quitte. */
+/** Downloads all the missing models with the Electron UI.
+ *  Resolves when all files are present. Rejects if the user quits. */
 export async function ensureModelsDownloaded(): Promise<void> {
   if (modelsReady()) return;
 
   const destDir = getWeightsDir();
   downloadWin = createDownloadWindow();
 
-  // Attendre que le renderer ait chargé son script avant d'émettre des events
+  // Wait for the renderer to have loaded its script before emitting events
   await new Promise<void>((resolve) => {
     downloadWin!.webContents.once('did-finish-load', () => resolve());
   });
@@ -244,7 +244,7 @@ export async function ensureModelsDownloaded(): Promise<void> {
           throw new Error('Modèles toujours manquants après téléchargement');
         }
         send({ phase: 'done' });
-        // Laisser la fenêtre 600 ms pour montrer 100 % avant de la fermer
+        // Leave the window 600 ms to show 100% before closing it
         setTimeout(() => {
           downloadWin?.close();
           resolve();

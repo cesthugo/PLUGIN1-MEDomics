@@ -165,7 +165,7 @@ for i, (label, fa, fb) in enumerate(pairs, 1):
     identical = md5(fa) == md5(fb)
     row["Identiques"] = "Oui" if identical else "Non"
 
-    # FPS + durée
+    # FPS + duration
     fps_a, dur_a = fps_and_duration(fa)
     fps_b, dur_b = fps_and_duration(fb)
     row["FPS identique"] = "Oui" if abs(fps_a - fps_b) < 0.01 else f"Non ({fps_a} vs {fps_b})"
@@ -191,7 +191,7 @@ with open(OUTPUT, "w", newline="", encoding="utf-8") as f:
     writer.writeheader()
     writer.writerows(rows)
 
-# ── Résumé ────────────────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────────────────────
 both = [r for r in rows if r["Dans la référence"] == "Oui" and r["Dans la version générée"] == "Oui"]
 n_id = sum(1 for r in both if r["Identiques"] == "Oui")
 n_tres_bon = sum(1 for r in both if "Très bonne" in r.get("Similarité", ""))

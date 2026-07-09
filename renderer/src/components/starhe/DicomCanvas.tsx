@@ -1,14 +1,14 @@
-// components/DicomCanvas.tsx — Visionneuse DICOM avec canvas HTML5
+// components/DicomCanvas.tsx — DICOM viewer with an HTML5 canvas
 //
-// Fonctionnalités portées depuis prototype_tkinter.py :
-//  - Affichage des frames JPEG avec pan / zoom centré sur curseur
-//  - Superposition des bboxes de détection (dessin canvas)
-//  - Outil de mesure en mm (dessin canvas, overlay SVG pour les terminaisons)
-//  - Mode série (drag vertical = scroll frames)
-//  - Clic droit maintenu = contraste (X) / luminosité (Y)
-//  - Molette = zoom centré sur le curseur
-//  - Barre de mode ("ORIGINAL" / "ANALYSE STARHE")
-//  - Prévisualisation mesure en cours de dessin
+// Features ported from prototype_tkinter.py:
+//  - JPEG frame display with cursor-centered pan / zoom
+//  - Detection bbox overlay (canvas drawing)
+//  - mm measurement tool (canvas drawing, SVG overlay for the endpoints)
+//  - Series mode (vertical drag = frame scroll)
+//  - Right-click held = contrast (X) / brightness (Y)
+//  - Wheel = cursor-centered zoom
+//  - Mode bar ("ORIGINAL" / "STARHE ANALYSIS")
+//  - Preview of the measure being drawn
 
 import React, {
   useCallback, useEffect, useLayoutEffect, useRef, useState,
@@ -23,7 +23,7 @@ import type { Transform } from '../../utilities/starhe/hooks/useCanvasInteractio
 import type { TabState, ViewMode, Measure, Detection } from '../../utilities/starhe/types';
 import { BLUE, CANVAS_BG, SBAR_MUTED } from '../../utilities/starhe/colors';
 
-// ── Dessine les bboxes de détection ──────────────────────────────────────────
+// ── Draws the detection bboxes ───────────────────────────────────────────────
 
 function drawDetections(
   ctx:        CanvasRenderingContext2D,
@@ -46,7 +46,7 @@ function drawDetections(
   }
 }
 
-// ── Dessine un segment de mesure ──────────────────────────────────────────────
+// ── Draws a measure segment ───────────────────────────────────────────────────
 
 function drawMeasureSegment(
   ctx:          CanvasRenderingContext2D,
@@ -90,7 +90,7 @@ function drawMeasureSegment(
     distLabel = `${Math.hypot(dxImg, dyImg).toFixed(1)} px (pas calibration)`;
   }
 
-  // Position du label (perpendiculaire par defaut, ou personnalisee si labelOffset)
+  // Label position (perpendicular by default, or custom if labelOffset)
   const mx = (sx1 + sx2) / 2, my = (sy1 + sy2) / 2;
   const [lx, ly] = getMeasureLabelScreenPos(p1, p2, labelOffset, t, canvasW, canvasH);
 
@@ -112,13 +112,13 @@ function drawMeasureSegment(
   ctx.fillText(distLabel, lx, ly);
 }
 
-// ── Composant ─────────────────────────────────────────────────────────────────
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export interface DicomCanvasProps {
   tab:              TabState | null;
   onZoomPan:        (zoom: number, panX: number, panY: number) => void;
-  /** Appelé à chaque redimensionnement du canvas pour forcer le recentrage de TOUS les
-   *  panneaux (multi-panneaux). Si absent, on replie sur onZoomPan(zoom,0,0) (vue simple). */
+  /** Called on every canvas resize to force the recentering of ALL the
+   *  panels (multi-panel). If absent, falls back to onZoomPan(zoom,0,0) (single view). */
   onPanReset?:      () => void;
   onContrastBright: (contrast: number, brightness: number) => void;
   onFrameChange:    (idx: number) => void;
@@ -144,39 +144,39 @@ export function DicomCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef   = useRef<HTMLDivElement>(null);
   const imgCacheRef  = useRef<Map<string, HTMLImageElement>>(new Map());
-  // Compteur de génération : chaque invocation de l'effet draw incrémente ce compteur.
-  // Les callbacks img.onload vérifient qu'ils correspondent à la génération courante avant
-  // de dessiner, évitant qu'un chargement différé écrase le canvas d'un autre onglet.
+  // Generation counter: each invocation of the draw effect increments this counter.
+  // The img.onload callbacks check that they match the current generation before
+  // drawing, preventing a deferred load from overwriting another tab's canvas.
   const drawGenRef = useRef(0);
 
-  // Preview segment en cours de dessin
+  // Preview segment being drawn
   const [measurePreview, setMeasurePreview] = useState<
     [[number, number], [number, number]] | null
   >(null);
 
-  // Taille courante du canvas (px)
-  // canvasSizeRef : toujours à jour (mis à jour synchroniquement dans le ResizeObserver)
-  // canvasSize    : état React (déclenche le re-render et la mise à jour des attributs canvas)
+  // Current canvas size (px)
+  // canvasSizeRef: always up to date (updated synchronously in the ResizeObserver)
+  // canvasSize    : React state (triggers the re-render and the canvas attribute update)
   const canvasSizeRef = useRef({ w: 640, h: 480 });
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 480 });
 
-  // Observer de taille
+  // Size observer
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const ro = new ResizeObserver(entries => {
       for (const e of entries) {
         const newSize = { w: e.contentRect.width, h: e.contentRect.height };
-        canvasSizeRef.current = newSize;   // synchrone : utilisé par getState() tout de suite
-        setCanvasSize(newSize);            // asynchrone : déclenche le re-render React
+        canvasSizeRef.current = newSize;   // synchronous: used by getState() right away
+        setCanvasSize(newSize);            // asynchronous: triggers the React re-render
       }
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  // Refs stables pour l'effet de recentrage — mis à jour à chaque render,
-  // utilisés dans un effect qui n'a que canvasSize dans ses dépendances.
+  // Stable refs for the recentering effect — updated on each render,
+  // used in an effect that has only canvasSize in its dependencies.
   const onZoomPanRef = useRef(onZoomPan);
   onZoomPanRef.current = onZoomPan;
   const onPanResetRef = useRef(onPanReset);
@@ -186,24 +186,24 @@ export function DicomCanvas({
   const hasDataRef = useRef(!!tab?.data);
   hasDataRef.current = !!tab?.data;
 
-  // Quand le canvas est redimensionné en mode vue simple (ex. resize fenêtre),
-  // réinitialise panX=0 / panY=0 pour recentrer l'image.
-  // En mode multi-panneaux (onPanReset fourni) on ne fait rien : le pan doit
-  // être préservé pendant et après le déplacement du séparateur.
+  // When the canvas is resized in single-view mode (e.g. window resize),
+  // reset panX=0 / panY=0 to recenter the image.
+  // In multi-panel mode (onPanReset provided) do nothing: the pan must
+  // be preserved during and after the separator is moved.
   const isFirstSizeRef = useRef(true);
   useEffect(() => {
     if (!hasDataRef.current) return;
-    if (onPanResetRef.current) return; // multi-panel : conserver le pan
+    if (onPanResetRef.current) return; // multi-panel: keep the pan
     // Single panel : skip the very first size measurement to preserve user pan/zoom.
     if (isFirstSizeRef.current) { isFirstSizeRef.current = false; return; }
     onZoomPanRef.current(tabZoomRef.current, 0, 0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasSize.w, canvasSize.h]);
 
-  // État pour le hook d'interactions
-  // canvasSizeRef est utilisé (pas canvasSize) pour que les handlers de zoom/pan
-  // voient toujours les dimensions courantes, même pendant le redimensionnement
-  // du séparateur (avant que React ait rerenderé avec les nouvelles props).
+  // State for the interactions hook
+  // canvasSizeRef is used (not canvasSize) so that the zoom/pan handlers
+  // always see the current dimensions, even during the resize
+  // of the separator (before React has re-rendered with the new props).
   const getState = useCallback(() => ({
     viewMode:        tab?.viewMode          ?? 'normal',
     zoom:            tab?.zoom              ?? 1,
@@ -220,7 +220,7 @@ export function DicomCanvas({
     measuresByFrame: tab?.measuresByFrame  ?? {},
     selectedMeasure: tab?.selectedMeasure  ?? null,
     pixelSpacing:    tab?.data?.pixelSpacing ?? null,
-  }), [tab]);  // pas besoin de dépendre de canvasSize : la ref est toujours à jour
+  }), [tab]);  // no need to depend on canvasSize: the ref is always up to date
 
   const interactions = useCanvasInteractions(getState, {
     onZoomPan,
@@ -233,12 +233,12 @@ export function DicomCanvas({
     onContextMenu,
   });
 
-  // Branche le setter de preview
+  // Wire up the preview setter
   useEffect(() => {
     interactions.setMeasurePreview(setMeasurePreview);
   }, [interactions]);
 
-  // Écoute Delete / Backspace sur le canvas
+  // Listen for Delete / Backspace on the canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -277,26 +277,26 @@ export function DicomCanvas({
     const frames = data.framesB64;
     if (!frames?.length) return;
     const b64 = frames[Math.min(frameIdx, frames.length - 1)];
-    // Clé namespaced par tab.id : empêche la collision entre fichiers ayant le même
-    // header JPEG identique (tous commencent par /9j/4AAQSkZJRgABAQAA en base64).
+    // Key namespaced by tab.id: prevents collisions between files sharing the same
+    // identical JPEG header (all start with /9j/4AAQSkZJRgABAQAA in base64).
     const cacheKey = `${tab.id}-${frameIdx}`;
     const gen = ++drawGenRef.current;
 
     const drawFrame = (img: HTMLImageElement) => {
-      // Utilise TOUJOURS les dimensions DICOM originales comme espace de coordonnées.
-      // Les hooks d'interaction (useCanvasInteractions) utilisent aussi data.cols/data.rows
-      // via getState() → les deux transforms sont identiques → pas de décalage de mesure.
+      // ALWAYS use the original DICOM dimensions as the coordinate space.
+      // The interaction hooks (useCanvasInteractions) also use data.cols/data.rows
+      // via getState() → both transforms are identical → no measurement offset.
       const iw = data.cols;
       const ih = data.rows;
       const t  = computeTransform(iw, ih, canvasSize.w, canvasSize.h, zoom, panX, panY);
 
-      // Contraste / luminosité via manipulation pixel (formule linéaire standard)
+      // Contrast / brightness via pixel manipulation (standard linear formula)
       // formula: out = contrast × (pixel − 128) + 128 + brightness
-      // → contrast et brightness sont indépendants et intuitifs.
+      // → contrast and brightness are independent and intuitive.
       ctx.drawImage(img, t.offX, t.offY, iw * t.scale, ih * t.scale);
 
       if (contrast !== 1 || brightness !== 0) {
-        // On travaille uniquement sur la région visible de l'image (coords canvas clampées)
+        // Work only on the visible region of the image (clamped canvas coords)
         const rx = Math.max(0, Math.round(t.offX));
         const ry = Math.max(0, Math.round(t.offY));
         const rw = Math.min(canvasSize.w, Math.round(t.offX + iw * t.scale)) - rx;
@@ -306,9 +306,9 @@ export function DicomCanvas({
           const d = imgData.data;
           const c = contrast;
           const b = brightness; // −100 … +100
-          // Pivot à 0 (adapté aux images sombres comme l'échographie) :
+          // Pivot at 0 (suited to dark images like ultrasound):
           // output = c * pixel + b
-          // → contrast=3 triple la dynamique sans écraser les darks vers 0
+          // → contrast=3 triples the dynamic range without crushing the darks toward 0
           for (let i = 0; i < d.length; i += 4) {
             d[i]   = Math.max(0, Math.min(255, c * d[i]   + b));
             d[i+1] = Math.max(0, Math.min(255, c * d[i+1] + b));
@@ -318,25 +318,25 @@ export function DicomCanvas({
         }
       }
 
-      // Détections
+      // Detections
       const dets = (detectionsBy.original ?? [])[frameIdx] ?? [];
       if (dets.length) drawDetections(ctx, dets, t.scale, t.offX, t.offY);
 
-      // Mesures finalisées
+      // Finalized measures
       const measures = measuresByFrame[frameIdx] ?? [];
       for (let i = 0; i < measures.length; i++) {
         drawMeasureSegment(ctx, measures[i].pts[0], measures[i].pts[1],
           t, canvasSize.w, canvasSize.h, i === selectedMeasure, data.pixelSpacing, measures[i].labelOffset);
       }
 
-      // Mesure en cours de dessin
+      // Measure being drawn
       if (measurePreview) {
         drawMeasureSegment(ctx, measurePreview[0], measurePreview[1],
           t, canvasSize.w, canvasSize.h, false, data.pixelSpacing);
       }
     };
 
-    // Lookup / charge l'image depuis le cache
+    // Look up / load the image from the cache
     const cached = imgCacheRef.current.get(cacheKey);
     if (cached) {
       drawFrame(cached);
@@ -348,8 +348,8 @@ export function DicomCanvas({
           const firstKey = imgCacheRef.current.keys().next().value;
           if (firstKey !== undefined) imgCacheRef.current.delete(firstKey);
         }
-        // Dessine seulement si l'effet n'a pas été re-déclenché entretemps
-        // (changement d'onglet ou de frame pendant le chargement de l'image)
+        // Draw only if the effect has not been re-triggered in the meantime
+        // (tab or frame change while the image is loading)
         if (drawGenRef.current === gen) drawFrame(img);
       };
       img.src = `data:image/jpeg;base64,${b64}`;

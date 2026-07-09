@@ -1,7 +1,7 @@
-// components/FileThumbnailStrip.tsx — Bande de vignettes des fichiers DICOM
+// components/FileThumbnailStrip.tsx — Thumbnail strip of the DICOM files
 //
-// Remplace l'ancienne FileTabBar (onglets textuels) par des vignettes visuelles
-// groupées par date d'étude, avec support drag & drop vers la vue multi-panneaux.
+// Replaces the former FileTabBar (text tabs) with visual thumbnails
+// grouped by study date, with drag & drop support to the multi-panel view.
 
 import React from 'react';
 import { TAB_BG } from '../../utilities/starhe/colors';
@@ -20,7 +20,7 @@ export function FileThumbnailStrip({
   onCloseTab:  (id: number) => void;
   onOpenNew:   () => void;
 }) {
-  // Groupe les onglets par date (partie avant " · " dans le label)
+  // Group the tabs by date (part before " · " in the label)
   const groups = React.useMemo(() => {
     const map = new Map<string, TabState[]>();
     for (const tab of tabs) {

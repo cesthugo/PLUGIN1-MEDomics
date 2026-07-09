@@ -1,18 +1,18 @@
 """
-dicom/prepus_bridge.py — Intégration de l'API prepUS.removeLayoutFile
+dicom/prepus_bridge.py — Integration of the prepUS.removeLayoutFile API
 ======================================================================
-Reproduit exactement le pipeline de référence (prepus/prepUS/cli.py) :
+Reproduces exactly the reference pipeline (prepus/prepUS/cli.py):
 
-    1. Encode les frames numpy → MP4 via ffmpeg (codec mpeg4, -qscale:v 1).
-       Fallback cv2.VideoWriter(mp4v) si ffmpeg est absent du PATH.
-    2. Appelle prepUS.cli.removeLayoutFile (back_scan_conversion=True).
-    3. Lit video.mp4 (cône US rogné, UI statique retirée) → numpy gris.
-    4. Lit info.json → dict de coordonnées de crop.
+    1. Encodes numpy frames → MP4 via ffmpeg (mpeg4 codec, -qscale:v 1).
+       Fallback to cv2.VideoWriter(mp4v) if ffmpeg is absent from the PATH.
+    2. Calls prepUS.cli.removeLayoutFile (back_scan_conversion=True).
+    3. Reads video.mp4 (cropped US cone, static UI removed) → grayscale numpy.
+    4. Reads info.json → crop coordinate dict.
 
-C'est la même sortie que les video.mp4 utilisés pour l'entraînement du C3D.
-ffmpeg (codec mpeg4) produit un bitstream identique à celui utilisé par Jérémy
-à l'entraînement, contrairement à cv2.VideoWriter(mp4v) qui dépend du FFmpeg
-lié à OpenCV et varie entre OS/versions.
+This is the same output as the video.mp4 files used for C3D training.
+ffmpeg (mpeg4 codec) produces a bitstream identical to the one Jérémy used
+during training, unlike cv2.VideoWriter(mp4v) which depends on the FFmpeg
+linked to OpenCV and varies across OSes/versions.
 """
 
 import json
@@ -28,11 +28,11 @@ import numpy as np
 from starhe_plugin.utils.go_print import go_print
 
 
-# ── Chemin vers prepUS vendorisé ──────────────────────────────────────────────
+# ── Path to the vendored prepUS ───────────────────────────────────────────────
 _VENDOR_PREPUS = os.path.abspath(
     os.path.join(
         os.path.dirname(__file__),   # starhe_plugin/dicom/
-        "..", "..", "..", "..",       # → racine du dépôt (PLUGIN1-MEDomics/)
+        "..", "..", "..", "..",       # → repository root (PLUGIN1-MEDomics/)
         "third_party", "prepUS",
     )
 )
@@ -60,12 +60,12 @@ def _ensure_importable() -> None:
 
 def _fallback_crop_only(frames: np.ndarray) -> "tuple[np.ndarray, dict]":
     """
-    Fallback ultime si prepUS (Mode A et B) échoue sur find_linear_fov.
-    Utilise crop.py (analyse temporelle de variabilité) pour détecter la
-    bounding-box du cône US. Pas de masque UI — uniquement un crop géométrique.
+    Last-resort fallback if prepUS (Mode A and B) fails on find_linear_fov.
+    Uses crop.py (temporal variability analysis) to detect the
+    bounding box of the US cone. No UI mask — only a geometric crop.
 
-    Retourne les frames en niveaux de gris rognées avec le même format
-    de tuple que preprocess_with_prepus / preprocess_with_prepus_inmem.
+    Returns the cropped grayscale frames with the same tuple format
+    as preprocess_with_prepus / preprocess_with_prepus_inmem.
     """
     from starhe_plugin.dicom.crop import detect_ultrasound_roi_temporal
 
@@ -98,7 +98,7 @@ def map_detections_to_dicom_coords(
     detections_per_frame: list,
     prepus_info: "dict | None",
 ) -> list:
-    """Remappe les bboxes de l'espace crop vers l'espace image DICOM original."""
+    """Remaps the bboxes from crop space to the original DICOM image space."""
     if prepus_info is None or "crop" not in prepus_info:
         return detections_per_frame
     crop = prepus_info["crop"]
@@ -118,10 +118,10 @@ def map_detections_to_dicom_coords(
 
 def _frames_to_mp4_ffmpeg(frames: np.ndarray, fps: float, out_mp4: str) -> None:
     """
-    Encode (T, H, W, 3) uint8 RGB → MP4 via ffmpeg (rawvideo pipe).
-    Codec mpeg4, -qscale:v 1 — identique au pipeline d'entraînement de Jérémy
-    (test_dicom_pipeline.py) et indépendant de la version OpenCV/FFmpeg système.
-    Fallback vers cv2.VideoWriter(mp4v) si ffmpeg est absent du PATH.
+    Encodes (T, H, W, 3) uint8 RGB → MP4 via ffmpeg (rawvideo pipe).
+    mpeg4 codec, -qscale:v 1 — identical to Jérémy's training pipeline
+    (test_dicom_pipeline.py) and independent of the system OpenCV/FFmpeg version.
+    Fallback to cv2.VideoWriter(mp4v) if ffmpeg is absent from the PATH.
     """
     T, H, W, _ = frames.shape
     ffmpeg_bin = shutil.which("ffmpeg")
@@ -159,7 +159,7 @@ def _frames_to_mp4_ffmpeg(frames: np.ndarray, fps: float, out_mp4: str) -> None:
 
 
 def _frames_to_mp4_cv2(frames: np.ndarray, fps: float, out_mp4: str) -> None:
-    """Fallback cv2.VideoWriter(mp4v) utilisé uniquement si ffmpeg est absent."""
+    """cv2.VideoWriter(mp4v) fallback used only when ffmpeg is absent."""
     T, H, W, _ = frames.shape
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(out_mp4, fourcc, fps, (W, H))
@@ -178,29 +178,29 @@ def preprocess_with_prepus(
     backscan_height: int = 512,
 ) -> "tuple[np.ndarray, dict | None]":
     """
-    Applique prepUS.removeLayoutFile et retourne les frames de video.mp4.
+    Applies prepUS.removeLayoutFile and returns the frames from video.mp4.
 
-    Paramètres
+    Parameters
     ----------
     frames         : (T, H, W, 3) uint8 RGB
-    fps            : fréquence d'images pour l'export MP4 intermédiaire
-    thresh         : seuil variabilité ; -1 = automatique (défaut prepUS)
-    backscan_width / backscan_height : dimensions backscan (requises par
-                     removeLayoutFile pour produire video.mp4)
+    fps            : frame rate for the intermediate MP4 export
+    thresh         : variability threshold; -1 = automatic (prepUS default)
+    backscan_width / backscan_height : backscan dimensions (required by
+                     removeLayoutFile to produce video.mp4)
 
-    Retourne
-    --------
-    crop_frames : (T, H_crop, W_crop) uint8 niveaux de gris — video.mp4
-    info        : dict depuis info.json (clés "crop", "backscan", …) ou None
+    Returns
+    -------
+    crop_frames : (T, H_crop, W_crop) uint8 grayscale — video.mp4
+    info        : dict from info.json ("crop", "backscan", … keys) or None
 
-    Chaîne de fallback
-    ------------------
-    Mode A (ce chemin) → si video.mp4 absent/vide → Mode B (bypass numpy)
-                       → si find_linear_fov échoue aussi → crop.py
+    Fallback chain
+    --------------
+    Mode A (this path) → if video.mp4 is absent/empty → Mode B (numpy bypass)
+                       → if find_linear_fov also fails → crop.py
 
-    Motif du fallback Mode A : removeLayoutFile() retourne None silencieusement
-    quand find_linear_fov épuise ses retries (thresh ≤ 0.005), sans lever
-    d'exception et sans écrire video.mp4.
+    Reason for the Mode A fallback: removeLayoutFile() silently returns None
+    when find_linear_fov exhausts its retries (thresh ≤ 0.005), without raising
+    an exception and without writing video.mp4.
     """
     _ensure_importable()
     from prepUS.cli import removeLayoutFile  # type: ignore[import]
@@ -212,11 +212,11 @@ def preprocess_with_prepus(
     _mode_a_result: "tuple[np.ndarray, dict | None] | None" = None
 
     try:
-        # ── 1. Encoder les frames → MP4 via ffmpeg (codec mpeg4, qscale 1) ───
+        # ── 1. Encode the frames → MP4 via ffmpeg (mpeg4 codec, qscale 1) ────
         tmp_mp4 = os.path.join(work_dir, "input.mp4")
         _frames_to_mp4_ffmpeg(frames, fps, tmp_mp4)
 
-        # ── 2. Appel prepUS ───────────────────────────────────────────────────
+        # ── 2. prepUS call ────────────────────────────────────────────────────
         out_dir = os.path.join(work_dir, "out")
         removeLayoutFile(
             input_file=tmp_mp4,
@@ -230,14 +230,14 @@ def preprocess_with_prepus(
             save_info=True,
         )
 
-        # ── 3. Lire info.json ─────────────────────────────────────────────────
+        # ── 3. Read info.json ─────────────────────────────────────────────────
         info: "dict | None" = None
         info_path = os.path.join(out_dir, "info.json")
         if os.path.exists(info_path):
             with open(info_path, encoding="utf-8") as fh:
                 info = json.load(fh)
 
-        # ── 4. Lire video.mp4 (cône rogné, masqué) ───────────────────────────
+        # ── 4. Read video.mp4 (cropped, masked cone) ─────────────────────────
         video_mp4 = os.path.join(out_dir, "video.mp4")
         if os.path.exists(video_mp4):
             cap = cv2.VideoCapture(video_mp4)
@@ -269,7 +269,7 @@ def preprocess_with_prepus(
     if _mode_a_result is not None:
         return _mode_a_result
 
-    # ── Fallback Mode B : bypass numpy (même algorithme, sans roundtrip MP4) ──
+    # ── Mode B fallback: numpy bypass (same algorithm, no MP4 roundtrip) ──────
     go_print("warning",
              "prepUS Mode A échoué — fallback Mode B (bypass numpy)")
     try:
@@ -288,15 +288,15 @@ def preprocess_with_prepus(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Variante in-memory : bypass total du roundtrip MP4 (cv2 VideoWriter/Capture).
+# In-memory variant: complete bypass of the MP4 roundtrip (cv2 VideoWriter/Capture).
 #
-# Motivation : `cv2.VideoWriter(mp4v)` produit un bitstream dépendant du binaire
-# FFmpeg lié à OpenCV. macOS ARM (Homebrew) et Linux (Jean Zay) produisent des
-# `video.mp4` différents pour la même entrée numpy, ce qui décale légèrement
-# l'entrée du C3D et empêche de reproduire bit-near les scores de Jérémy.
-# Cette variante calcule le crop exclusivement en numpy : 100 % déterministe
-# cross-plateforme, mais s'écarte légèrement de la distribution d'entraînement
-# (perte des artefacts mp4v vus pendant l'entraînement).
+# Motivation: `cv2.VideoWriter(mp4v)` produces a bitstream that depends on the
+# FFmpeg binary linked to OpenCV. macOS ARM (Homebrew) and Linux (Jean Zay)
+# produce different `video.mp4` files for the same numpy input, which slightly
+# shifts the C3D input and prevents reproducing Jérémy's scores bit-near.
+# This variant computes the crop exclusively in numpy: 100% deterministic
+# cross-platform, but deviates slightly from the training distribution
+# (loses the mp4v artifacts seen during training).
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _remove_layout_inmem(
@@ -308,24 +308,24 @@ def _remove_layout_inmem(
     backscan_height: int,
 ) -> "tuple[np.ndarray, dict]":
     """
-    Réimplémentation numpy pure de `prepUS.cli.removeLayoutFile` (back_scan_conversion=True),
-    sans aucune écriture/lecture MP4. La logique est strictement identique à la
-    référence ; seuls les appels VideoWriter/VideoCapture/savevideo sont supprimés.
+    Pure numpy reimplementation of `prepUS.cli.removeLayoutFile` (back_scan_conversion=True),
+    without any MP4 write/read. The logic is strictly identical to the
+    reference; only the VideoWriter/VideoCapture/savevideo calls are removed.
 
     Parameters
     ----------
-    v : (T, H, W) uint8  — frames en niveaux de gris (sortie équivalente de
+    v : (T, H, W) uint8  — grayscale frames (equivalent output of
         `sonocrop.vid.loadvideo`).
-    fps : float          — non utilisé en interne (gardé pour la trace info).
-    thresh : float       — -1 = seuil auto (histogramme des pixels uniques).
-    FOV_tresh : int      — seuil Hough pour find_linear_fov.
-    backscan_width / backscan_height : dims FOV linéaire.
+    fps : float          — unused internally (kept for the info trace).
+    thresh : float       — -1 = auto threshold (unique-pixel histogram).
+    FOV_tresh : int      — Hough threshold for find_linear_fov.
+    backscan_width / backscan_height : linear FOV dims.
 
     Returns
     -------
-    y_cropped : (T, H_crop, W_crop) uint8 — équivalent du `video.mp4` produit
-                par prepUS, sans roundtrip mp4v.
-    info      : dict     — métadonnées (crop bbox + paramètres backscan).
+    y_cropped : (T, H_crop, W_crop) uint8 — equivalent of the `video.mp4`
+                produced by prepUS, without the mp4v roundtrip.
+    info      : dict     — metadata (crop bbox + backscan parameters).
     """
     from scipy.ndimage import binary_fill_holes
     from sonocrop import vid
@@ -334,7 +334,7 @@ def _remove_layout_inmem(
 
     f, height, width = v.shape
 
-    # Étape 1 : carte des pixels uniques par position (identique référence)
+    # Step 1: per-position unique-pixel map (identical to the reference)
     u = np.zeros((height, width), np.uint8)
     for i in range(height):
         u[i] = np.apply_along_axis(vid.countUniquePixels, 0, v[:, i, :])
@@ -344,7 +344,7 @@ def _remove_layout_inmem(
         _, bin_edges = np.histogram(u_avg, bins=20)
         thresh = bin_edges[3]
 
-    # Étape 2 : masque booléen denoisé + miroir + remplissage de trous
+    # Step 2: denoised boolean mask + mirror + hole filling
     mask = u_avg > thresh
     mask_img = mask.astype(np.uint8)
     mask_largest_img = keep_largest_component(mask_img)
@@ -359,11 +359,11 @@ def _remove_layout_inmem(
 
     cropped_boolean_mask, ymin, ymax, xmin, xmax = crop_single_object(np.copy(boolean_mask))
 
-    # Étape 3 : find_linear_fov (avec retry identique à la référence en cas d'échec)
+    # Step 3: find_linear_fov (with a retry identical to the reference on failure)
     params = find_linear_fov((cropped_boolean_mask * 255).astype(np.uint8), threshold=FOV_tresh)
     if params is None:
         if thresh > 0.005:
-            # Retry récursif : thresh × 0.8, FOV_tresh × 0.9 (référence ligne 187-194 cli.py)
+            # Recursive retry: thresh × 0.8, FOV_tresh × 0.9 (reference lines 187-194 cli.py)
             return _remove_layout_inmem(
                 v, fps,
                 thresh=thresh * 0.8,
@@ -377,7 +377,7 @@ def _remove_layout_inmem(
         )
     xoffset, yoffset, rc, theta_c, dc = params
 
-    # Étape 4 : recadrage + masque valid FOV (mêmes ops que la référence)
+    # Step 4: cropping + valid FOV mask (same ops as the reference)
     y_cropped = v[:, ymin:ymax, xmin:xmax]
     mask_valid = pre_dsc_image_vectorized(
         y_cropped[0], dc, rc, theta_c, yoffset, xoffset,
@@ -419,19 +419,19 @@ def preprocess_with_prepus_inmem(
     backscan_height: int = 512,
 ) -> "tuple[np.ndarray, dict | None]":
     """
-    Variante 100 % numpy de `preprocess_with_prepus` : aucun roundtrip MP4.
+    100% numpy variant of `preprocess_with_prepus`: no MP4 roundtrip.
 
-    Différence avec la version standard :
-      - PAS d'export `input.mp4` (cv2.VideoWriter)
-      - PAS de lecture `video.mp4` (cv2.VideoCapture)
-      - prepUS est exécuté in-process sur le numpy converti RGB→GRAY direct.
+    Difference from the standard version:
+      - NO `input.mp4` export (cv2.VideoWriter)
+      - NO `video.mp4` read (cv2.VideoCapture)
+      - prepUS is executed in-process on the numpy converted RGB→GRAY directly.
 
-    Avantage  : sortie identique bit-à-bit entre macOS/Linux/Windows pour la
-                même entrée numpy (élimine la non-portabilité de mp4v).
-    Coût      : s'écarte légèrement de la distribution d'entraînement (le
-                C3D a vu des crops décodés depuis mp4v, pas du numpy pur).
+    Advantage : bit-identical output across macOS/Linux/Windows for the
+                same numpy input (eliminates the non-portability of mp4v).
+    Cost      : deviates slightly from the training distribution (the
+                C3D saw crops decoded from mp4v, not pure numpy).
 
-    Signature et sémantique de retour identiques à `preprocess_with_prepus`.
+    Signature and return semantics identical to `preprocess_with_prepus`.
     """
     _ensure_importable()
 
@@ -440,10 +440,10 @@ def preprocess_with_prepus_inmem(
 
     T = frames.shape[0]
 
-    # Conversion RGB → grayscale uint8 (équivalent du chemin
-    # mp4v(color)→VideoCapture(BGR)→cvtColor(BGR2GRAY) sans la perte mp4v).
-    # cv2.cvtColor(RGB2GRAY) applique exactement les mêmes poids ITU-R BT.601
-    # (0.299·R + 0.587·G + 0.114·B) que BGR2GRAY.
+    # RGB → grayscale uint8 conversion (equivalent to the
+    # mp4v(color)→VideoCapture(BGR)→cvtColor(BGR2GRAY) path without the mp4v loss).
+    # cv2.cvtColor(RGB2GRAY) applies exactly the same ITU-R BT.601 weights
+    # (0.299·R + 0.587·G + 0.114·B) as BGR2GRAY.
     gray_frames = np.empty((T, frames.shape[1], frames.shape[2]), dtype=np.uint8)
     for i, f in enumerate(frames):
         gray_frames[i] = cv2.cvtColor(f.astype(np.uint8), cv2.COLOR_RGB2GRAY)

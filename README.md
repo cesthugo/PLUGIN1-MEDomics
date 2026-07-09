@@ -906,7 +906,14 @@ def _infer(backbone, cls_head, frames: np.ndarray, device: str) -> tuple[float, 
 
 ### Reproducibility
 
-`DETERMINISTIC_INFERENCE = True` (default in `config.py`) forces inside the subprocess:
+> **Current default: `DETERMINISTIC_INFERENCE = False`.** As of the July 2026
+> reproducibility campaign the flag is **off** so the pipeline runs in its native
+> mode (device from `INFERENCE_DEVICE = "auto"`, float32). This is intentional: the
+> CPU/float64 forcing below maximizes *cross-OS* reproducibility but moves *away*
+> from Jérémy's native training environment (Linux + GPU, float32). Set it back to
+> `True` when cross-platform bit-identity matters more than matching Jérémy.
+
+When `DETERMINISTIC_INFERENCE = True`, the subprocess forces:
 
 ```python
 device = "cpu"                                 # override — no CUDA/MPS variance
@@ -1167,7 +1174,11 @@ Set `DETECT_BATCH_SIZE = <int>` in `config.py` to override auto-detection.
 
 ### Reproducibility (`DETERMINISTIC_INFERENCE`)
 
-When `DETERMINISTIC_INFERENCE = True` (default), the subprocess is launched with `--deterministic`:
+> **Current default: `False`** (see the RISK reproducibility note above — off to
+> match Jérémy's native Linux/GPU environment). The description below applies when
+> the flag is set back to `True`.
+
+When `DETERMINISTIC_INFERENCE = True`, the subprocess is launched with `--deterministic`:
 
 | Setting | Value | Rationale |
 |---|---|---|
@@ -1244,9 +1255,16 @@ Returns a 2-tuple `(crop_frames, info_dict)`:
 
 ### Internal implementation
 
-Two backends are available, controlled by the `PREPUS_BYPASS_MP4` flag in `config.py`:
+Two backends are available, controlled by the `PREPUS_BYPASS_MP4` flag in `config.py`.
 
-**Mode A — MP4 roundtrip** (`preprocess_with_prepus`, legacy):
+> **Current default: `PREPUS_BYPASS_MP4 = False`** (Mode A). As of the July 2026
+> reproducibility campaign, prepUS runs through the mp4v roundtrip because that is
+> the exact path the STARHE models saw at training time (Jérémy's crops carry mp4v
+> compression artifacts). Mode B (pure numpy) is cross-OS bit-identical but produces
+> *cleaner* crops that are slightly off the training distribution — set it back to
+> `True` when cross-platform portability matters more than matching Jérémy.
+
+**Mode A — MP4 roundtrip** (`preprocess_with_prepus`, legacy, **current default**):
 
 1. Export numpy frames → temporary MP4 (OpenCV `VideoWriter`, codec `mp4v`, grayscale)
 2. Call `prepUS.cli.removeLayoutFile(mp4, out_dir, back_scan_conversion=True, ...)`
@@ -1254,7 +1272,12 @@ Two backends are available, controlled by the `PREPUS_BYPASS_MP4` flag in `confi
 4. Read `out_dir/info.json` → ROI dict
 5. Cleanup of temporary directory
 
-**Mode B — MP4 bypass** (`preprocess_with_prepus_inmem`, enabled via `PREPUS_BYPASS_MP4=True`, recommended since June 5, 2026):
+> ⚠️ Mode A calls `cv2.VideoWriter(mp4v)`, whose bitstream depends on the FFmpeg
+> build linked into OpenCV — so the same DICOM yields **different** crops across
+> macOS / Linux / Windows. This is acceptable (and intended) when reproducing
+> Jérémy on a single Linux host, but breaks cross-OS bit-identity.
+
+**Mode B — MP4 bypass** (`preprocess_with_prepus_inmem`, enabled via `PREPUS_BYPASS_MP4=True`):
 
 1. Convert numpy RGB frames → grayscale (cv2.cvtColor `RGB2GRAY` — BT.601, identical to the path read by `loadvideo` on a grayscale MP4)
 2. Run the prepUS algorithm in-process on numpy: variability mask → morphological denoise → `crop_single_object` → `find_linear_fov` (with recursive retry identical to the reference) → FOV mask → `applyMask`
@@ -1521,6 +1544,131 @@ What matters for the pipeline is **pixel-level similarity after decoding**. Meas
 | `05-0065-B-Y` (frame-count override 253→89) | 89 | 4.1 | 26.3 dB |
 
 41–42 dB PSNR (MAE < 1.0) corresponds to imperceptible quality difference — the reference and our output are visually identical for 45/48 files. The lower PSNR for `05-0065` reflects that the reference J2K decoder used a different decoding path for this specific file, producing slightly different pixel values before encoding.
+
+---
+
+## Full DICOM Pipeline Reproducibility
+
+This section documents the end-to-end reproducibility work on the complete DICOM
+pipeline (`DICOM → Weasis → prepUS → STARHE models`). The goal is to prove, with
+measurements, that this repo's pipeline reproduces the results of the original
+research pipeline (Adrien M's `data_test` dataset), and to isolate every residual
+source of divergence.
+
+### Pipeline stages under test
+
+```
+DICOM (raw) ──► Weasis (LUT) ──► prepUS crop ──► STARHE-RISK / STARHE-DETECT
+                                     ▲
+      datasetAVANTPREPROCESS (AV1 MP4) ┘   (intermediate, unprocessed step)
+      data_test (mpeg4 MP4)  ────────────► STARHE-RISK / STARHE-DETECT  (reference path)
+```
+
+Each stage is validated in isolation, because testing only the end-to-end result
+does not tell you *where* a divergence originates.
+
+### numpy 2.0 compatibility (vendored prepUS)
+
+The vendored prepUS (`third_party/prepUS/`) was written in April 2024 for numpy 1.x.
+The constraint is that this code must stay **identical to the original**, so only
+minimal numpy-2.0 compatibility fixes are applied:
+
+- **`backscan.py`** — `np.linalg.solve` now requires a 1-D right-hand side:
+  `b = np.array([rho1, rho2])` instead of the old 2-D `[[rho1], [rho2]]`.
+- **`cli.py`** — added an `_NpEncoder` so `json.dump` can serialize numpy scalar
+  types written to `info.json`.
+- **NEP 50 type promotion** — `angle_between_lines()` now returns a float32
+  `theta_c` (was float64 under numpy 1.x). Measured impact: **8.7 × 10⁻⁸ rad**,
+  i.e. **~4.5 × 10⁻⁵ px** at 512 px width — far below the 1-px threshold needed to
+  shift a crop boundary. No functional effect.
+
+### Current configuration — set to reproduce Jérémy (July 2026)
+
+The reproducibility flags are currently configured to **match Jérémy's native
+environment**, not to maximize cross-OS portability. Run the pipeline on **Linux**
+to be closest to his setup.
+
+| Flag | Value | Why |
+|---|---|---|
+| `DETERMINISTIC_INFERENCE` | `False` | Native device (`INFERENCE_DEVICE="auto"` → GPU if present) + float32, as Jérémy trained. CPU/float64 forcing is the *cross-OS* mode. |
+| `PREPUS_BYPASS_MP4` | `False` | Mode A (mp4v roundtrip) — the exact crop path the models saw at training. Mode B produces cleaner, off-distribution crops. |
+| `USE_WEASIS_EXPORT` | `True` | Reproduces Jérémy's LUT decoding chain (kept — it moves *toward* him). |
+
+Flip the first two back to `True` to restore cross-platform bit-identity (at the
+cost of matching Jérémy). See the RISK and DETECT reproducibility notes above.
+
+### Cross-platform prepUS (`PREPUS_BYPASS_MP4 = True`, optional)
+
+When cross-OS portability is the priority, set `PREPUS_BYPASS_MP4 = True`. The legacy
+Mode A path writes a temporary MP4 and reads it back; the `mp4v` bitstream depends on
+the FFmpeg build linked into OpenCV, which differs across macOS / Linux / Windows,
+making crops non-portable for the *same* input. The in-memory numpy path (Mode B, see
+[prepUS Preprocessing](#prepus-preprocessing-dicomprepus_bridgepy)) removes that
+roundtrip and produces **bit-identical output across all OSes** — at the price of
+crops slightly off the training distribution.
+
+A fallback cascade guarantees the pipeline always completes: if `find_linear_fov`
+(Hough-line FOV detection) fails on an atypical or dark cone, `prepus_bridge` falls
+back to `crop.py` (temporal-variability ROI detection) with an explicit warning —
+geometric crop only, no UI mask.
+
+### Library version pinning is NOT required
+
+We compared prepUS output between April-2024 library versions and current versions
+(numpy 1.26→2.4, opencv 4.9→4.13, scipy 1.13→1.17) on the 49 files of
+`datasetAVANTPREPROCESS`. Because numpy 1.26.4 has no Python 3.14 wheel, the only
+semantically significant change (NEP 50) is simulated by forcing float64 `theta_c`.
+
+Result: **34/34 successfully processed files are bit-identical** (crop dimensions
+and backscan pixels), Δtheta_c = 8.7 × 10⁻⁸ rad. All other functions used by prepUS
+(`cv2.HoughLines` / `Canny` / `dilate` / `morphologyEx`, `scipy.ndimage`) are
+deterministic across these version ranges. **Verdict: pinning library versions is
+unnecessary** — the pinned-venv complexity outweighs any benefit.
+
+### Residual divergence sources (established, not fixable in code)
+
+1. **Video encoding (AV1 vs mpeg4).** Our intermediate `datasetAVANTPREPROCESS`
+   files are AV1 (PSNR ~39–41 dB vs the mpeg4 reference). Slightly different pixels
+   change `countUniquePixels` statistics in prepUS → shift the automatic threshold
+   (`bin_edges[3]`) → different mask → different crop coordinates. This is the
+   primary cause of crop-dimension mismatches vs `data_test` (0/22 exact), yet
+   **20/22 RISK labels still match** — the model is robust to it.
+2. **PyTorch version drift.** torch 2.11 (2025) yields different C3D 3D-conv
+   floating-point results than torch ~2.0 (June 2024), same checkpoint and input,
+   even in deterministic mode (normal BLAS/MKL evolution). The June-2024 reference
+   *scores* are therefore no longer reproducible exactly, though *labels* are.
+
+### Validation scripts and CSV outputs (`scripts/` → `scripts/results/`)
+
+Run scripts from a venv-activated shell; each writes a CSV into `scripts/results/`.
+
+| Script | Question answered | Key result |
+|---|---|---|
+| [compare_risk_original_vs_plugin.py](scripts/compare_risk_original_vs_plugin.py) | Does this repo's RISK match the original mmaction2 pipeline on the same preprocessed files? | **24/24, Δ = 0.000000** — model implementation is exact |
+| [validate_dicom_pipeline.py](scripts/validate_dicom_pipeline.py) | From raw DICOM (Weasis→prepUS→RISK), same labels as `data_test`→RISK? | **23/24 labels identical** (96%); the one diff is a patient at 0.506 vs 0.481, both on the 0.50 threshold |
+| [validate_pipeline_steps.py](scripts/validate_pipeline_steps.py) | Where does the full pipeline diverge, step by step? | Crops from AV1: 0/22 exact dims (encoding), but 20/22 labels correct |
+| [validate_dicom_detect.py](scripts/validate_dicom_detect.py) | From raw DICOM (Weasis→prepUS→DETECT), same detection labels as `data_test`→DETECT? | **Our path: 0.0% detections on all 24 patients; reference: 24.4% avg** — 11/24 label agreement, all trivial zeros. DETECT preprocessing is off-distribution (see below). |
+| [compare_prepus_lib_versions.py](scripts/compare_prepus_lib_versions.py) | Do library versions (2024 vs today) change prepUS output? | **34/34 bit-identical** — pinning not needed |
+
+Generated CSVs in [scripts/results/](scripts/results/):
+
+| CSV | Content |
+|---|---|
+| `comparaison_risk_original_vs_plugin.csv` | Per-patient RISK score, original vs plugin, `abs_delta`, `labels_identiques` |
+| `validation_dicom_pipeline.csv` | Per-patient RISK from raw DICOM vs from `data_test`, `delta_score`, `labels_identiques` |
+| `validate_pipeline_steps.csv` | Step 2 (AV1→prepUS crop vs `data_test`) and Step 3 (`data_test`→RISK vs June-2024 reference CSV) |
+| `comparaison_datasets_avant_prepUS.csv` | Intermediate MP4 vs reference: codec, dimensions, MD5, PSNR, MAE — shows AV1 vs mpeg4 |
+| `prepus_comparison.csv` | Original prepUS vs `prepus_bridge` crop coordinates — IoU ~0.997, ±1 px |
+| `compare_prepus_lib_versions.csv` | Old vs current library behaviour: `delta_theta_c`, `backscan_psnr_dB`, `crop_*_match` |
+
+### Conclusion
+
+Each link in the chain is validated in isolation — RISK model exact (24/24), prepUS
+faithful (IoU 0.997), libraries ruled out (bit-identical) — and the residual
+end-to-end divergences are localized, explained, and quantified: **video encoding
+(AV1)** and **PyTorch version drift**. To reach exact score reproduction, the
+options are to pin the encoding path or to **fine-tune the current model** on the
+present-day distribution.
 
 ---
 
@@ -2127,6 +2275,17 @@ These variables allow sharing the same MongoDB instance between the standalone p
 
 - **Paths**: `pathlib` is used in `mongo_client.py` and `starhe_detect.py` for path normalization (cache keys, venv detection).
 - **MongoDB**: graceful degradation — if MongoDB is unavailable, the pipeline runs normally but results are not cached (`save_result()` and `find_by_file()` return `None` instead of raising an exception).
+
+Reproducibility parameters (currently set to reproduce Jérémy on Linux — see
+[Full DICOM Pipeline Reproducibility](#full-dicom-pipeline-reproducibility)):
+
+| Parameter | Value | Effect |
+|---|---|---|
+| `DETERMINISTIC_INFERENCE` | `False` | `False` = native device/float32 (matches Jérémy). `True` = CPU/float64, bit-identical cross-OS. |
+| `PREPUS_BYPASS_MP4` | `False` | `False` = Mode A mp4v roundtrip (training path). `True` = pure-numpy, cross-OS bit-identical but off-distribution. |
+| `USE_WEASIS_EXPORT` | `True` | DICOM decoded via Weasis (Modality + VOI LUT), pydicom fallback. Reproduces Jérémy's LUT chain. |
+| `INFERENCE_DEVICE` | `"auto"` | `auto` → CUDA/MPS/CPU. Used when `DETERMINISTIC_INFERENCE=False`. |
+| `RISK_THRESHOLD` | `0.50` | Class-1 probability cutoff for "High risk". |
 
 AI parameters:
 

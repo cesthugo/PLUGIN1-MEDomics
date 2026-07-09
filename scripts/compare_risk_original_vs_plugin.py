@@ -44,7 +44,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-# ── PYTHONPATH — modules du plugin ─────────────────────────────────────────
+# ── PYTHONPATH — plugin modules ────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _MOD_PATH   = os.path.join(_SCRIPT_DIR, "..", "pythonCode", "modules")
 if _MOD_PATH not in sys.path:
@@ -62,7 +62,7 @@ set_log_sink(_log)
 from starhe_plugin.ai.models._c3d_runner import _load_model as _load_c3d_direct
 from starhe_plugin.ai.starhe_risk import STARHERiskModel
 
-# ── Chemins par défaut ───────────────────────────────────────────────────────
+# ── Default paths ─────────────────────────────────────────────────────────────
 DEFAULT_INPUT = "/Users/hugo/Desktop/STAGE/STARHE_ADRIEN_DATA-PREPROCESSED/data_test"
 DEFAULT_ORIG_CKPT = (
     "/Users/hugo/Desktop/STAGE/starhe_share/models/classification/"
@@ -88,8 +88,8 @@ CSV_FIELDS = [
     "erreur",
 ]
 
-# Réutilise EXACTEMENT le même dict que le plugin pour éviter tout faux-positif
-# de comparaison de chaînes (accents, casse…).
+# Reuses EXACTLY the same dict as the plugin to avoid any false positive
+# from string comparison (accents, case…).
 LABELS = STARHERiskModel.LABELS
 
 
@@ -115,14 +115,14 @@ def read_mp4_frames(path: str) -> np.ndarray:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  A) Pipeline "original" — vraies classes mmaction2 (pas de réimplémentation)
+#  A) "original" pipeline — real mmaction2 classes (no reimplementation)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class OriginalMMAction2Model:
-    """Backbone C3D + I3DHead chargés depuis le checkpoint originel,
+    """C3D backbone + I3DHead loaded from the original checkpoint,
     prétraitement effectué avec les VRAIES classes mmaction2
     (SampleFrames, Resize, CenterCrop, FormatShape) — mêmes hyperparamètres
-    que models/classification/c3d_starhe.py (config d'entraînement)."""
+    as models/classification/c3d_starhe.py (training config)."""
 
     CLIP_LEN, NUM_CLIPS, RESIZE_SIZE, CROP_SIZE = 16, 10, 128, 112
     MEAN = np.array([104.0, 117.0, 128.0], dtype=np.float32).reshape(1, 3, 1, 1, 1)

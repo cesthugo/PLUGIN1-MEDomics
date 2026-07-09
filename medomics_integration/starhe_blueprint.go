@@ -1,32 +1,32 @@
-// starhe_blueprint.go — Blueprint MEDomics pour le plugin STARHE
+// starhe_blueprint.go — MEDomics blueprint for the STARHE plugin
 //
-// Architecture : reverse proxy
+// Architecture: reverse proxy
 // ─────────────────────────────────────────────────────────────────────────────
-// Toutes les requêtes vers /starhe/* dans le serveur Go MEDomics sont
-// transmises (proxifiées) au serveur Go STARHE standalone qui tourne sur
-// STARHE_SERVER_PORT (défaut : 8082).
+// All requests to /starhe/* in the MEDomics Go server are forwarded
+// (proxied) to the standalone STARHE Go server running on
+// STARHE_SERVER_PORT (default: 8082).
 //
-// Cela évite tout conflit de protocole :
-//   - Notre React app (iframe) parle directement au serveur MEDomics (port
-//     injecté via postMessage depuis starhe.jsx).
-//   - Le serveur MEDomics redirige /starhe/* vers notre serveur standalone.
-//   - Notre serveur standalone gère DICOM, SSE, cache MongoDB, etc.
+// This avoids any protocol conflict:
+//   - Our React app (iframe) talks directly to the MEDomics server (port
+//     injected via postMessage from starhe.jsx).
+//   - The MEDomics server redirects /starhe/* to our standalone server.
+//   - Our standalone server handles DICOM, SSE, MongoDB cache, etc.
 //
-// ── Installation dans MEDomics ──────────────────────────────────────────────
+// ── Installation into MEDomics ──────────────────────────────────────────────
 //
-//  1. Copier ce fichier dans :
+//  1. Copy this file to:
 //       MEDomics/go_server/blueprints/starhe/starhe.go
 //
-//  2. Dans MEDomics/go_server/main.go, ajouter :
+//  2. In MEDomics/go_server/main.go, add:
 //       import Starhe "go_module/blueprints/starhe"
-//       // Dans la fonction d'initialisation :
+//       // In the initialization function:
 //       Starhe.AddHandleFunc()
 //
-//  3. S'assurer que le serveur Go STARHE standalone est démarré avant
-//     l'ouverture du plugin (voir starhe_server_launcher.js).
+//  3. Make sure the standalone STARHE Go server is started before
+//     the plugin is opened (see starhe_server_launcher.js).
 //
-// ── Variables d'environnement ────────────────────────────────────────────────
-//   STARHE_SERVER_PORT  Port du serveur STARHE standalone (défaut : 8082)
+// ── Environment variables ────────────────────────────────────────────────────
+//   STARHE_SERVER_PORT  Port of the standalone STARHE server (default: 8082)
 package starhe
 
 import (
@@ -38,7 +38,7 @@ import (
 	"time"
 )
 
-// starheServerURL est l'adresse du serveur Go STARHE standalone.
+// starheServerURL is the address of the standalone STARHE Go server.
 func starheServerURL() string {
 	port := os.Getenv("STARHE_SERVER_PORT")
 	if port == "" {
@@ -47,7 +47,7 @@ func starheServerURL() string {
 	return "http://localhost:" + port
 }
 
-// AddHandleFunc enregistre un reverse proxy /starhe/* → serveur STARHE standalone.
+// AddHandleFunc registers a reverse proxy /starhe/* → standalone STARHE server.
 func AddHandleFunc() {
 	target, err := url.Parse(starheServerURL())
 	if err != nil {
@@ -59,11 +59,11 @@ func AddHandleFunc() {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 			req.Host = target.Host
-			// Supprimer les en-têtes qui posent problème derrière un proxy
+			// Remove headers that cause issues behind a proxy
 			req.Header.Del("X-Forwarded-For")
 		},
-		// FlushInterval court pour que le SSE (stream d'analyse) fonctionne
-		// sans mise en tampon côté proxy.
+		// Short FlushInterval so SSE (analysis stream) works
+		// without proxy-side buffering.
 		FlushInterval: 50 * time.Millisecond,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Printf("STARHE proxy error: %v", err)
@@ -72,8 +72,8 @@ func AddHandleFunc() {
 	}
 
 	http.HandleFunc("/starhe/", func(w http.ResponseWriter, r *http.Request) {
-		// CORS — nécessaire si le frontend est chargé depuis file:// ou un
-		// domaine différent (iframe en mode prod).
+		// CORS — required if the frontend is loaded from file:// or a
+		// different domain (iframe in prod mode).
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")

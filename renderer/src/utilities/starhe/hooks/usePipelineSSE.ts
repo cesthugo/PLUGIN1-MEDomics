@@ -1,8 +1,8 @@
-// hooks/usePipelineSSE.ts — Flux SSE de l'analyse STARHE
+// hooks/usePipelineSSE.ts — SSE stream of the STARHE analysis
 //
-// Consomme les événements SSE de /starhe/analyze et distribue :
-//  - progress  → mise à jour du label de détection
-//  - result    → résultats finaux (risk + detections_per_frame)
+// Consumes the SSE events of /starhe/analyze and dispatches:
+//  - progress  → update of the detection label
+//  - result    → final results (risk + detections_per_frame)
 //  - error     → message d'erreur
 
 import { useCallback, useRef, useState } from 'react';
@@ -49,21 +49,28 @@ export function usePipelineSSE(
     setProgress('Starting analysis…');
     addLog('Starting STARHE analysis (SSE stream)…', 'info');
 
-    // Ce que l'utilisateur a demandé — sert à filtrer les événements SSE
-    // (le backend peut retourner des données RISK même si on ne l'a pas demandé,
-    //  ex. résultat caché MongoDB)
+    // What the user requested — used to filter the SSE events
+    // (the backend may return RISK data even if it was not requested,
+    //  e.g. a cached MongoDB result)
     const runRisk      = req.runRisk      ?? true;
     const runDetection = req.runDetection ?? true;
 
     let finalDetections: Detection[][] | null = null;
     let finalResult:     AnalysisResult  | null = null;
+    // Business error emitted by Python (level "error") and reception of
+    // the final "result" event — without this, onDone committed an
+    // empty result with "done" status even when the pipeline had crashed.
+    let pipelineError: string | null = null;
+    let gotResult     = false;
+    let committed     = false;
 
-    // Une analyse peut se terminer dès que les modèles demandés ont répondu
+    // An analysis can finish as soon as the requested models have responded
     const isComplete = () =>
       (!runRisk      || finalResult?.riskText !== undefined && finalResult.riskText !== '…') &&
       (!runDetection || finalDetections !== null);
 
     const commitResult = () => {
+      committed = true;
       setLastResult({
         detectionsPerFrame: finalDetections ?? [],
         result: finalResult ?? { riskText: '', riskFg: SBAR_MUTED, detText: '', detFg: SBAR_MUTED },
@@ -84,7 +91,14 @@ export function usePipelineSSE(
         setProgress(msg);
       }
 
-      // Extraction du risque — ignoré si le mode ne l'inclut pas
+      if (lvl === 'error') {
+        pipelineError = msg || 'Erreur pipeline (voir logs serveur)';
+      }
+      if (lvl === 'result') {
+        gotResult = true;
+      }
+
+      // Risk extraction — ignored if the mode does not include it
       if (runRisk && payload.data?.risk) {
         const risk = payload.data.risk;
         const score = (risk.score ?? risk.risk_score ?? 0) as number;
@@ -95,7 +109,7 @@ export function usePipelineSSE(
         else finalResult = { ...finalResult, riskText, riskFg };
       }
 
-      // Extraction des détections finales — ignoré si le mode ne l'inclut pas
+      // Final detection extraction — ignored if the mode does not include it
       if (runDetection && payload.data?.detections_per_frame) {
         finalDetections = payload.data.detections_per_frame as Detection[][];
         const nDet = finalDetections.filter(d => d.length > 0).length;
@@ -113,7 +127,16 @@ export function usePipelineSSE(
     };
 
     const onDone = () => {
-      commitResult();
+      // Python business error (level "error") or stream ended without any
+      // "result" event → error status, without committing a false result.
+      if (pipelineError || !gotResult) {
+        const msg = pipelineError ?? 'Pipeline terminé sans résultat (crash Python ?)';
+        addLog(`Erreur analyse : ${msg}`, 'error');
+        setStatus('error');
+        setProgress(null);
+        return;
+      }
+      if (!committed) commitResult();
       addLog('Analysis complete.', 'success');
     };
 

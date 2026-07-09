@@ -1,50 +1,50 @@
 # requirements.txt — Plugin STARHE / MEDomics
-# Installer avec : pip install -r requirements.txt
+# Install with: pip install -r requirements.txt
 
-# ── Imagerie médicale ─────────────────────────────────────────────────────────
+# ── Medical imaging ───────────────────────────────────────────────────────────
 pydicom>=2.4.0
-# Décodeurs JPEG / JPEG-2000 / JPEG-LS pour pydicom (requis pour certains DICOM compressés)
+# JPEG / JPEG-2000 / JPEG-LS decoders for pydicom (required for some compressed DICOMs)
 pylibjpeg>=2.0.0
 pylibjpeg-openjpeg>=2.0.0   # JPEG 2000
 pylibjpeg-libjpeg>=2.1.0    # JPEG lossless / lossy
 
-# ── Traitement d'image ────────────────────────────────────────────────────────
+# ── Image processing ──────────────────────────────────────────────────────────
 opencv-python-headless>=4.9.0.80
 
-# ── IA / Deep Learning ───────────────────────────────────────────────────────
+# ── AI / Deep Learning ───────────────────────────────────────────────────────
 torch>=2.2.0
 torchvision>=0.17.0
-# einops n'est pas importé directement — dépendance transitive de mmdet (installée automatiquement)
+# einops is not imported directly — transitive dependency of mmdet (installed automatically)
 
-# ── Frameworks ML (mmcv-lite = Python pur, pas d'extensions C compilées) ──────
+# ── ML frameworks (mmcv-lite = pure Python, no compiled C extensions) ─────────
 mmengine>=0.10.0
 mmcv-lite>=2.0.0rc4,<2.2.0
 mmdet>=3.3.0,<4.0.0
-# mmaction2 — installé SANS dépendances (mmengine/mmcv/torch déjà présents)
+# mmaction2 — installed WITHOUT dependencies (mmengine/mmcv/torch already present)
 #   pip install mmaction2==1.2.0 --no-deps
-# Requis par C3D_BACKEND="mmaction2" dans config.py (défaut).
-# Patches venv automatiques appliqués par scripts/setup.sh :
-#   localizers/__init__.py  : suppression import DRN absent du wheel
-#   roi_heads/__init__.py   : AssertionError ajouté au except (conflit registre mmdet)
-#   task_modules/__init__.py: idem
+# Required by C3D_BACKEND="mmaction2" in config.py (default).
+# Automatic venv patches applied by scripts/setup.sh:
+#   localizers/__init__.py  : removal of the DRN import missing from the wheel
+#   roi_heads/__init__.py   : AssertionError added to the except (mmdet registry conflict)
+#   task_modules/__init__.py: same
 importlib_metadata>=6.0
 
-# ── Base de données ───────────────────────────────────────────────────────────
+# ── Database ──────────────────────────────────────────────────────────────────
 pymongo>=4.6.0
 
-# ── Interface prototype ───────────────────────────────────────────────────────
+# ── Prototype interface ───────────────────────────────────────────────────────
 Pillow>=10.2.0
 
-# ── Utilitaires ───────────────────────────────────────────────────────────────
+# ── Utilities ─────────────────────────────────────────────────────────────────
 numpy>=1.26.0
 scipy>=1.12.0
 
-# ── Pré-traitement prepUS ─────────────────────────────────────────────────────
-# prepUS est vendorisé dans third_party/prepUS/ (inclus dans le dépôt).
-# run_tkinter.ps1 l'installe automatiquement avec :
+# ── prepUS preprocessing ──────────────────────────────────────────────────────
+# prepUS is vendored in third_party/prepUS/ (included in the repo).
+# run_tkinter.ps1 installs it automatically with:
 #   pip install sonocrop --no-deps
 #   pip install ../../../../../../third_party/prepUS --no-deps
-# (ou depuis la racine du projet : pip install third_party/prepUS --no-deps)
+# (or from the project root: pip install third_party/prepUS --no-deps)
 sonocrop
 fire>=0.5.0
 rich>=13.0

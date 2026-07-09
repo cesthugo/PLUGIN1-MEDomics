@@ -27,22 +27,27 @@ _REPO    = "https://github.com/cesthugo/PLUGIN1-MEDomics"
 _TAG     = "STARHE_MODELS"
 _BASE    = f"{_REPO}/releases/download/{_TAG}"
 
-MODELS_DIR = Path(__file__).parent.parent / "pythonCode" / "modules" / "starhe_plugin" / "models"
+# STARHE_WEIGHTS_DIR (same variable as config.py) redirects the weights to a
+# user data directory; by default the plugin's models/.
+_DEFAULT_MODELS_DIR = Path(__file__).parent.parent / "pythonCode" / "modules" / "starhe_plugin" / "models"
+MODELS_DIR = Path(os.environ["STARHE_WEIGHTS_DIR"]) if os.environ.get("STARHE_WEIGHTS_DIR") else _DEFAULT_MODELS_DIR
 
-# (nom_fichier, sha256_hex_ou_None)  — sha256 optionnel, vérifie l'intégrité si renseigné
+# (file_name, sha256_hex_or_None)  — sha256 optional, checks integrity if provided
 WEIGHTS = [
-    ("best_acc_mean_cls_f1_epoch_14.pth",    None),
-    ("best_coco_bbox_mAP_50_iter_2100.pth",  None),
+    ("best_acc_mean_cls_f1_epoch_14.pth",
+     "b122463682ac4017659e4a9516c6421f1d9cf82284512031c792921bc6e3a3ff"),
+    ("best_coco_bbox_mAP_50_iter_2100.pth",
+     "1a434bad262ccb848da4ae51737541a9c03004eed60095a4fb690a5252931246"),
 ]
 
 
-# ── GitHub token (repo privé) ────────────────────────────────────────────────
+# ── GitHub token (private repo) ───────────────────────────────────────────────
 _GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 _API_BASE     = "https://api.github.com/repos/cesthugo/PLUGIN1-MEDomics"
 
 
 def _make_request(url: str) -> urllib.request.Request:
-    """Construit une Request avec header Authorization si GITHUB_TOKEN est défini."""
+    """Builds a Request with an Authorization header if GITHUB_TOKEN is set."""
     req = urllib.request.Request(url)
     if _GITHUB_TOKEN:
         req.add_header("Authorization", f"Bearer {_GITHUB_TOKEN}")
@@ -73,7 +78,7 @@ def _resolve_asset_url(name: str) -> str:
     return f"{_BASE}/{name}"  # fallback
 
 
-# ── Utilitaires ───────────────────────────────────────────────────────────────
+# ── Utilities ─────────────────────────────────────────────────────────────────
 
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()

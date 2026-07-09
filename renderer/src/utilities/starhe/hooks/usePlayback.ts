@@ -1,11 +1,11 @@
-// hooks/usePlayback.ts — Gestion de la lecture vidéo DICOM
+// hooks/usePlayback.ts — DICOM video playback management
 //
-// Réplique exactement la logique de lecture de prototype_tkinter.py :
-//  - fps natif du DICOM
-//  - multiplicateur de vitesse (0.25× → 3.0×)
-//  - saut de N frames par tick si speedMult >= 1
-//  - allongement de l'intervalle si speedMult < 1
-//  - boucle optionnelle
+// Exactly replicates the playback logic of prototype_tkinter.py:
+//  - native DICOM fps
+//  - speed multiplier (0.25× → 3.0×)
+//  - jump of N frames per tick if speedMult >= 1
+//  - interval lengthening if speedMult < 1
+//  - optional loop
 
 import { useCallback, useEffect, useRef } from 'react';
 
@@ -33,7 +33,7 @@ export function usePlayback({
   const rafRef   = useRef<number | null>(null);
   const stateRef = useRef({ frameIdx, playing, loop, speedMult, baseFps, frameCount });
 
-  // Garde les refs à jour sans déclencher de nouvelle animation
+  // Keeps the refs up to date without triggering a new animation
   stateRef.current = { frameIdx, playing, loop, speedMult, baseFps, frameCount };
 
   const step = useCallback(() => {

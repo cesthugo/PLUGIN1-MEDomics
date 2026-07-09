@@ -1,15 +1,15 @@
 """
-utils/go_print.py — Protocole de communication vers le serveur Go
+utils/go_print.py — Communication protocol to the Go server
 ==================================================================
-MEDomics utilise un protocole stdout basé sur des lignes JSON préfixées
-pour que le processus Go parent puisse parser les événements du worker Python.
+MEDomics uses a stdout protocol based on prefixed JSON lines
+so that the parent Go process can parse the Python worker's events.
 
-Format attendu :
-  GO_PRINT|<niveau>|<message>
+Expected format:
+  GO_PRINT|<level>|<message>
 
-Niveaux supportés : info, warning, error, progress, result
+Supported levels: info, warning, error, progress, result
 
-Exemple de parsing côté Go :
+Example of parsing on the Go side:
   scanner.Scan() → "GO_PRINT|info|Plugin chargé"
 """
 
@@ -17,24 +17,24 @@ import json
 import sys
 from typing import Callable
 
-# Force UTF-8 sur stdout pour éviter les erreurs d'encodage Unicode sous Windows
-# (PowerShell utilise cp1252 par défaut, incompatible avec les caractères comme →, —, etc.)
+# Force UTF-8 on stdout to avoid Unicode encoding errors on Windows
+# (PowerShell uses cp1252 by default, incompatible with characters like →, —, etc.)
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-# ── Log sink (injection pour UI non-Go / tests) ───────────────────────────────
-# fn(level: str, message: str) → None  |  None = comportement stdout (mode Go)
+# ── Log sink (injection for non-Go UI / tests) ────────────────────────────────
+# fn(level: str, message: str) → None  |  None = stdout behavior (Go mode)
 _log_sink: "Callable | None" = None
 
 
 def set_log_sink(fn: "Callable | None") -> None:
     """
-    Redirige go_print() vers un callback arbitraire au lieu de stdout.
+    Redirects go_print() to an arbitrary callback instead of stdout.
 
-    Usage Tkinter :
+    Tkinter usage:
         set_log_sink(lambda level, msg: app._log(msg, level=level))
-    Usage pipeline Go (défaut) :
+    Go pipeline usage (default):
         set_log_sink(None)
     """
     global _log_sink
@@ -43,16 +43,16 @@ def set_log_sink(fn: "Callable | None") -> None:
 
 def go_print(level: str, message: str, data: dict | None = None) -> None:
     """
-    Émet un message de log.
+    Emits a log message.
 
-    En mode Go (défaut) : écrit une ligne préfixée sur stdout que le
-    serveur Go peut intercepter.
-    En mode UI (sink actif) : appelle le callback injecté via set_log_sink().
+    In Go mode (default): writes a prefixed line to stdout that the
+    Go server can intercept.
+    In UI mode (sink active): calls the callback injected via set_log_sink().
 
-    Paramètres :
+    Parameters:
       level   : "info" | "warning" | "error" | "success" | "progress" | "result"
-      message : texte humain lisible
-      data    : dictionnaire optionnel de données structurées (ignoré par le sink)
+      message : human-readable text
+      data    : optional dictionary of structured data (ignored by the sink)
     """
     if _log_sink is not None:
         _log_sink(level, message)
@@ -68,12 +68,12 @@ def go_print(level: str, message: str, data: dict | None = None) -> None:
 
 def go_progress(step: int, total: int, label: str = "") -> None:
     """
-    Raccourci pour émettre un événement de progression.
+    Shortcut to emit a progress event.
 
-    Paramètre :
-      step  : étape courante (0-based)
-      total : nombre total d'étapes
-      label : description de l'étape courante (optionnel)
+    Parameters:
+      step  : current step (0-based)
+      total : total number of steps
+      label : description of the current step (optional)
     """
     pct = int(step / total * 100) if total > 0 else 0
     go_print("progress", label or f"Étape {step}/{total}", {
@@ -83,7 +83,7 @@ def go_progress(step: int, total: int, label: str = "") -> None:
 
 def go_result(data: dict) -> None:
     """
-    Émet le résultat final structuré du traitement.
-    Le serveur Go parse cette ligne pour renvoyer la réponse HTTP.
+    Emits the final structured result of the processing.
+    The Go server parses this line to return the HTTP response.
     """
     go_print("result", "Traitement terminé", data)

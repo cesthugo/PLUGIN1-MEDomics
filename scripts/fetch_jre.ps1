@@ -1,13 +1,13 @@
-# fetch_jre.ps1 — Télécharge une JRE Temurin 17 pour Windows x64
-# depuis l'API Adoptium.
+# fetch_jre.ps1 — Downloads a Temurin 17 JRE for Windows x64
+# from the Adoptium API.
 #
-# Usage :
-#   .\scripts\fetch_jre.ps1                # win-x64 (défaut)
+# Usage:
+#   .\scripts\fetch_jre.ps1                # win-x64 (default)
 #   .\scripts\fetch_jre.ps1 -Platform win-x64
 #
-# Sortie : renderer\build-resources\jre-win-x64\  (contient bin\java.exe)
-# Convention package.json : extraResources copie ce dossier vers "jre\" dans
-# resources\jre\bin\java.exe de l'installeur NSIS.
+# Output: renderer\build-resources\jre-win-x64\  (contains bin\java.exe)
+# package.json convention: extraResources copies this directory to "jre\" in
+# resources\jre\bin\java.exe of the NSIS installer.
 
 param(
     [string]$Platform = "win-x64",
@@ -52,7 +52,7 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 try {
     Expand-Archive -Path $TmpZip -DestinationPath $TmpExtract -Force
 
-    # Adoptium livre `jdk-17.x.x+x-jre\` à la racine du zip Windows
+    # Adoptium ships `jdk-17.x.x+x-jre\` at the root of the Windows zip
     $Inner = Get-ChildItem -Path $TmpExtract -Directory | Select-Object -First 1
     if (-not $Inner) {
         throw "Extraction vide"

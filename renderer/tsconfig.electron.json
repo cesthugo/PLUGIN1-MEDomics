@@ -1,10 +1,10 @@
 {
-  // Config TypeScript pour compiler electron/main.ts et electron/preload.ts
-  // en CommonJS (nécessaire pour le processus Node.js d'Electron).
+  // TypeScript config to compile electron/main.ts and electron/preload.ts
+  // to CommonJS (required for Electron's Node.js process).
   //
-  // Les fichiers compilés vont dans electron-dist/ — un package.json avec
-  // "type": "commonjs" y est généré par le script build:electron-main pour
-  // contourner le "type": "module" du package.json racine.
+  // The compiled files go into electron-dist/ — a package.json with
+  // "type": "commonjs" is generated there by the build:electron-main script to
+  // work around the "type": "module" of the root package.json.
   "compilerOptions": {
     "target":           "ES2020",
     "module":           "CommonJS",

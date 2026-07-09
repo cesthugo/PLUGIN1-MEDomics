@@ -1,11 +1,11 @@
 // components/MultiPanelView.tsx — Vue multi-panneaux (split-v / split-h / quad)
 //
 // Supporte :
-//  - 2 panneaux côte à côte (split-v), 2 panneaux empilés (split-h), grille 2×2 (quad)
-//  - Séparateurs fixes 50/50 (non déplaçables)
-//  - Drag & drop d'onglets depuis la bande de vignettes vers les panneaux
-//  - Zone d'expansion : déposer un fichier pour passer à la disposition supérieure
-//  - Panneau actif (interactions activées) / panneau inactif (clic pour activer)
+//  - 2 panels side by side (split-v), 2 panels stacked (split-h), 2×2 grid (quad)
+//  - Fixed 50/50 separators (non-draggable)
+//  - Drag & drop of tabs from the thumbnail strip onto the panels
+//  - Expansion zone: drop a file to switch to the larger layout
+//  - Active panel (interactions enabled) / inactive panel (click to activate)
 
 import React from 'react';
 import { DicomCanvas } from './DicomCanvas';
@@ -44,7 +44,7 @@ export function MultiPanelView({
   const [dragDepth,      setDragDepth]      = React.useState(0);
   const [dragOverExpand, setDragOverExpand] = React.useState(false);
 
-  // Séparateurs fixes 50/50 — non déplaçables
+  // Fixed 50/50 separators — non-draggable
   const gridStyle: React.CSSProperties =
     layout === 'split-v' ? { gridTemplateColumns: '1fr 1fr' } :
     layout === 'split-h' ? { gridTemplateRows:    '1fr 1fr' } :
@@ -64,9 +64,9 @@ export function MultiPanelView({
   return (
     <div
       style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}
-      // Suivi du drag au niveau du conteneur (englobe la grille ET la zone
-      // d'expansion) : la zone reste montée tant que le curseur est dans la vue,
-      // même en quittant la grille — sinon elle se démonte avant le drop.
+      // Drag tracking at the container level (encompasses the grid AND the
+      // expansion zone): the zone stays mounted as long as the cursor is in the view,
+      // even when leaving the grid — otherwise it unmounts before the drop.
       onDragEnter={() => setDragDepth(d => d + 1)}
       onDragLeave={() => setDragDepth(d => Math.max(0, d - 1))}
       onDrop={() => { setDragDepth(0); setDragOverExpand(false); }}
@@ -79,7 +79,7 @@ export function MultiPanelView({
         padding: '0 10px', gap: 8,
       }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-          Vue multiple
+          Multi-view
         </span>
         <span style={{ fontSize: 10, color: '#334155' }}>
           {layout === 'split-v' ? 'Left / Right' : layout === 'split-h' ? 'Top / Bottom' : '2×2 Grid'}
@@ -180,7 +180,7 @@ export function MultiPanelView({
                     background: 'rgba(0,0,0,0.6)', padding: '2px 5px', borderRadius: 3,
                     pointerEvents: 'none',
                   }}>
-                    Cliquer pour activer
+                    Click to activate
                   </span>
                 </div>
               )}

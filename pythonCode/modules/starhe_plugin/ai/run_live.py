@@ -1,20 +1,20 @@
 """
-ai/run_live.py — Point d'entrée CLI pour le mode analyse en direct
+ai/run_live.py — CLI entry point for the live analysis mode
 ==================================================================
-Lancé par le serveur Go comme subprocess pour `POST /starhe/live`.
+Launched by the Go server as a subprocess for `POST /starhe/live`.
 
-Usage :
+Usage:
     python -m starhe_plugin.ai.run_live --source folder --folder /path/to/watch
     python -m starhe_plugin.ai.run_live --source cstore --port 11112
     python -m starhe_plugin.ai.run_live --source hdmi --device 0 [--no_risk]
 
-Protocole stdout (identique à pipeline.py) :
+stdout protocol (identical to pipeline.py):
     GO_PRINT|info|{"level":"info","message":"..."}
     GO_PRINT|result|{"level":"result","message":"Frame N",
                      "data":{"frame_b64":"..jpeg_b64..","detections":[...],"risk":{...}}}
 
-Le processus tourne jusqu'à recevoir SIGTERM (envoyé par le serveur Go quand le
-client SSE se déconnecte) ou jusqu'à ce que la source s'arrête d'elle-même.
+The process runs until it receives SIGTERM (sent by the Go server when the
+SSE client disconnects) or until the source stops by itself.
 """
 
 from __future__ import annotations
@@ -35,22 +35,22 @@ import numpy as np
 from starhe_plugin.ai.live_pipeline import LivePipeline
 from starhe_plugin.utils.go_print import go_print
 
-# ── Qualité JPEG pour la transmission SSE ────────────────────────────────────
-_JPEG_QUALITY = 82   # bon compromis qualité / taille (~20–40 KB/frame)
+# ── JPEG quality for SSE transmission ────────────────────────────────────────
+_JPEG_QUALITY = 82   # good quality/size trade-off (~20–40 KB/frame)
 
-# ── Événement global de stop (SIGTERM ou erreur de source) ───────────────────
+# ── Global stop event (SIGTERM or source error) ──────────────────────────────
 _stop_event = threading.Event()
 
-# ── Émission immédiate de frames pour l'affichage (découplé de l'inférence) ───
+# ── Immediate frame emission for display (decoupled from inference) ───────────
 _preview_idx = itertools.count()
 
 
 def _emit_preview_frame(frame: np.ndarray) -> None:
     """
-    Encode la frame en JPEG et l'émet immédiatement sur stdout pour l'affichage
-    dans l'interface, AVANT que l'inférence soit terminée.
-    La clé 'detections' est intentionnellement absente → le frontend conserve
-    les bbox de la dernière inférence en overlay.
+    Encodes the frame as JPEG and emits it immediately on stdout for display
+    in the UI, BEFORE inference has finished.
+    The 'detections' key is intentionally absent → the frontend keeps
+    the bboxes of the latest inference as overlay.
     """
     ok, buf = cv2.imencode(
         ".jpg",
@@ -73,18 +73,18 @@ def _install_signal_handlers() -> None:
     try:
         signal.signal(signal.SIGINT, _handler)
     except OSError:
-        pass  # Windows : SIGINT parfois non supporté via signal.signal
+        pass  # Windows: SIGINT sometimes not supported via signal.signal
 
 
-# ── Sources de frames ─────────────────────────────────────────────────────────
+# ── Frame sources ─────────────────────────────────────────────────────────────
 
 class _FolderWatcher(threading.Thread):
     """
-    Surveille un dossier et pousse les nouveaux fichiers .dcm/.dicom vers
-    le pipeline au fur et à mesure qu'ils apparaissent.
+    Watches a folder and pushes new .dcm/.dicom files to
+    the pipeline as they appear.
     """
 
-    POLL_INTERVAL = 0.5  # secondes entre deux scans
+    POLL_INTERVAL = 0.5  # seconds between two scans
 
     def __init__(self, folder: str, pipeline: LivePipeline) -> None:
         super().__init__(daemon=True, name="FolderWatcher")
@@ -128,25 +128,25 @@ class _FolderWatcher(threading.Thread):
                     if mx > mn else np.zeros_like(arr, dtype=np.uint8)
                 )
 
-            # Intervalle inter-frames depuis DICOM FrameTime (ms → s), défaut 15 fps
+            # Inter-frame interval from DICOM FrameTime (ms → s), default 15 fps
             try:
                 interval = float(ds.FrameTime) / 1000.0
             except AttributeError:
                 interval = 1.0 / 15.0
 
             if arr.ndim == 2:
-                # Frame unique en niveaux de gris (H, W)
+                # Single grayscale frame (H, W)
                 rgb = np.stack([arr, arr, arr], axis=-1)
                 _emit_preview_frame(rgb)
                 self._pipe.push_frame(rgb)
 
             elif arr.ndim == 3 and arr.shape[2] == 3:
-                # Frame unique RGB (H, W, 3)
+                # Single RGB frame (H, W, 3)
                 _emit_preview_frame(arr)
                 self._pipe.push_frame(arr)
 
             elif arr.ndim == 3:
-                # Cine multi-frame en niveaux de gris (T, H, W)
+                # Multi-frame grayscale cine (T, H, W)
                 for frame in arr:
                     if self._stop_evt.is_set():
                         break
@@ -156,7 +156,7 @@ class _FolderWatcher(threading.Thread):
                     self._stop_evt.wait(interval)
 
             elif arr.ndim == 4:
-                # Cine multi-frame RGB (T, H, W, 3)
+                # Multi-frame RGB cine (T, H, W, 3)
                 for frame in arr:
                     if self._stop_evt.is_set():
                         break
@@ -170,8 +170,8 @@ class _FolderWatcher(threading.Thread):
 
 class _HDMIReader(threading.Thread):
     """
-    Lit les frames depuis une carte de capture HDMI via cv2.VideoCapture.
-    Limite le débit à fps_limit images/seconde (30 par défaut).
+    Reads frames from an HDMI capture card via cv2.VideoCapture.
+    Limits the rate to fps_limit frames/second (30 by default).
     """
 
     def __init__(self, device: int, pipeline: LivePipeline,
@@ -233,9 +233,9 @@ class _HDMIReader(threading.Thread):
 
 class _CStoreReceiver:
     """
-    Serveur DICOM C-STORE SCP (AE title : STARHE_LIVE).
-    Pousse les pixels de chaque instance reçue vers le pipeline.
-    Requiert pynetdicom.
+    DICOM C-STORE SCP server (AE title: STARHE_LIVE).
+    Pushes the pixels of each received instance to the pipeline.
+    Requires pynetdicom.
     """
 
     def __init__(self, port: int, pipeline: LivePipeline) -> None:
@@ -313,17 +313,17 @@ class _CStoreReceiver:
             go_print("info", "[Live] C-STORE SCP arrêté.")
 
 
-# ── Callback résultat ─────────────────────────────────────────────────────────
+# ── Result callback ───────────────────────────────────────────────────────────
 
 def _make_on_result() -> Callable[[dict], None]:
     """
-    Retourne le callback on_result émettant uniquement les résultats d'inférence
-    (détections + risque) — sans frame_b64.
+    Returns the on_result callback emitting only the inference results
+    (detections + risk) — without frame_b64.
 
-    La frame a déjà été émise en preview par le thread source → l'affichage
-    vidéo est fluide indépendamment de la latence d'inférence RTMDet.
-    Quand les détections arrivent, le frontend les superpose sur la dernière
-    frame affichée (comportement « caméra de surveillance »).
+    The frame was already emitted as a preview by the source thread → the video
+    display stays smooth regardless of the RTMDet inference latency.
+    When detections arrive, the frontend overlays them on the last
+    displayed frame ("surveillance camera" behavior).
     """
     def on_result(result: dict) -> None:
         data: dict = {
@@ -340,25 +340,25 @@ def _make_on_result() -> Callable[[dict], None]:
     return on_result
 
 
-# ── Point d'entrée ────────────────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="STARHE live analysis subprocess — lancé par le serveur Go"
+        description="STARHE live analysis subprocess — launched by the Go server"
     )
     parser.add_argument(
         "--source", required=True,
         choices=["cstore", "folder", "hdmi"],
-        help="Source de frames : C-STORE DICOM | dossier | carte HDMI",
+        help="Frame source: C-STORE DICOM | folder | HDMI capture card",
     )
     parser.add_argument("--port",    type=int, default=11112,
-                        help="Port TCP du serveur C-STORE SCP (source=cstore)")
+                        help="TCP port of the C-STORE SCP server (source=cstore)")
     parser.add_argument("--folder",  type=str, default="",
-                        help="Chemin du dossier à surveiller (source=folder)")
+                        help="Path of the folder to watch (source=folder)")
     parser.add_argument("--device",  type=int, default=0,
-                        help="Index cv2.VideoCapture (source=hdmi)")
+                        help="cv2.VideoCapture index (source=hdmi)")
     parser.add_argument("--no_risk", action="store_true",
-                        help="Désactiver STARHE-RISK (réduit la latence)")
+                        help="Disable STARHE-RISK (reduces latency)")
     args = parser.parse_args()
 
     _install_signal_handlers()
@@ -390,10 +390,10 @@ def main() -> None:
 
     go_print("info", f"[Live] Analyse en direct démarrée (source={args.source})")
 
-    # ── Bloque jusqu'au stop (SIGTERM ou erreur de source) ────────────────────
+    # ── Block until stop (SIGTERM or source error) ────────────────────────────
     _stop_event.wait()
 
-    # ── Arrêt propre ──────────────────────────────────────────────────────────
+    # ── Clean shutdown ────────────────────────────────────────────────────────
     go_print("info", "[Live] Arrêt en cours…")
     if source_runner is not None and hasattr(source_runner, "stop"):
         source_runner.stop()

@@ -52,7 +52,7 @@ CSV_FIELDS = [
     "pt_score_high",
     "pt_score_low",
     "pt_label",
-    # différence
+    # difference
     "delta_score",
     "labels_identiques",
     # timing
@@ -142,7 +142,7 @@ def main() -> None:
 
     _log("info", f"{len(mp4_files)} fichier(s) à évaluer")
 
-    # Charger les deux backends (une seule fois — C3D est lourd)
+    # Load both backends (only once — C3D is heavy)
     _log("info", "Chargement backend mmaction2…")
 
     # Force mmaction2
@@ -159,7 +159,7 @@ def main() -> None:
     device_pt = "cpu" if DETERMINISTIC_INFERENCE else "cpu"
     risk_pt_backend = _PyTorchBackend(device_pt, DETERMINISTIC_INFERENCE)
 
-    # Wrapper minimal pour avoir la même interface predict()
+    # Minimal wrapper to have the same predict() interface
     class _PTModel:
         LABELS = {0: "Risque faible", 1: "Risque élevé"}
         def __init__(self, backend):
@@ -179,14 +179,14 @@ def main() -> None:
 
     risk_mma.close()
 
-    # Écriture CSV
+    # CSV write
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
     _log("info", f"\n✓ CSV : {args.output}")
 
-    # Résumé terminal
+    # Terminal summary
     ok  = [r for r in rows if not r["erreur"]]
     err = [r for r in rows if r["erreur"]]
     n_same  = sum(1 for r in ok if r["labels_identiques"] == "OUI")

@@ -1,15 +1,15 @@
-// api.ts — Appels vers le serveur Go STARHE
+// api.ts — Calls to the STARHE Go server
 
 
 import type { DicomData, Detection, AnalysisResult, SSEPayload } from './types';
 
-// Base URL configurable (ordre de priorité) :
-//   1. window.electronAPI.apiBase  → injecté par electron/preload.ts
-//   2. window.__STARHE_API_BASE__  → injection manuelle (iframe MEDomics via postMessage)
-//   3. ''                          → chemin relatif → proxy Vite en dev
+// Configurable base URL (priority order):
+//   1. window.electronAPI.apiBase  → injected by electron/preload.ts
+//   2. window.__STARHE_API_BASE__  → manual injection (MEDomics iframe via postMessage)
+//   3. ''                          → relative path → Vite proxy in dev
 //
-// Fonction (non const) pour relire la valeur à chaque appel,
-// notamment après l'injection tardive de window.__STARHE_API_BASE__.
+// Function (not const) to re-read the value on each call,
+// in particular after the late injection of window.__STARHE_API_BASE__.
 export function getApiBase(): string {
   return window.electronAPI?.apiBase ?? (window as any).__STARHE_API_BASE__ ?? '';
 }
@@ -29,7 +29,7 @@ export interface DicomLoadResponse {
   patient_name:       string;
   study_date:         string;
   frames_b64:         string[];
-  /** Chemin du fichier sur le serveur (injecté par le handler Go) */
+  /** File path on the server (injected by the Go handler) */
   server_path?:       string;
   error?:             string;
 }
@@ -57,9 +57,9 @@ export async function loadDicom(
 }
 
 /**
- * Charge un DICOM depuis un objet File (navigateur standard, sans Electron).
- * Upload les octets en multipart/form-data → le serveur Go écrit un fichier
- * temporaire qu'il supprime après traitement.
+ * Loads a DICOM from a File object (standard browser, without Electron).
+ * Uploads the bytes as multipart/form-data → the Go server writes a
+ * temporary file that it deletes after processing.
  */
 export async function loadDicomFile(
   file:    File,
@@ -74,8 +74,8 @@ export async function loadDicomFile(
   const res = await fetch(`${getApiBase()}/starhe/dicom/load`, {
     method: 'POST',
     body:   form,
-    // Ne pas définir Content-Type manuellement — le navigateur ajoute le
-    // boundary multipart automatiquement si on laisse le champ absent.
+    // Do not set Content-Type manually — the browser adds the
+    // multipart boundary automatically if the field is left unset.
   });
 
   if (!res.ok) {
@@ -108,9 +108,9 @@ function mapDicomResponse(json: DicomLoadResponse): DicomData {
 }
 
 /**
- * Charge un fichier MP4 depuis un objet File (navigateur standard).
- * Upload les octets en multipart/form-data → le serveur Go écrit un fichier
- * temporaire et retourne les frames encodées JPEG base64.
+ * Loads an MP4 file from a File object (standard browser).
+ * Uploads the bytes as multipart/form-data → the Go server writes a
+ * temporary file and returns the base64 JPEG-encoded frames.
  */
 export async function loadMp4File(
   file:    File,
@@ -138,10 +138,10 @@ export async function loadMp4File(
   return mapDicomResponse(json);
 }
 
-// ── Suppression du cache MongoDB ──────────────────────────────────────────────
+// ── MongoDB cache deletion ────────────────────────────────────────────────────
 
-/** Recharge un MP4 déjà présent sur le serveur à partir de son chemin absolu.
- *  Utilisé par openBatchResultAsTab pour rouvrir un résultat d'analyse MP4. */
+/** Reloads an MP4 already present on the server from its absolute path.
+ *  Used by openBatchResultAsTab to reopen an MP4 analysis result. */
 export async function loadMp4(
   mp4Path: string,
   quality = 70,
@@ -176,11 +176,11 @@ export async function deleteCache(dicomPath: string): Promise<{ deleted: number 
   return res.json();
 }
 
-// ── Analyse SSE (pipeline STARHE) ────────────────────────────────────────────
+// ── SSE analysis (STARHE pipeline) ───────────────────────────────────────────
 
 export interface AnalyzeRequest {
   dicomPath?:          string;
-  /** Chemin serveur d'un fichier MP4 temporaire — utilise /starhe/mp4/analyze */
+  /** Server path of a temporary MP4 file — uses /starhe/mp4/analyze */
   mp4Path?:            string;
   anonMode?:          string;
   runRisk?:           boolean;
@@ -191,12 +191,12 @@ export interface AnalyzeRequest {
 }
 
 /**
- * Ouvre un flux SSE vers /starhe/analyze.
+ * Opens an SSE stream to /starhe/analyze.
  *
- * @param req  Corps de la requête
- * @param onEvent  Callback pour chaque événement SSE parsé
- * @param onDone  Appelé quand le signal [DONE] est reçu
- * @returns Fonction abort() pour annuler le flux
+ * @param req  Request body
+ * @param onEvent  Callback for each parsed SSE event
+ * @param onDone  Called when the [DONE] signal is received
+ * @returns abort() function to cancel the stream
  */
 export function streamAnalysis(
   req: AnalyzeRequest,
@@ -260,7 +260,7 @@ export function streamAnalysis(
           try {
             onEvent(JSON.parse(raw) as SSEPayload);
           } catch {
-            // ligne malformée — ignorer
+            // malformed line — ignore
           }
         }
       }
@@ -275,11 +275,11 @@ export function streamAnalysis(
   return () => ctrl.abort();
 }
 
-// ── Label d'onglet depuis la date DICOM ──────────────────────────────────────
+// ── Tab label from the DICOM date ─────────────────────────────────────────────
 
 export function makeTabLabel(studyDate: string, fileName: string): string {
   const sd = studyDate.trim();
-  // Suffixe court du nom de fichier (sans extension) pour différencier les onglets
+  // Short suffix of the file name (without extension) to distinguish the tabs
   const base   = fileName.replace(/\.[^.]+$/, '');
   const suffix = base.slice(0, 12);
   if (sd.length === 8 && /^\d{8}$/.test(sd)) {

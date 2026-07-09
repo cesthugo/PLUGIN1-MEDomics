@@ -1,10 +1,10 @@
 """
-ai/models/_dino_runner.py — Script standalone DINO-DETR
+ai/models/_dino_runner.py — Standalone DINO-DETR script
 ========================================================
-Script appelé EN SUBPROCESS par starhe_detect.py.
-NE PAS importer directement — utiliser via subprocess uniquement.
+Script called AS A SUBPROCESS by starhe_detect.py.
+DO NOT import directly — use via subprocess only.
 
-Usage :
+Usage:
     python _dino_runner.py \\
         --config    <path/dino_starhe.py>           \\
         --ckpt      <path/best_xxx.pth>             \\
@@ -13,7 +13,7 @@ Usage :
         --out       <path/results.json>             \\
         [--score-thr 0.001]
 
-Sortie JSON (liste de détections) :
+JSON output (list of detections):
     [{"bbox": [x0,y0,x1,y1], "score": 0.87, "label": "tumor"}, ...]
 """
 
@@ -23,7 +23,7 @@ import types
 import argparse
 from pathlib import Path
 
-# ─── 1. Stub mmcv._ext (avant tout import mmcv/mmdet) ────────────────────────
+# ─── 1. Stub mmcv._ext (before any mmcv/mmdet import) ────────────────────────
 if "mmcv._ext" not in sys.modules:
     class _CExtStub(types.ModuleType):
         def __getattr__(self, name):
@@ -32,7 +32,7 @@ if "mmcv._ext" not in sys.modules:
             return _unavailable
     sys.modules["mmcv._ext"] = _CExtStub("mmcv._ext")
 
-# ─── 2. Stub tqdm si absent ───────────────────────────────────────────────────
+# ─── 2. Stub tqdm if missing ──────────────────────────────────────────────────
 try:
     import tqdm  # noqa: F401
 except ImportError:
@@ -88,24 +88,24 @@ def _tv_nms_fwd(ctx, bboxes, scores, iou_threshold,
 
 NMSop.forward = staticmethod(_tv_nms_fwd)
 
-# ─── 5. Point d'entrée ───────────────────────────────────────────────────────
+# ─── 5. Entry point ──────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="_dino_runner.py",
-        description="Inférence DINO-DETR — appelé en subprocess par starhe_detect.py",
+        description="DINO-DETR inference — called as a subprocess by starhe_detect.py",
     )
-    parser.add_argument("--config",      required=True, help="Chemin vers dino_starhe.py")
-    parser.add_argument("--ckpt",        required=True, help="Chemin vers le checkpoint .pth")
+    parser.add_argument("--config",      required=True, help="Path to dino_starhe.py")
+    parser.add_argument("--ckpt",        required=True, help="Path to the .pth checkpoint")
     parser.add_argument("--starhe-root", required=True, dest="starhe_root",
-                        help="Racine du dépôt starhe_share (dossier qui contient `starhe/`)")
-    parser.add_argument("--image",       required=True, help="Chemin vers l'image (PNG/JPEG)")
-    parser.add_argument("--out",         required=True, help="Chemin de sortie JSON")
+                        help="Root of the starhe_share repo (directory containing `starhe/`)")
+    parser.add_argument("--image",       required=True, help="Path to the image (PNG/JPEG)")
+    parser.add_argument("--out",         required=True, help="JSON output path")
     parser.add_argument("--score-thr",   type=float, default=0.001, dest="score_thr",
-                        help="Seuil de confiance minimum (défaut : 0.001)")
+                        help="Minimum confidence threshold (default: 0.001)")
     args = parser.parse_args()
 
-    # Enregistrer les modules custom starhe
+    # Register the custom starhe modules
     if args.starhe_root not in sys.path:
         sys.path.insert(0, args.starhe_root)
     try:
@@ -114,7 +114,7 @@ def main() -> None:
         print(f"[dino_runner] ERREUR import starhe.models : {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Imports mmdet (sûrs après stubs + enregistrement starhe)
+    # mmdet imports (safe after stubs + starhe registration)
     import cv2
     import numpy as np
     from mmcv.transforms import Compose
@@ -122,17 +122,17 @@ def main() -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Chargement du modèle
+    # Model loading
     model = init_detector(args.config, args.ckpt, device=device)
 
-    # Remplacer le loader fichier par un loader en mémoire
+    # Replace the file loader with an in-memory loader
     cfg = model.cfg.copy()
     cfg.test_dataloader.dataset.pipeline[0].type = "LoadImageFromNDArray"
     test_pipeline = Compose(cfg.test_dataloader.dataset.pipeline)
 
     class_names = list(model.dataset_meta.get("classes", ["tumor"]))
 
-    # Chargement de l'image (BGR, format OpenCV)
+    # Image loading (BGR, OpenCV format)
     image_path = Path(args.image)
     if not image_path.exists():
         print(f"[dino_runner] ERREUR : image introuvable : {image_path}", file=sys.stderr)
@@ -143,7 +143,7 @@ def main() -> None:
         print(f"[dino_runner] ERREUR : impossible de lire {image_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Inférence
+    # Inference
     with torch.no_grad():
         result = inference_detector(model, bgr, test_pipeline=test_pipeline)
 
@@ -164,7 +164,7 @@ def main() -> None:
         if sc >= args.score_thr
     ]
 
-    # Écriture JSON
+    # JSON write
     Path(args.out).write_text(
         json.dumps(detections, ensure_ascii=False), encoding="utf-8"
     )

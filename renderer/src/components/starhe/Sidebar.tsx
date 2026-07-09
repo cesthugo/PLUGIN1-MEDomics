@@ -1,11 +1,11 @@
-// components/Sidebar.tsx — Panneau latéral gauche style MEDomics STARHE
+// components/Sidebar.tsx — MEDomics STARHE-style left side panel
 //
-// Réplique intégralement la sidebar de prototype_tkinter.py :
-//   - FICHIER DICOM : chargement, info, label fichier
-//   - NAVIGATION    : ◀/▶, compteur, scrubbar, play/pause, boucle, vitesse, reset
-//   - ANALYSE IA    : lancer / réinitialiser / live
-//   - RÉSULTATS     : mode, risque CHC, lésions, frames avec tumeur (cliquables)
-//   - MÉTADONNÉES   : conservées + tags anonymisés
+// Fully replicates the sidebar of prototype_tkinter.py:
+//   - DICOM FILE  : loading, info, file label
+//   - NAVIGATION  : ◀/▶, counter, scrubbar, play/pause, loop, speed, reset
+//   - AI ANALYSIS : run / reset / live
+//   - RESULTS     : mode, HCC risk, lesions, frames with tumor (clickable)
+//   - METADATA    : kept + anonymized tags
 
 import React, { useRef, useState } from 'react';
 import type { TabState, LogLevel, Patient } from '../../utilities/starhe/types';
@@ -94,7 +94,7 @@ function SBtn({
   );
 }
 
-// ── Bouton icône navigation ──────────────────────────────────────────────────
+// ── Navigation icon button ────────────────────────────────────────────────────
 
 function NavBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
@@ -123,7 +123,7 @@ function SH({ title }: { title: string }) {
   );
 }
 
-// ── Row résultat (label + valeur colorée) ─────────────────────────────────────
+// ── Result row (label + colored value) ────────────────────────────────────────
 
 function ResultRow({ label, value, fg }: { label: string; value: string; fg: string }) {
   return (
@@ -134,27 +134,27 @@ function ResultRow({ label, value, fg }: { label: string; value: string; fg: str
   );
 }
 
-// ── Composant principal ───────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export interface SidebarProps {
   tab:            TabState | null;
   analysisStatus: AnalysisStatus;
   darkMode:       boolean;
-  /** Couleur de fond de la sidebar (depuis les réglages d'affichage) */
+  /** Sidebar background color (from the display settings) */
   sidebarBg?:     string;
-  /** Couleur principale du texte (depuis les réglages d'affichage) */
+  /** Main text color (from the display settings) */
   textColor?:     string;
-  /** Modèles IA à exécuter (depuis les réglages d'affichage) */
+  /** AI models to run (from the display settings) */
   analysisMode?:  'both' | 'risk_only' | 'detect_only';
-  /** Callback pour modifier le mode d'analyse depuis la sidebar */
+  /** Callback to change the analysis mode from the sidebar */
   onAnalysisModeChange?: (mode: 'both' | 'risk_only' | 'detect_only') => void;
 
   onLoadDicom:      () => void;
-  /** Sélection manuelle de fichiers DICOM individuels */
+  /** Manual selection of individual DICOM files */
   onLoadDicomFiles: () => void;
-  /** Chargement direct d'un fichier MP4 */
+  /** Direct loading of an MP4 file */
   onLoadMp4?:       () => void;
-  /** Chargement direct par chemin absolu (mode dev navigateur, hors Electron) */
+  /** Direct loading by absolute path (browser dev mode, outside Electron) */
   onLoadPath:       (path: string) => void;
   onPrevFrame:      () => void;
   onNextFrame:      () => void;
@@ -202,7 +202,7 @@ export function Sidebar({
 }: SidebarProps) {
   const [pathInput,       setPathInput]       = useState('');
   const [showModelPicker, setShowModelPicker] = useState(false);
-  // Détection Electron : via l'API preload (méthode fiable avec contextIsolation)
+  // Electron detection: via the preload API (reliable method with contextIsolation)
   const isElectron = typeof window !== 'undefined' &&
     (window.electronAPI !== undefined ||
      navigator.userAgent.includes('Electron'));
@@ -214,11 +214,11 @@ export function Sidebar({
 
   const speedRef = useRef<HTMLInputElement>(null);
 
-  // Résultats IA
+  // AI results
   const mode        = tab ? (tab.detectionsBy.original ? 'original' : null) : null;
   const result      = mode ? tab?.resultsBy[mode] : null;
 
-  // Métadonnées
+  // Metadata
   const keptMeta       = data?.keptMetadata ?? [];
   const origSensitive  = data?.originalSensitive ?? [];
 
@@ -445,7 +445,7 @@ export function Sidebar({
                         if (!onAnalysisModeChange) return;
                         const nowRisk   = key === 'risk'   ? e.target.checked : analysisMode !== 'detect_only';
                         const nowDetect = key === 'detect' ? e.target.checked : analysisMode !== 'risk_only';
-                        // Empêche de décocher les deux
+                        // Prevents unchecking both
                         if (!nowRisk && !nowDetect) return;
                         onAnalysisModeChange(
                           nowRisk && nowDetect ? 'both'

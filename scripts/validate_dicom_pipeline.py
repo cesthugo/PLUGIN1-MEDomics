@@ -121,7 +121,7 @@ def main() -> None:
                         help="Traiter uniquement ce patient (ex: 01-0006)")
     args = parser.parse_args()
 
-    # Liste les fichiers data_test pour avoir les références
+    # List the data_test files to get the references
     ref_mp4s = {
         patient_id(f): os.path.join(args.data_test, f)
         for f in os.listdir(args.data_test)
@@ -129,14 +129,14 @@ def main() -> None:
     }
     _log("info", f"Références data_test : {len(ref_mp4s)} patients")
 
-    # Liste les DICOMs disponibles
+    # List the available DICOMs
     dcm_files = {
         patient_id(f): os.path.join(args.dicom_dir, f)
         for f in os.listdir(args.dicom_dir)
         if f.lower().endswith((".dcm", ".avi"))
     }
 
-    # Intersection : patients avec DICOM ET data_test référence
+    # Intersection: patients with DICOM AND data_test reference
     common = sorted(set(ref_mp4s) & set(dcm_files))
     if args.patient:
         common = [p for p in common if args.patient in p]
@@ -159,20 +159,20 @@ def main() -> None:
         row["patient"] = pid
 
         try:
-            # ── Score depuis data_test MP4 (référence) ─────────────────────
+            # ── Score from data_test MP4 (reference) ───────────────────────
             ref_frames = read_mp4_frames(ref_mp4s[pid])
             row["n_frames_ref"] = len(ref_frames)
             c_ref = np.stack([ref_frames[:, :, :, 0]] * 3 if ref_frames.ndim == 4
                               else [ref_frames] * 3, axis=-1) \
                     if ref_frames.ndim == 3 else ref_frames
-            # data_test frames sont déjà RGB pseudo-gray (R=G=B)
+            # data_test frames are already RGB pseudo-gray (R=G=B)
             r_ref = risk_model.predict(ref_frames)
 
-            # ── Score depuis pipeline DICOM ────────────────────────────────
+            # ── Score from the DICOM pipeline ──────────────────────────────
             t0 = time.perf_counter()
             crop_frames, _ = dicom_to_crop_frames(dcm_files[pid])
             row["n_frames_dicom"] = len(crop_frames)
-            # Convertir (T, H_crop, W_crop) gris → pseudo-RGB (R=G=B)
+            # Convert (T, H_crop, W_crop) grayscale → pseudo-RGB (R=G=B)
             frames_rgb = np.stack([crop_frames, crop_frames, crop_frames], axis=-1)
             r_dcm = risk_model.predict(frames_rgb)
             elapsed = time.perf_counter() - t0

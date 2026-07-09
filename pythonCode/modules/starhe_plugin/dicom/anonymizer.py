@@ -1,10 +1,10 @@
 """
-dicom/anonymizer.py — Anonymisation des métadonnées DICOM
+dicom/anonymizer.py — DICOM metadata anonymization
 ==========================================================
-Suppression automatique des tags sensibles (identificateurs patient,
-centre, médecin) à l'importation du fichier DICOM dans le plugin.
+Automatic removal of sensitive tags (patient, center, physician
+identifiers) when importing the DICOM file into the plugin.
 
-Référence : DICOM PS3.15 Annexe E — Attribute Confidentiality Profiles
+Reference: DICOM PS3.15 Annex E — Attribute Confidentiality Profiles
 """
 
 import numpy as np
@@ -15,41 +15,41 @@ from starhe_plugin.utils.go_print import go_print
 
 def remove_pixel_burnin(frames: np.ndarray) -> np.ndarray:
     """
-    Noircit le bandeau d'en-tête (burned-in PHI) présent en haut des frames.
+    Blacks out the header banner (burned-in PHI) present at the top of the frames.
 
-    Algorithme :
-      1. Sur le premier frame, calcule la luminosité moyenne par ligne.
-      2. Parcourt les lignes depuis le haut : dès qu'une ligne non-noire
-         est trouvée (bandeau coloré), on mémorise qu'on est « dans un bandeau ».
-      3. La première ligne quasi-noire APRÈS le bandeau marque la fin de
-         l'en-tête ; toutes les lignes 0..header_end sont mises à 0 dans
-         chaque frame.
+    Algorithm:
+      1. On the first frame, compute the mean brightness per row.
+      2. Walk the rows from the top: as soon as a non-black row is
+         found (colored banner), remember that we are "inside a banner".
+      3. The first near-black row AFTER the banner marks the end of
+         the header; all rows 0..header_end are set to 0 in
+         every frame.
 
-    Fonctionne pour les images RGB (T, H, W, 3) ou niveaux-de-gris (T, H, W).
-    Retourne le tableau modifié en place.
+    Works for RGB (T, H, W, 3) or grayscale (T, H, W) images.
+    Returns the array modified in place.
     """
     if frames is None or len(frames) == 0:
         return frames
 
     first = frames[0]
-    # Luminosité moyenne par pixel (moyenne des canaux pour RGB)
+    # Mean brightness per pixel (channel average for RGB)
     gray = first.mean(axis=2).astype(float) if first.ndim == 3 else first.astype(float)
     h = gray.shape[0]
 
-    _DARK_THRESH   = 15    # pixel < 15  → considéré noir/fond
-    _DARK_ROW_FRAC = 0.90  # 90 % des pixels de la ligne doivent être sombres
+    _DARK_THRESH   = 15    # pixel < 15  → considered black/background
+    _DARK_ROW_FRAC = 0.90  # 90% of the row's pixels must be dark
 
     header_end   = 0
     saw_content  = False
-    max_scan_row = min(h // 3, 300)  # limiter la recherche au tiers supérieur
+    max_scan_row = min(h // 3, 300)  # limit the search to the top third
 
     for row in range(max_scan_row):
         dark_frac = np.mean(gray[row] < _DARK_THRESH)
         if dark_frac < _DARK_ROW_FRAC:
-            # Ligne non-noire : on est dans (ou avant) le bandeau
+            # Non-black row: we are inside (or before) the banner
             saw_content = True
         elif saw_content:
-            # Première ligne noire après contenu → fin du bandeau
+            # First black row after content → end of the banner
             header_end = row
             break
 
@@ -65,12 +65,12 @@ def remove_pixel_burnin(frames: np.ndarray) -> np.ndarray:
 def anonymize(ds: pydicom.dataset.FileDataset,
               mode: str = "remove") -> pydicom.dataset.FileDataset:
     """
-    Anonymise les tags sensibles du dataset DICOM (en place).
+    Anonymizes the sensitive tags of the DICOM dataset (in place).
 
-    mode : "remove" — suppression totale (défaut)
-           "hash"   — remplacement par SHA-256[:16] (traçabilité interne)
+    mode : "remove" — full removal (default)
+           "hash"   — replacement with SHA-256[:16] (internal traceability)
 
-    Retourne le dataset modifié.
+    Returns the modified dataset.
     """
     import hashlib
     removed = 0

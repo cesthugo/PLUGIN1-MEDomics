@@ -1,6 +1,6 @@
-# start_react.ps1 — lance le serveur Go STARHE puis l'UI React/Vite.
+# start_react.ps1 — launches the STARHE Go server then the React/Vite UI.
 #
-# Usage :
+# Usage:
 #   .\start_react.ps1
 #
 # Logs :
@@ -23,7 +23,7 @@ $MainLog  = Join-Path $LogDir "starhe_dev.log"
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-# Arrete les processus go_server.exe restants pour liberer les fichiers log
+# Stops the remaining go_server.exe processes to free the log files
 Get-Process -Name "go_server" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 300
 
@@ -56,7 +56,7 @@ function Require-Command {
 Require-Command "go"
 
 
-# Sur Windows, npm est un script .ps1 / .cmd — on cherche npm.cmd en priorité
+# On Windows, npm is a .ps1 / .cmd script — look for npm.cmd first
 $_NpmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
 $NpmExe  = if ($_NpmCmd) { $_NpmCmd.Source } else { $null }
 if (-not $NpmExe) {
@@ -64,7 +64,7 @@ if (-not $NpmExe) {
     $NpmExe = if ($_NpmFallback) { $_NpmFallback.Source } else { $null }
 }
 if (-not $NpmExe) {
-    # Fallback : emplacement standard Node.js sur Windows
+    # Fallback: standard Node.js location on Windows
     $candidates = @(
         "C:\Program Files\nodejs\npm.cmd",
         "C:\Program Files (x86)\nodejs\npm.cmd",
@@ -79,7 +79,7 @@ if (-not $NpmExe) {
 Write-DevLog "npm trouvé : $NpmExe"
 
 
-# ── Vérification venv Python ──────────────────────────────────────────────────
+# ── Python venv verification ──────────────────────────────────────────────────
 $VenvPython = Join-Path $RootDir "pythonCode\modules\starhe_plugin\.venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
     Write-DevLog "Venv Python introuvable - lancement du setup..."
@@ -92,9 +92,9 @@ if (-not (Test-Path $VenvPython)) {
 }
 
 
-# ── Choix du port Go ─────────────────────────────────────────────────────────
-# Si STARHE_PORT est déjà défini dans l'environnement, on le respecte.
-# Sinon on part de 8082 et on cherche le premier port libre.
+# ── Go port selection ────────────────────────────────────────────────────────
+# If STARHE_PORT is already set in the environment, respect it.
+# Otherwise start from 8082 and look for the first free port.
 function Find-FreePort {
     param([int]$StartPort = 8082)
     $port = $StartPort

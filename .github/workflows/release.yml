@@ -77,7 +77,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: go_server/go.sum
 
-      # ── Linux only: libérer l'espace disque (~25 GB) avant les gros téléchargements ──
+      # ── Linux only: free up disk space (~25 GB) before the big downloads ──
       - name: Free disk space (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -85,7 +85,7 @@ jobs:
                       /usr/share/dotnet /usr/local/share/boost
           df -h
 
-      # ── Linux only: dépendances système pour electron-builder (deb/AppImage) ──
+      # ── Linux only: system dependencies for electron-builder (deb/AppImage) ──
       - name: Install Linux build deps
         if: runner.os == 'Linux'
         run: |
@@ -93,7 +93,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             fakeroot dpkg rpm libarchive-tools
 
-      # ── Étape 1 : compiler le serveur Go ──────────────────────────────────────
+      # ── Step 1: build the Go server ───────────────────────────────────────────
       - name: Build Go server
         working-directory: go_server
         shell: bash
@@ -101,10 +101,10 @@ jobs:
           go build -trimpath -ldflags "-s -w" -o ${{ matrix.go_bin }} .
           ls -la ${{ matrix.go_bin }}
 
-      # ── Étape 2 : installer Python deps + PyInstaller ────────────────────────
-      # Sur Linux, on force torch CPU-only (~200 MB) au lieu de la roue CUDA+CPU
-      # par défaut (~2.5 GB), ce qui réduit drastiquement le temps PyInstaller.
-      # Les runners Ubuntu n'ont pas de GPU ; le bundle Linux sera CPU-only.
+      # ── Step 2: install Python deps + PyInstaller ────────────────────────────
+      # On Linux, force torch CPU-only (~200 MB) instead of the default CUDA+CPU
+      # wheel (~2.5 GB), which drastically reduces the PyInstaller time.
+      # The Ubuntu runners have no GPU; the Linux bundle will be CPU-only.
       - name: Install Python dependencies
         shell: bash
         run: |
@@ -116,7 +116,7 @@ jobs:
           fi
           python -m pip install -r pythonCode/modules/starhe_plugin/requirements.txt
 
-      # ── Étape 3 : bundler le worker Python ───────────────────────────────────
+      # ── Step 3: bundle the Python worker ─────────────────────────────────────
       - name: Cache PyInstaller worker bundle
         id: cache-pyinstaller
         uses: actions/cache@v4
@@ -133,7 +133,7 @@ jobs:
           pyinstaller ../../scripts/starhe_worker.spec --noconfirm
           ls dist/starhe_worker | head -20
 
-      # ── Étape 4 : télécharger la JRE Temurin pour la plateforme ──────────────
+      # ── Step 4: download the Temurin JRE for the platform ────────────────────
       - name: Fetch JRE (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -144,14 +144,14 @@ jobs:
         shell: pwsh
         run: .\${{ matrix.jre_script }} -Platform ${{ matrix.jre_arg }}
 
-      # ── Étape 5 : installer + builder l'app Electron ─────────────────────────
+      # ── Step 5: install + build the Electron app ─────────────────────────────
       - name: Install npm dependencies
         working-directory: renderer
         run: npm ci
 
-      # `third_party/weasis-dcm2png/dist/` est gitignored (règle `dist/` globale)
-      # mais référencé par `extraResources`. On le reconstruit depuis `target/`
-      # (artefacts Maven committés) avant chaque build electron-builder.
+      # `third_party/weasis-dcm2png/dist/` is gitignored (global `dist/` rule)
+      # but referenced by `extraResources`. Rebuild it from `target/`
+      # (committed Maven artifacts) before each electron-builder build.
       - name: Prepare weasis-dcm2png/dist
         shell: bash
         run: |
@@ -172,22 +172,22 @@ jobs:
       - name: Run electron-builder
         working-directory: renderer
         env:
-          # Évite que electron-builder essaie de signer/notariser sans certificats.
+          # Prevents electron-builder from trying to sign/notarize without certificates.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          # Token pour le téléchargement éventuel des binaires Electron derrière proxy.
+          # Token for the possible download of Electron binaries behind a proxy.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           npx electron-builder ${{ matrix.eb_flags }} --publish never
 
-      # ── Étape 6 : remonter les artefacts (sans les blockmaps internes) ───────
+      # ── Step 6: upload the artifacts (without the internal blockmaps) ────────
       - name: Collect artifacts
         id: collect
         shell: bash
         run: |
           mkdir -p dist-artifacts
           cd renderer/release
-          # On garde uniquement les installeurs/distribuables finaux.
+          # Keep only the final installers/distributables.
           shopt -s nullglob
           for f in *.dmg *.pkg *.zip *.deb *.AppImage *.exe; do
             cp "$f" ../../dist-artifacts/
@@ -203,7 +203,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # ── Job final : agréger les artefacts, calculer SHA256, créer la release ───
+  # ── Final job: aggregate the artifacts, compute SHA256, create the release ───
   release:
     name: Publish GitHub Release
     needs: build

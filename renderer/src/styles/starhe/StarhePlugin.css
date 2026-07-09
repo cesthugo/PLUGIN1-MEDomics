@@ -1,4 +1,4 @@
-/* StarhePlugin.css — Styles globaux du plugin STARHE
+/* StarhePlugin.css — Global styles of the STARHE plugin
    Scrollbars, transitions, utilitaires */
 
 /* Scrollbar webkit */
@@ -22,7 +22,7 @@
   box-sizing: border-box;
 }
 
-/* Assure que le root React occupe la totalité de la fenêtre */
+/* Ensures the React root occupies the whole window */
 html, body, #root {
   margin: 0;
   padding: 0;
@@ -31,17 +31,17 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* Canvas : pas de contour au focus */
+/* Canvas: no outline on focus */
 canvas:focus {
   outline: none;
 }
 
-/* Transitions légères pour les thèmes */
+/* Light transitions for the themes */
 .starhe-card {
   transition: background 0.2s ease, border-color 0.2s ease;
 }
 
-/* Animation clignotante pour le indicateur d'analyse */
+/* Blinking animation for the analysis indicator */
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.3; }
@@ -50,7 +50,7 @@ canvas:focus {
   animation: blink 1.2s ease-in-out infinite;
 }
 
-/* Barre de progression colorée */
+/* Colored progress bar */
 .starhe-progress {
   height: 3px;
   background: #1565C0;

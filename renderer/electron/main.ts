@@ -1,16 +1,16 @@
 /**
- * electron/main.ts — Processus principal Electron pour le plugin STARHE
+ * electron/main.ts — Electron main process for the STARHE plugin
  *
- * Responsabilités :
- *   1. Créer la BrowserWindow et charger le renderer React
- *   2. Démarrer le serveur Go (go_server) en sous-processus
- *   3. Exposer le dialogue natif d'ouverture de fichiers DICOM via IPC
- *   4. Arrêter proprement le serveur Go à la fermeture de l'app
+ * Responsibilities:
+ *   1. Create the BrowserWindow and load the React renderer
+ *   2. Start the Go server (go_server) as a subprocess
+ *   3. Expose the native DICOM file-open dialog via IPC
+ *   4. Cleanly stop the Go server when the app closes
  *
- * Sécurité :
- *   - contextIsolation: true  — le renderer n'a pas accès direct à Node.js
- *   - nodeIntegration: false  — pas d'API Node dans le renderer
- *   - Seul le preload expose une API strictement définie via contextBridge
+ * Security:
+ *   - contextIsolation: true  — the renderer has no direct access to Node.js
+ *   - nodeIntegration: false  — no Node API in the renderer
+ *   - Only the preload exposes a strictly defined API via contextBridge
  */
 
 import { app, BrowserWindow, ipcMain, dialog, net } from 'electron';
@@ -21,25 +21,25 @@ import { ensureModelsDownloaded, getWeightsDir, modelsReady } from './download-m
 
 const isDev = !app.isPackaged;
 
-// Port + URL du serveur Go — alignés avec go_server/config.go (PORT env)
+// Go server port + URL — aligned with go_server/config.go (PORT env)
 const GO_PORT = process.env.STARHE_PORT ?? '8082';
 const GO_BASE_URL = `http://localhost:${GO_PORT}`;
 
-// ── Serveur Go ────────────────────────────────────────────────────────────────
+// ── Go server ─────────────────────────────────────────────────────────────────
 
 let goServer: ChildProcess | null = null;
-/** true dès que l'app commence à se fermer — inhibe les redémarrages */
+/** true as soon as the app starts closing — inhibits restarts */
 let appQuitting = false;
 
-// Délais de backoff exponentiel entre les redémarrages (ms)
+// Exponential backoff delays between restarts (ms)
 const RESTART_DELAYS = [1_000, 2_000, 5_000, 10_000, 30_000];
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Retourne le chemin vers le binaire go_server selon l'environnement et la plateforme. */
+/** Returns the path to the go_server binary depending on the environment and platform. */
 function getGoServerBin(): string {
   if (isDev) {
-    // En développement : auto-détection OS + arch → build-resources/go-server/
+    // In development: OS + arch auto-detection → build-resources/go-server/
     // __dirname = renderer/electron-dist/  →  ../build-resources/go-server/
     const os   = process.platform === 'win32' ? 'win'
                : process.platform === 'darwin' ? 'mac'
@@ -49,12 +49,12 @@ function getGoServerBin(): string {
     return path.join(__dirname, '..', 'build-resources', 'go-server',
                      `go-server-${os}-${arch}${ext}`);
   }
-  // En production : binaire copié dans les ressources packagées par electron-builder
+  // In production: binary copied into the resources packaged by electron-builder
   const ext = process.platform === 'win32' ? '.exe' : '';
   return path.join(process.resourcesPath, 'go_server', `go_server${ext}`);
 }
 
-/** Ping GET /health — résout au premier 200, rejette après `timeoutMs`. */
+/** Ping GET /health — resolves on the first 200, rejects after `timeoutMs`. */
 function waitForGoHealthy(timeoutMs = 30_000, intervalMs = 300): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
@@ -93,11 +93,11 @@ function startGoServer(): void {
     env: {
       ...process.env,
       PORT: GO_PORT,
-      // Pointe le bridge weasis vers la copie bundlée (extraResources).
-      // Ignoré si non-packagé : weasis_bridge.py recalcule depuis PROJECT_ROOT.
+      // Point the weasis bridge to the bundled copy (extraResources).
+      // Ignored if not packaged: weasis_bridge.py recomputes from PROJECT_ROOT.
       ...(isDev ? {} : { STARHE_WEASIS_DIR: path.join(process.resourcesPath, 'weasis-dcm2png') }),
-      // Pointe le bridge weasis vers la JRE Temurin embarquée (Phase 3).
-      // En dev : utilise le `java` du PATH (brew install openjdk@17).
+      // Point the weasis bridge to the embedded Temurin JRE (Phase 3).
+      // In dev: uses the `java` from PATH (brew install openjdk@17).
       ...(isDev
         ? {}
         : {
@@ -108,8 +108,8 @@ function startGoServer(): void {
               process.platform === 'win32' ? 'java.exe' : 'java',
             ),
           }),
-      // Pointe Go vers le worker Python bundlé (PyInstaller --onedir).
-      // Si non défini, Go retombe sur le venv local (mode dev).
+      // Point Go to the bundled Python worker (PyInstaller --onedir).
+      // If not set, Go falls back to the local venv (dev mode).
       ...(isDev
         ? {}
         : {
@@ -119,9 +119,9 @@ function startGoServer(): void {
               process.platform === 'win32' ? 'starhe_worker.exe' : 'starhe_worker',
             ),
           }),
-      // Pointe le pipeline Python vers le dossier où les `.pth` ont été
-      // téléchargés au 1er lancement (Phase 4). En dev : non défini → utilise
-      // pythonCode/modules/starhe_plugin/models/ (.pth versionnés en local).
+      // Point the Python pipeline to the directory where the `.pth` files were
+      // downloaded at first launch (Phase 4). In dev: unset → uses
+      // pythonCode/modules/starhe_plugin/models/ (.pth versioned locally).
       ...(isDev ? {} : { STARHE_WEIGHTS_DIR: getWeightsDir() }),
     },
   });
@@ -135,10 +135,10 @@ function startGoServer(): void {
   goServer.on('exit', (code, signal) => {
     goServer = null;
 
-    // Arrêt volontaire (SIGTERM/SIGINT depuis before-quit) → ne pas redémarrer
+    // Intentional stop (SIGTERM/SIGINT from before-quit) → do not restart
     if (appQuitting || signal === 'SIGTERM' || signal === 'SIGINT') return;
 
-    // Crash ou arrêt inattendu → redémarrage automatique avec backoff
+    // Crash or unexpected stop → automatic restart with backoff
     const delay = RESTART_DELAYS[Math.min(restartAttempt, RESTART_DELAYS.length - 1)];
     restartAttempt += 1;
     console.warn(
@@ -152,13 +152,13 @@ function startGoServer(): void {
     }, delay);
   });
 
-  // Redémarrage réussi : remettre le compteur à zéro après 30 s de stabilité
+  // Successful restart: reset the counter after 30 s of stability
   setTimeout(() => {
     if (goServer && !appQuitting) restartAttempt = 0;
   }, 30_000);
 }
 
-// ── Fenêtre principale ────────────────────────────────────────────────────────
+// ── Main window ───────────────────────────────────────────────────────────────
 
 let splashWin: BrowserWindow | null = null;
 let mainWin: BrowserWindow | null = null;
@@ -188,7 +188,7 @@ function createMainWindow(): void {
     minHeight: 700,
     title:     'STARHE — MEDomics Plugin',
     backgroundColor: '#0c1018',
-    show: false, // affiché après ready-to-show pour éviter le flash blanc
+    show: false, // shown after ready-to-show to avoid the white flash
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -212,7 +212,7 @@ function createMainWindow(): void {
   mainWin.on('closed', () => { mainWin = null; });
 }
 
-/** Affiche un dialog clair si le serveur Go ne répond pas (MongoDB down, port pris, etc.). */
+/** Shows a clear dialog if the Go server does not respond (MongoDB down, port taken, etc.). */
 async function showGoUnavailableDialog(err: Error): Promise<void> {
   const { response } = await dialog.showMessageBox({
     type: 'error',
@@ -230,7 +230,7 @@ async function showGoUnavailableDialog(err: Error): Promise<void> {
     cancelId: 1,
   });
   if (response === 0) {
-    // Réessai : la window principale est déjà créée, on relance juste la sonde
+    // Retry: the main window is already created, just restart the probe
     await bootSequence();
   } else {
     appQuitting = true;
@@ -242,14 +242,14 @@ async function showGoUnavailableDialog(err: Error): Promise<void> {
 async function bootSequence(): Promise<void> {
   if (!splashWin) createSplash();
 
-  // Phase 4 : télécharger les modèles `.pth` si absents (mode packagé uniquement).
-  // En dev, on suppose qu'ils sont déjà dans pythonCode/.../models/.
+  // Phase 4: download the `.pth` models if missing (packaged mode only).
+  // In dev, we assume they are already in pythonCode/.../models/.
   if (!isDev && !modelsReady()) {
     splashWin?.close();
     try {
       await ensureModelsDownloaded();
     } catch (err) {
-      // Utilisateur a cliqué "Quitter" dans la fenêtre download
+      // User clicked "Quit" in the download window
       appQuitting = true;
       app.quit();
       return;
@@ -267,7 +267,7 @@ async function bootSequence(): Promise<void> {
   }
 }
 
-// ── IPC : dialogue natif fichiers DICOM ───────────────────────────────────────
+// ── IPC: native DICOM file dialog ─────────────────────────────────────────────
 
 ipcMain.handle('open-dicom-files', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -276,9 +276,9 @@ ipcMain.handle('open-dicom-files', async () => {
     filters: [
       {
         name: 'Fichiers DICOM',
-        // Extensions courantes + '' pour les fichiers sans extension
-        // (ex: A0000, A0001 — standard DICOM sans suffixe).
-        // pydicom identifie les DICOM par magic bytes, pas par l'extension.
+        // Common extensions + '' for extension-less files
+        // (e.g. A0000, A0001 — standard DICOM without a suffix).
+        // pydicom identifies DICOMs by magic bytes, not by the extension.
         extensions: ['dcm', 'DCM', 'dicom', 'DICOM', 'dic', 'DIC', 'img', ''],
       },
       { name: 'Tous les fichiers', extensions: ['*'] },
@@ -293,7 +293,7 @@ ipcMain.handle('open-dicom-files', async () => {
 app.whenReady().then(() => {
   bootSequence();
 
-  // macOS : recréer la fenêtre si l'app est réactivée sans fenêtre ouverte
+  // macOS: recreate the window if the app is reactivated with no window open
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) bootSequence();
   });
@@ -311,6 +311,6 @@ app.on('before-quit', () => {
 });
 
 app.on('window-all-closed', () => {
-  // Sur macOS, l'app reste active même sans fenêtre (comportement natif)
+  // On macOS, the app stays active even with no window (native behavior)
   if (process.platform !== 'darwin') app.quit();
 });

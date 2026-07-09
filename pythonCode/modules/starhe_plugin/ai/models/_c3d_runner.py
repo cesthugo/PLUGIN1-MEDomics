@@ -1,21 +1,21 @@
 """
-ai/models/_c3d_runner.py — Subprocess mmaction2 C3D (server mode)
+ai/models/_c3d_runner.py — mmaction2 C3D subprocess (server mode)
 =================================================================
-Lance le backbone C3D et la tête I3DHead de mmaction2 directement
-(sans passer par le registre mmengine, incompatible avec mmdet sous
-Python 3.13). Charge le checkpoint identiquement à init_recognizer.
+Runs mmaction2's C3D backbone and I3DHead head directly
+(without going through the mmengine registry, incompatible with mmdet
+under Python 3.13). Loads the checkpoint identically to init_recognizer.
 
-Usage (lancé en subprocess par starhe_risk.py) :
+Usage (launched as a subprocess by starhe_risk.py):
     python _c3d_runner.py \\
         --ckpt  <path/best_xxx.pth>  \\
         [--device cpu]               \\
         [--deterministic]
 
-Protocole stdin/stdout (JSON, une ligne par message) :
-  Démarrage : [c3d_server] READY
-  Requête   : {"frames_b64": "<numpy uint8 T×H×W×3 en base64>", "shape": [T,H,W,3]}
-  Réponse   : {"score_low": 0.35, "score_high": 0.65}
-  Arrêt     : {"__EXIT__": true}
+stdin/stdout protocol (JSON, one line per message):
+  Startup  : [c3d_server] READY
+  Request  : {"frames_b64": "<numpy uint8 T×H×W×3 in base64>", "shape": [T,H,W,3]}
+  Response : {"score_low": 0.35, "score_high": 0.65}
+  Shutdown : {"__EXIT__": true}
 """
 
 import argparse
@@ -29,7 +29,7 @@ import torch
 import torch.nn.functional as F
 
 
-# ── Constantes de prétraitement (identiques à c3d.py + mmaction2 pipeline) ───
+# ── Preprocessing constants (identical to c3d.py + mmaction2 pipeline) ───────
 CLIP_LEN    = 16
 NUM_CLIPS   = 10
 RESIZE_SIZE = 128
@@ -37,16 +37,16 @@ CROP_SIZE   = 112
 _MEAN       = np.array([104.0, 117.0, 128.0], dtype=np.float32)
 
 
-# ── Prétraitement — copie exacte de c3d.py (validé bit-identique à mmaction2) ─
+# ── Preprocessing — exact copy of c3d.py (validated bit-identical to mmaction2) ─
 
 def _sample_clips(total: int) -> np.ndarray:
-    """Reproduit exactement mmaction2 SampleFrames 3D (clip_len=16, num_clips=10, test_mode=True).
+    """Reproduces exactly mmaction2 SampleFrames 3D (clip_len=16, num_clips=10, test_mode=True).
 
-    Formule réelle de mmaction2 1.2.0 _get_test_clips (3D recognizer) :
+    Actual formula of mmaction2 1.2.0 _get_test_clips (3D recognizer):
       max_offset    = max(total - clip_len, 0)
       offset_between = max_offset / (num_clips - 1)
       clip_offsets  = round(arange(num_clips) * offset_between)
-    Les indices hors-borne sont ramenés par modulo (out_of_bound_opt='loop').
+    Out-of-bound indices are wrapped by modulo (out_of_bound_opt='loop').
     """
     if total <= 0:
         return np.zeros((NUM_CLIPS, CLIP_LEN), dtype=int)
@@ -93,13 +93,13 @@ def _preprocess(frames: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(np.stack(result))              # (10, 3, 16, 112, 112)
 
 
-# ── Chargement mmaction2 (import direct, sans registre mmengine) ──────────────
+# ── mmaction2 loading (direct import, without the mmengine registry) ──────────
 
 def _load_model(ckpt_path: str, device: str):
     """
-    Charge backbone C3D + tête I3DHead de mmaction2 directement depuis
-    leurs modules Python, sans passer par init_recognizer / MODELS.build.
-    Évite le conflit de registre mmengine ↔ mmdet sous Python 3.13.
+    Loads mmaction2's C3D backbone + I3DHead head directly from
+    their Python modules, without going through init_recognizer / MODELS.build.
+    Avoids the mmengine ↔ mmdet registry conflict under Python 3.13.
     """
     from mmaction.models.backbones.c3d import C3D
     from mmaction.models.heads.i3d_head import I3DHead
@@ -122,7 +122,7 @@ def _load_model(ckpt_path: str, device: str):
     return backbone, cls_head
 
 
-# ── Inférence ─────────────────────────────────────────────────────────────────
+# ── Inference ─────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
 def _infer(backbone, cls_head, frames: np.ndarray, device: str) -> tuple[float, float]:
@@ -133,7 +133,7 @@ def _infer(backbone, cls_head, frames: np.ndarray, device: str) -> tuple[float, 
     return float(probs[0].item()), float(probs[1].item())
 
 
-# ── Mode serveur ──────────────────────────────────────────────────────────────
+# ── Server mode ───────────────────────────────────────────────────────────────
 
 def _run_server(backbone, cls_head, device: str) -> None:
     print("[c3d_server] READY", flush=True)
@@ -152,14 +152,14 @@ def _run_server(backbone, cls_head, device: str) -> None:
         print(json.dumps({"score_low": score_low, "score_high": score_high}), flush=True)
 
 
-# ── Point d'entrée ────────────────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ckpt",          required=True, help="Chemin vers best_xxx.pth")
+    parser.add_argument("--ckpt",          required=True, help="Path to best_xxx.pth")
     parser.add_argument("--device",        default="cpu",   help="cpu | cuda | mps")
     parser.add_argument("--deterministic", action="store_true",
-                        help="Force CPU mono-thread + désactive TF32 (reproductibilité)")
+                        help="Force single-threaded CPU + disable TF32 (reproducibility)")
     args = parser.parse_args()
 
     device = args.device

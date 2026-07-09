@@ -27,7 +27,7 @@ _MOD_PATH   = os.path.join(_SCRIPT_DIR, "..", "pythonCode", "modules")
 if _MOD_PATH not in sys.path:
     sys.path.insert(0, _MOD_PATH)
 
-# Rediriger go_print vers stderr (pas de protocole Go ici)
+# Redirect go_print to stderr (no Go protocol here)
 from starhe_plugin.utils.go_print import set_log_sink
 
 def _log(level: str, message: str) -> None:
@@ -77,17 +77,17 @@ def run_one(mp4_path: str, risk_model: STARHERiskModel) -> dict:
     t0   = time.perf_counter()
 
     try:
-        # 1. Lecture frames — déjà préprocessées, on passe directement aux modèles
+        # 1. Read frames — already preprocessed, go straight to the models
         _log("info", f"── {name} ── lecture…")
         frames, fps = read_mp4_frames(mp4_path)
         n_total = len(frames)
         _log("info", f"  {n_total} frames @ {fps:.1f} fps  {frames.shape[2]}×{frames.shape[1]} px")
 
-        # 2. STARHE-RISK (C3D) — entrée : (T, H, W, 3) uint8 RGB
+        # 2. STARHE-RISK (C3D) — input: (T, H, W, 3) uint8 RGB
         _log("info", "  STARHE-RISK…")
         risk_result = risk_model.predict(frames)
 
-        # 3. STARHE-DETECT (RTMDet) — entrée : liste de frames (H, W, 3) uint8 RGB
+        # 3. STARHE-DETECT (RTMDet) — input: list of frames (H, W, 3) uint8 RGB
         _log("info", "  STARHE-DETECT…")
         stride         = max(1, DETECT_EVERY_N)
         sampled        = list(range(0, n_total, stride))
@@ -164,7 +164,7 @@ def main() -> None:
 
     _log("info", f"{len(mp4_files)} fichier(s) → {args.output}")
 
-    # C3D chargé une seule fois (lourd)
+    # C3D loaded only once (heavy)
     _log("info", "Chargement STARHE-RISK (C3D)…")
     risk_model = STARHERiskModel()
 
@@ -180,7 +180,7 @@ def main() -> None:
 
     _log("info", f"\n✓ CSV écrit : {args.output}")
 
-    # Résumé terminal
+    # Terminal summary
     ok  = [r for r in rows if not r["erreur"]]
     err = [r for r in rows if r["erreur"]]
     print(f"\n{'─'*65}", file=sys.stderr)

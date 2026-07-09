@@ -1,12 +1,12 @@
-// components/BatchModal.tsx — Analyse batch multi-fichiers STARHE
+// components/BatchModal.tsx — STARHE multi-file batch analysis
 //
-// Permet d'analyser plusieurs fichiers DICOM séquentiellement (un à la fois
-// pour éviter les conflits mémoire du pipeline Python).
+// Allows analyzing several DICOM files sequentially (one at a time
+// to avoid the Python pipeline's memory conflicts).
 //
-// Chaque entrée passe par les états :
+// Each entry goes through the states:
 //   waiting → loading → analyzing → done | error
 //
-// À la fin, un tableau récapitulatif affiche risk score + nb lésions / fichier.
+// At the end, a summary table shows risk score + number of lesions / file.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { loadDicom, loadDicomFile, loadMp4File, streamAnalysis } from '../../utilities/starhe/api';
@@ -24,27 +24,27 @@ type ItemStatus = 'waiting' | 'loading' | 'analyzing' | 'done' | 'error';
 
 interface BatchItem {
   id:        number;
-  /** Nom affiché (nom de fichier ou chemin court) */
+  /** Displayed name (file name or short path) */
   name:      string;
-  /** Chemin absolu côté serveur (rempli après loadDicom) */
+  /** Server-side absolute path (filled after loadDicom) */
   serverPath: string;
-  /** File object si upload navigateur, undefined si chemin absolu */
+  /** File object if browser upload, undefined if absolute path */
   file?:     File;
   status:    ItemStatus;
   progress:  string;
-  /** Résultats si status === 'done' */
+  /** Results if status === 'done' */
   riskScore?: number;
   riskLabel?: string;
   detCount?:  number;
-  /** Message d'erreur si status === 'error' */
+  /** Error message if status === 'error' */
   error?:    string;
-  /** Détections par frame (pour export JSON et rechargement bboxes) */
+  /** Detections per frame (for JSON export and bbox reloading) */
   detections?: Detection[][];
-  /** Nombre de frames du DICOM (métadonnée pour le JSON) */
+  /** Number of DICOM frames (metadata for the JSON) */
   numFrames?:  number;
-  /** ROI crop retourné par le pipeline */
+  /** Crop ROI returned by the pipeline */
   roi?:        unknown;
-  /** true si ce fichier est un MP4 (pas un DICOM) */
+  /** true if this file is an MP4 (not a DICOM) */
   isMp4?:      boolean;
 }
 
@@ -78,7 +78,7 @@ function riskColor(label?: string): string {
   return /élevé|high/i.test(label) ? RISK_HIGH_FG : RISK_LOW_FG;
 }
 
-// ── Sous-composant : ligne de la queue ────────────────────────────────────────
+// ── Subcomponent: queue row ───────────────────────────────────────────────────
 
 function BatchRow({ item, onRemove }: { item: BatchItem; onRemove: () => void }) {
   const isActive = item.status === 'loading' || item.status === 'analyzing';
@@ -127,7 +127,7 @@ function BatchRow({ item, onRemove }: { item: BatchItem; onRemove: () => void })
   );
 }
 
-// ── Composant principal ───────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export interface BatchResultToOpen {
   serverPath:  string;
@@ -136,21 +136,21 @@ export interface BatchResultToOpen {
   risk?:       { score: number; label: string };
   numFrames?:  number;
   roi?:        unknown;
-  /** Objet File original du navigateur — permet de re-uploader si le fichier temp a expiré */
+  /** Original browser File object — allows re-uploading if the temp file expired */
   file?:       File;
-  /** true si ce résultat provient d'un fichier MP4 (pas DICOM) */
+  /** true if this result comes from an MP4 file (not DICOM) */
   isMp4?:      boolean;
 }
 
 export interface BatchModalProps {
   onClose:       () => void;
-  /** Mode d'analyse par défaut (depuis les réglages globaux) */
+  /** Default analysis mode (from the global settings) */
   analysisMode:  'both' | 'risk_only' | 'detect_only';
-  /** Callback pour ouvrir le fichier analysé dans un onglet principal (avec résultats pré-chargés) */
+  /** Callback to open the analyzed file in a main tab (with preloaded results) */
   onOpenInTab:   (result: BatchResultToOpen) => void;
   /**
-   * Callback pour ouvrir plusieurs fichiers avec le sélecteur de disposition.
-   * Si absent, les fichiers s'ouvrent individuellement dans des onglets séparés.
+   * Callback to open several files with the layout picker.
+   * If absent, the files open individually in separate tabs.
    */
   onOpenInLayout?: (results: BatchResultToOpen[]) => void;
 }
@@ -162,23 +162,23 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
   const [batchMode,    setBatchMode]    = useState<'both' | 'risk_only' | 'detect_only'>(defaultMode);
   const [selected,     setSelected]     = useState<Set<number>>(new Set());
   const [concurrency,  setConcurrency]  = useState(3);
-  /** Map itemId → abort fn pour les analyses parallèles en cours */
+  /** Map itemId → abort fn for the parallel analyses in progress */
   const abortMapRef  = useRef<Map<number, () => void>>(new Map());
   const cancelledRef = useRef(false);
 
-  // Mise à jour d'un item par id
+  // Update an item by id
   const update = useCallback((id: number, patch: Partial<BatchItem>) => {
     setItems(prev => prev.map(it => it.id === id ? { ...it, ...patch } : it));
   }, []);
 
-  // ── Détection DICOM : .dcm, .dicom, ou sans extension (ex: A0000, IM-0001) ─
+  // ── DICOM detection: .dcm, .dicom, or extension-less (e.g. A0000, IM-0001) ─
   const isDicomFile = (f: File) => {
     const lname = f.name.toLowerCase();
     return lname.endsWith('.dcm') || lname.endsWith('.dicom') || !lname.includes('.');
   };
   const isMp4File = (f: File) => f.name.toLowerCase().endsWith('.mp4');
 
-  // ── Ajout de fichiers (upload navigateur) ──────────────────────────────────
+  // ── Add files (browser upload) ─────────────────────────────────────────────
   const onFileDrop = useCallback((files: FileList | null) => {
     if (!files) return;
     const all = Array.from(files);
@@ -201,7 +201,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     setDone(false);
   }, []);
 
-  // ── Sélection de fichiers MP4 ──────────────────────────────────────────────
+  // ── MP4 file selection ─────────────────────────────────────────────────────
   const onPickMp4Files = useCallback(() => {
     const inp = document.createElement('input');
     inp.type = 'file';
@@ -211,7 +211,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     inp.click();
   }, [onFileDrop]);
 
-  // ── Ajout d'un dossier entier (navigateur) ────────────────────────────────
+  // ── Add a whole folder (browser) ───────────────────────────────────────────
   const onPickFolder = useCallback(() => {
     const inp = document.createElement('input');
     inp.type = 'file';
@@ -221,7 +221,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     inp.click();
   }, [onFileDrop]);
 
-  // ── Ajout par chemin absolu (Electron / saisie manuelle) ──────────────────
+  // ── Add by absolute path (Electron / manual input) ────────────────────────
   const pathRef = useRef<HTMLInputElement>(null);
   const onAddPath = useCallback(() => {
     const val = pathRef.current?.value.trim();
@@ -235,15 +235,15 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     setDone(false);
   }, []);
 
-  // ── Glisser-déposer ───────────────────────────────────────────────────────
+  // ── Drag-and-drop ──────────────────────────────────────────────────────────
   const onDragOver = (e: React.DragEvent) => { e.preventDefault(); };
   const onDrop     = (e: React.DragEvent) => { e.preventDefault(); onFileDrop(e.dataTransfer.files); };
 
-  // ── Traitement d'un seul item (réutilisé par chaque worker) ─────────────
+  // ── Processing of a single item (reused by each worker) ──────────────────
   const processItem = useCallback(async (item: BatchItem, batchModeSnap: typeof batchMode) => {
     if (cancelledRef.current) return;
 
-    // 1. Chargement du fichier
+    // 1. File loading
     update(item.id, { status: 'loading', progress: item.isMp4 ? 'Chargement MP4…' : 'Chargement DICOM…' });
     let serverPath = item.serverPath;
     try {
@@ -267,7 +267,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
 
     if (cancelledRef.current) return;
 
-    // 2. Analyse SSE
+    // 2. SSE analysis
     update(item.id, { status: 'analyzing', progress: 'Starting analysis…' });
     const req: AnalyzeRequest = item.isMp4
       ? {
@@ -291,6 +291,11 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
       let detections: Detection[][] | undefined;
       let numFrames:  number | undefined;
       let roi:        unknown;
+      // Business error emitted by Python (level "error") and reception of
+      // the final "result" event — without this, a crashed pipeline was
+      // marked ✓ done with "Risk: — · 0 lesion(s)" (false success).
+      let pipelineError: string | undefined;
+      let gotResult = false;
 
       const abort = streamAnalysis(
         req,
@@ -298,6 +303,12 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
           const msg = payload.message ?? '';
           if (payload.level === 'progress' || payload.level === 'info') {
             update(item.id, { progress: msg });
+          }
+          if (payload.level === 'error') {
+            pipelineError = msg || 'Erreur pipeline (voir logs serveur)';
+          }
+          if (payload.level === 'result') {
+            gotResult = true;
           }
           if (payload.data?.risk) {
             const r = payload.data.risk;
@@ -313,13 +324,20 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
         },
         () => {
           abortMapRef.current.delete(item.id);
-          update(item.id, {
-            status: 'done', progress: 'Done', serverPath,
-            riskScore, riskLabel,
-            detCount:   detCount ?? 0,
-            detections: detections ?? [],
-            numFrames,  roi,
-          });
+          if (pipelineError || !gotResult) {
+            update(item.id, {
+              status: 'error',
+              error:  pipelineError ?? 'Pipeline terminé sans résultat (crash Python ?)',
+            });
+          } else {
+            update(item.id, {
+              status: 'done', progress: 'Done', serverPath,
+              riskScore, riskLabel,
+              detCount:   detCount ?? 0,
+              detections: detections ?? [],
+              numFrames,  roi,
+            });
+          }
           resolve();
         },
         (err) => {
@@ -332,17 +350,17 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     });
   }, [update]);
 
-  // ── Lancer le batch (workers parallèles) ──────────────────────────────────
+  // ── Launch the batch (parallel workers) ────────────────────────────────────
   const runBatch = useCallback(async () => {
     cancelledRef.current = false;
     setRunning(true);
     setDone(false);
 
     const modeSnap = batchMode;
-    // File d'attente partagée entre les workers (mutation protégée : JS mono-thread)
+    // Queue shared between the workers (mutation-safe: single-threaded JS)
     const pending = items.filter(it => it.status === 'waiting' || it.status === 'error');
 
-    // Chaque worker pioche le prochain item disponible jusqu'à épuisement
+    // Each worker picks the next available item until exhaustion
     const worker = async () => {
       while (true) {
         if (cancelledRef.current) break;
@@ -359,7 +377,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     setDone(true);
   }, [items, batchMode, concurrency, processItem]);
 
-  // ── Annuler (interrompt tous les workers en cours) ───────────────────────
+  // ── Cancel (interrupts all running workers) ──────────────────────────────
   const cancel = useCallback(() => {
     cancelledRef.current = true;
     for (const abort of abortMapRef.current.values()) abort();
@@ -367,7 +385,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     setRunning(false);
   }, []);
 
-  // ── Retrait d'un item en attente ─────────────────────────────────────────
+  // ── Remove a pending item ────────────────────────────────────────────────
   const removeItem = useCallback((id: number) => {
     setItems(prev => prev.filter(it => it.id !== id));
   }, []);
@@ -410,7 +428,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
       dateStr,
     ]);
 
-    // Échappe les champs contenant des virgules, guillemets ou retours à la ligne
+    // Escapes fields containing commas, quotes or newlines
     const escape = (v: string) =>
       /[,"\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 
@@ -419,7 +437,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
         .map(row => row.map(escape).join(','))
         .join('\r\n');
 
-    // BOM UTF-8 pour que Excel l'ouvre directement sans problème d'encodage
+    // UTF-8 BOM so Excel opens it directly without encoding issues
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -508,7 +526,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     URL.revokeObjectURL(url);
   }, [items, batchMode]);
 
-  // Fermeture sur Escape
+  // Close on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !running) onClose(); };
     window.addEventListener('keydown', onKey);
@@ -601,7 +619,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
             onClick={() => {
               const inp = document.createElement('input');
               inp.type = 'file'; inp.multiple = true;
-              // Pas de restriction accept : laisse passer les fichiers sans extension
+              // No accept restriction: lets extension-less files through
               inp.onchange = () => onFileDrop(inp.files);
               inp.click();
             }}

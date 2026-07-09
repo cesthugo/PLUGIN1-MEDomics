@@ -1,10 +1,10 @@
 """
-db/mongo_client.py — Persistance des résultats STARHE dans MongoDB
+db/mongo_client.py — Persistence of STARHE results in MongoDB
 ===================================================================
-Schéma d'un document résultat :
+Schema of a result document:
 {
   "_id"                  : ObjectId,
-  "file_path"            : str,       → chemin .dcm source (clé de cache)
+  "file_path"            : str,       → source .dcm path (cache key)
   "processed_at"         : ISO-8601,
   "num_frames"           : int,
   "roi"                  : [x0, y0, x1, y1],
@@ -30,16 +30,16 @@ from starhe_plugin.utils.go_print import go_print
 
 
 def _normalize_path(p: str) -> str:
-    """Normalise un chemin vers des séparateurs POSIX pour que la clé
-    de cache MongoDB soit identique quel que soit l'OS d'origine."""
+    """Normalizes a path to POSIX separators so that the MongoDB
+    cache key is identical regardless of the source OS."""
     return str(PurePosixPath(p))
 
 
 def _get_collection() -> Collection:
-    """Ouvre une connexion MongoDB et retourne la collection STARHE."""
+    """Opens a MongoDB connection and returns the STARHE collection."""
     try:
         client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
-        # Teste la connexion immédiatement
+        # Test the connection immediately
         client.admin.command("ping")
         return client[MONGO_DB_NAME][MONGO_COLLECTION]
     except ConnectionFailure as e:
@@ -55,11 +55,11 @@ def save_result(file_path: str,
                 anon_mode: str = "none",
                 analysis_mode: str = "original") -> str | None:
     """
-    Insère (ou remplace) un document de résultat dans MongoDB.
-    Si un document avec le même file_path existe déjà, il est remplacé.
+    Inserts (or replaces) a result document in MongoDB.
+    If a document with the same file_path already exists, it is replaced.
 
-    Retourne l'_id (str) du document inséré/remplacé, ou None si
-    MongoDB est inaccessible (le pipeline continue sans persistence).
+    Returns the _id (str) of the inserted/replaced document, or None if
+    MongoDB is unreachable (the pipeline continues without persistence).
     """
     try:
         col = _get_collection()
@@ -88,9 +88,9 @@ def save_result(file_path: str,
 
 def find_by_file(file_path: str, analysis_mode: str | None = None) -> dict | None:
     """
-    Retourne le document de résultat associé à ce fichier DICOM et mode, ou None.
-    Si analysis_mode est None, retourne le premier résultat trouvé.
-    Retourne None si MongoDB est inaccessible.
+    Returns the result document associated with this DICOM file and mode, or None.
+    If analysis_mode is None, returns the first result found.
+    Returns None if MongoDB is unreachable.
     """
     try:
         col = _get_collection()
@@ -107,7 +107,7 @@ def find_by_file(file_path: str, analysis_mode: str | None = None) -> dict | Non
 
 
 def get_result(doc_id: str) -> dict | None:
-    """Récupère un document résultat par son _id (str)."""
+    """Fetches a result document by its _id (str)."""
     from bson import ObjectId
     col = _get_collection()
     doc = col.find_one({"_id": ObjectId(doc_id)})
@@ -118,7 +118,7 @@ def get_result(doc_id: str) -> dict | None:
 
 def list_results(limit: int = 50) -> list[dict]:
     """
-    Retourne les N derniers résultats triés par date décroissante.
+    Returns the last N results sorted by descending date.
     """
     col = _get_collection()
     cursor = col.find({}, {"_id": 1, "file_path": 1, "processed_at": 1,
@@ -133,7 +133,7 @@ def list_results(limit: int = 50) -> list[dict]:
 
 
 def delete_result(file_path: str) -> bool:
-    """Supprime le document résultat associé à un fichier. Retourne True si supprimé."""
+    """Deletes the result document associated with a file. Returns True if deleted."""
     col = _get_collection()
     res = col.delete_one({"file_path": file_path})
     deleted = res.deleted_count > 0

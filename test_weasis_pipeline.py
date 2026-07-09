@@ -1,14 +1,14 @@
 """
-test_weasis_pipeline.py — Test du pipeline Weasis-style
+test_weasis_pipeline.py — Test of the Weasis-style pipeline
 ========================================================
-Passe output.mp4 (généré depuis les PNGs Weasis via ffmpeg) directement à
-prepUS.removeLayoutFile, puis fait tourner STARHE-RISK (C3D) sur le résultat.
+Passes output.mp4 (generated from the Weasis PNGs via ffmpeg) directly to
+prepUS.removeLayoutFile, then runs STARHE-RISK (C3D) on the result.
 
-Différence clé avec la pipeline normale :
-  Pipeline normale : DICOM → pydicom → cv2.VideoWriter (mp4v) → prepUS → C3D
-  Pipeline Weasis  : DICOM → Weasis (PNG lossless) → ffmpeg (mp4v) → prepUS → C3D
+Key difference from the normal pipeline:
+  Normal pipeline: DICOM → pydicom → cv2.VideoWriter (mp4v) → prepUS → C3D
+  Weasis pipeline: DICOM → Weasis (PNG lossless) → ffmpeg (mp4v) → prepUS → C3D
 
-Ce script saute la ré-encodage en testant directement l'output.mp4 ffmpeg.
+This script skips the re-encoding by testing the ffmpeg output.mp4 directly.
 """
 
 import json
@@ -20,7 +20,7 @@ import tempfile
 import cv2
 import numpy as np
 
-# ── Chemins ────────────────────────────────────────────────────────────────────
+# ── Paths ──────────────────────────────────────────────────────────────────────
 PLUGIN_DIR = "/Users/hugo/Desktop/STAGE/PLUGIN1-MEDomics/pythonCode/modules"
 MP4_PATH   = (
     "/Users/hugo/Desktop/UNKNOWN/Nov 30, 2022"
@@ -29,7 +29,7 @@ MP4_PATH   = (
 
 sys.path.insert(0, PLUGIN_DIR)
 
-# ── 1. Appel direct de removeLayoutFile sur le MP4 ffmpeg ────────────────────
+# ── 1. Direct call to removeLayoutFile on the ffmpeg MP4 ─────────────────────
 print(f"[1] removeLayoutFile sur : {os.path.basename(MP4_PATH)}")
 from prepUS.cli import removeLayoutFile  # type: ignore
 
@@ -57,7 +57,7 @@ else:
     print("[2] info.json absent")
     info = {}
 
-# ── 3. Lire video.mp4 (crop polaire, niveaux de gris) ────────────────────────
+# ── 3. Read video.mp4 (polar crop, grayscale) ────────────────────────────────
 crop_mp4 = os.path.join(out_dir, "video.mp4")
 cap = cv2.VideoCapture(crop_mp4)
 frames_gray = []

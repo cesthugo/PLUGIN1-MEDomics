@@ -1,26 +1,26 @@
-// hooks/useKeyboardShortcuts.ts — Raccourcis clavier du plugin STARHE
+// hooks/useKeyboardShortcuts.ts — STARHE plugin keyboard shortcuts
 //
-// Centralise tous les raccourcis clavier dans un seul hook.
-// Extrait de index.tsx pour alléger le composant racine.
+// Centralizes all the keyboard shortcuts in a single hook.
+// Extracted from index.tsx to lighten the root component.
 //
-// Raccourcis actifs :
-//   Espace        → play/pause
-//   ← / →         → frame précédente / suivante
+// Active shortcuts:
+//   Space         → play/pause
+//   ← / →         → previous / next frame
 //   Shift+← / →   → ±10 frames
-//   Home          → retour au début
-//   P             → mode panoramique
-//   M             → mode mesure
-//   S             → mode série
-//   R             → réinitialiser la vue
-//   C             → dialogue contraste
-//   L             → dialogue luminosité
-//   Escape        → retour mode normal + déselection mesure
-//   + / -         → vitesse lecture ×1.25 / ÷1.25
-//   B             → toggle boucle
+//   Home          → back to the start
+//   P             → pan mode
+//   M             → measure mode
+//   S             → series mode
+//   R             → reset the view
+//   C             → contrast dialog
+//   L             → brightness dialog
+//   Escape        → back to normal mode + measure deselection
+//   + / -         → playback speed ×1.25 / ÷1.25
+//   B             → toggle loop
 //   Ctrl+= / -    → zoom in / out
 //   Ctrl+0        → zoom 100 %
-//   Ctrl+Tab      → onglet suivant du même patient
-//   Ctrl+W        → fermer l'onglet actif
+//   Ctrl+Tab      → next tab of the same patient
+//   Ctrl+W        → close the active tab
 
 import { useEffect } from 'react';
 import type { TabState, ViewMode, Patient } from '../types';
@@ -51,7 +51,7 @@ export function useKeyboardShortcuts({
 }: UseKeyboardShortcutsParams): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Ne pas intercepter si un champ de saisie est actif
+      // Do not intercept if an input field is active
       const focused = document.activeElement;
       if (focused && ['INPUT', 'TEXTAREA'].includes((focused as HTMLElement).tagName)) return;
 
@@ -95,7 +95,7 @@ export function useKeyboardShortcuts({
         updateActiveTab(t => ({ ...t, zoom: 1, panX: 0, panY: 0 }));
       }
 
-      // Ctrl+Tab — onglet suivant/précédent du même patient
+      // Ctrl+Tab — next/previous tab of the same patient
       if ((e.metaKey || e.ctrlKey) && e.key === 'Tab') {
         e.preventDefault();
         if (activePatientIdx >= 0 && patients[activePatientIdx]) {
@@ -106,7 +106,7 @@ export function useKeyboardShortcuts({
         }
       }
 
-      // Ctrl+W — fermer l'onglet actif
+      // Ctrl+W — close the active tab
       if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
         if (activeTab) closeTab(activeTab.id);
       }

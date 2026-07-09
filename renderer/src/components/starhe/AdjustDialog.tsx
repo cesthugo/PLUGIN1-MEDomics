@@ -1,6 +1,6 @@
-// components/AdjustDialog.tsx — Fenêtre flottante contraste / luminosité
+// components/AdjustDialog.tsx — Floating contrast / brightness window
 //
-// Réplique _AdjustDialog de prototype_tkinter.py.
+// Replicates _AdjustDialog from prototype_tkinter.py.
 
 import React, { useEffect, useRef, useState } from 'react';
 import { SIDEBAR_BG, SBAR_FG, SBAR_MUTED, BLUE } from '../../utilities/starhe/colors';
@@ -21,7 +21,7 @@ export function AdjustDialog({
   const [value, setValue] = useState(initial);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Position draggable (simple — centré à l'ouverture)
+  // Draggable position (simple — centered on open)
   const [pos, setPos] = useState({ x: window.innerWidth / 2 - 140, y: window.innerHeight / 2 - 100 });
   const dragStartRef = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
 
@@ -41,7 +41,7 @@ export function AdjustDialog({
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, []);
 
-  // Fermeture sur Échap
+  // Close on Esc
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);

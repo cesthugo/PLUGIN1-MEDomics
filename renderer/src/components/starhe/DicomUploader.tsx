@@ -1,15 +1,15 @@
 /**
  * DicomUploader.tsx
  *
- * Composant d'import DICOM unifié offrant deux modes dans une seule zone d'action :
+ * Unified DICOM import component offering two modes in a single action area:
  *
- *   1. CLIC  → déclenche un <input type="file" multiple> natif.
- *   2. DRAG & DROP → scan récursif du/des dossier(s) déposé(s) via l'API
+ *   1. CLICK → triggers a native <input type="file" multiple>.
+ *   2. DRAG & DROP → recursive scan of the dropped folder(s) via the API
  *      `DataTransferItem.webkitGetAsEntry()` (Chrome, Firefox 50+, Edge, Safari 11.1+).
  *
  * ── STRATÉGIE UPLOAD VERS UN BACKEND PYTHON (FastAPI / Flask) ─────────────────
  *
- * Pour un tableau File[], la solution standard est FormData :
+ * For a File[] array, the standard solution is FormData:
  *
  *   const form = new FormData();
  *   files.forEach(f => form.append('dicom_files', f, f.name));
@@ -18,10 +18,10 @@
  * FastAPI :  async def upload(dicom_files: List[UploadFile] = File(...))
  * Flask    :  request.files.getlist('dicom_files')
  *
- * Pour des volumes importants (> 50 fichiers / > 500 MB), deux stratégies :
+ * For large volumes (> 50 files / > 500 MB), two strategies:
  *
- *   A. Parallel batching — grouper les fichiers par tranches de N et lancer
- *      N requêtes en parallèle avec Promise.all() :
+ *   A. Parallel batching — group the files into batches of N and launch
+ *      N requests in parallel with Promise.all():
  *
  *        const BATCH = 5;
  *        for (let i = 0; i < files.length; i += BATCH) {
@@ -31,15 +31,15 @@
  *          await fetch('/api/upload', { method: 'POST', body: form });
  *        }
  *
- *   B. Resumable uploads — protocole TUS (tus.io) pour reprendre après
- *      interruption réseau ; librairie cliente : `tus-js-client`.
+ *   B. Resumable uploads — TUS protocol (tus.io) to resume after
+ *      a network interruption; client library: `tus-js-client`.
  *
  * ────────────────────────────────────────────────────────────────────────────────
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-// ── Palette (cohérente avec le projet MEDomics) ───────────────────────────────
+// ── Palette (consistent with the MEDomics project) ────────────────────────────
 const MAIN_BG     = '#0a0e18';
 const CARD_BORDER = '#1f2937';
 const BLUE        = '#2563eb';
@@ -51,7 +51,7 @@ const SUCCESS_FG  = '#4ade80';
 const SUCCESS_BG  = 'rgba(5,46,22,0.60)';
 const SUCCESS_BD  = '#166534';
 
-// ── CSS keyframes injectés une seule fois dans <head> ────────────────────────
+// ── CSS keyframes injected once into <head> ──────────────────────────────────
 const SPIN_KEYFRAMES = `@keyframes __dicom-spin { to { transform: rotate(360deg); } }`;
 
 function injectSpinKeyframes() {
@@ -64,20 +64,20 @@ function injectSpinKeyframes() {
 
 // ── Types publics ─────────────────────────────────────────────────────────────
 export interface DicomUploaderProps {
-  /** Appelé à chaque changement de la liste de fichiers (sélection ou drop). */
+  /** Called on every change to the file list (selection or drop). */
   onFilesChange: (files: File[]) => void;
-  /** Nombre max de fichiers affichés dans l'aperçu (défaut : 5). */
+  /** Max number of files shown in the preview (default: 5). */
   maxPreview?: number;
-  /** Classe CSS optionnelle pour le conteneur racine. */
+  /** Optional CSS class for the root container. */
   className?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Retourne `true` si le fichier est probablement un DICOM :
+ * Returns `true` if the file is probably a DICOM:
  * extension `.dcm` / `.dicom`, type MIME `application/dicom`,
- * ou absence d'extension (format courant pour les séries DICOM sans suffixe).
+ * or no extension (a common format for DICOM series without a suffix).
  */
 const isDicom = (file: File): boolean => {
   const lower = file.name.toLowerCase();
@@ -90,11 +90,11 @@ const isDicom = (file: File): boolean => {
 };
 
 /**
- * Parcourt récursivement une `FileSystemEntry` (fichier ou répertoire)
- * et résout avec la liste plate de tous les fichiers DICOM trouvés.
+ * Recursively walks a `FileSystemEntry` (file or directory)
+ * and resolves with the flat list of all the DICOM files found.
  *
- * ⚠️  `FileSystemDirectoryReader.readEntries()` renvoie au plus 100 entrées
- * par appel — on reboucle jusqu'à obtenir un tableau vide.
+ * ⚠️  `FileSystemDirectoryReader.readEntries()` returns at most 100 entries
+ * per call — loop until an empty array is returned.
  */
 const traverseEntry = (entry: FileSystemEntry): Promise<File[]> =>
   new Promise((resolve) => {
@@ -132,9 +132,9 @@ const traverseEntry = (entry: FileSystemEntry): Promise<File[]> =>
     resolve([]);
   });
 
-// ── Sous-composants ───────────────────────────────────────────────────────────
+// ── Subcomponents ─────────────────────────────────────────────────────────────
 
-/** Indicateur de chargement tournant (CSS animation, sans dépendance externe). */
+/** Spinning loading indicator (CSS animation, no external dependency). */
 const Spinner: React.FC = () => {
   useEffect(() => { injectSpinKeyframes(); }, []);
   return (
@@ -152,7 +152,7 @@ const Spinner: React.FC = () => {
   );
 };
 
-/** Liste condensée des N premiers fichiers avec taille en KB. */
+/** Condensed list of the first N files with size in KB. */
 const FilePreview: React.FC<{ files: File[]; max: number }> = ({ files, max }) => {
   const shown = files.slice(0, max);
   const rest  = files.length - max;
@@ -193,7 +193,7 @@ const FilePreview: React.FC<{ files: File[]; max: number }> = ({ files, max }) =
   );
 };
 
-// ── Composant principal ───────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 const DicomUploader: React.FC<DicomUploaderProps> = ({
   onFilesChange,
@@ -206,14 +206,14 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // ── Validation et commit de la liste finale ──────────────────────────────
+  // ── Validation and commit of the final list ───────────────────────────────
   const commit = useCallback((raw: File[]) => {
     const sorted = [...raw].sort((a, b) => a.name.localeCompare(b.name));
     setFiles(sorted);
     onFilesChange(sorted);
   }, [onFilesChange]);
 
-  // ── Clic → sélection via <input> ────────────────────────────────────────
+  // ── Click → selection via <input> ─────────────────────────────────────────
   const handleClick = () => {
     if (!loading) inputRef.current?.click();
   };
@@ -221,7 +221,7 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? []).filter(isDicom);
     commit(selected);
-    e.target.value = ''; // reset pour permettre une re-sélection identique
+    e.target.value = ''; // reset to allow an identical re-selection
   };
 
   // ── Drag & Drop ──────────────────────────────────────────────────────────
@@ -235,20 +235,20 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
 
     const items = Array.from(e.dataTransfer.items);
 
-    // Récupérer les FileSystemEntry (fichiers ET dossiers)
+    // Retrieve the FileSystemEntry items (files AND folders)
     const entries = items
       .map((item) => item.webkitGetAsEntry?.() ?? null)
       .filter((entry): entry is FileSystemEntry => entry !== null);
 
     if (entries.length === 0) {
-      // Fallback : navigateur sans API FileSystem → File objects directs
+      // Fallback: browser without the FileSystem API → direct File objects
       const fallback = Array.from(e.dataTransfer.files).filter(isDicom);
       setLoading(false);
       commit(fallback);
       return;
     }
 
-    // Traversée asynchrone de tous les nœuds racine en parallèle
+    // Asynchronous traversal of all root nodes in parallel
     const batches = await Promise.all(entries.map(traverseEntry));
     const all     = batches.flat();
 
@@ -376,7 +376,7 @@ const DicomUploader: React.FC<DicomUploaderProps> = ({
   );
 };
 
-// ── Bouton stylisé avec hover géré via state (pas de CSS class) ───────────────
+// ── Styled button with hover managed via state (no CSS class) ─────────────────
 const UploadButton: React.FC<{
   label: string;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;

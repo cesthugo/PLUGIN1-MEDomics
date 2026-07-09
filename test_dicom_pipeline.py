@@ -2,16 +2,16 @@
 """
 test_dicom_pipeline.py
 ======================
-Pipeline complet :
+Full pipeline:
     DICOM → export PNG → ffmpeg MP4 → prepUS → STARHE (RISK + DETECT)
 
-Moteur d'export PNG (par priorité) :
+PNG export engine (by priority):
   1. weasis-dicom-tools (Java) — applique Modality LUT + VOI LUT comme Weasis.
-     Supporte : RLE Lossless, JPEG Lossless, JPEG Baseline.
-     (Échec JPEG 2000 connu → fallback automatique vers pydicom)
-  2. pydicom (Python) — fallback. Supporte tous les formats via pylibjpeg.
+     Supports: RLE Lossless, JPEG Lossless, JPEG Baseline.
+     (Known JPEG 2000 failure → automatic fallback to pydicom)
+  2. pydicom (Python) — fallback. Supports all formats via pylibjpeg.
 
-Utilisation :
+Usage:
     python test_dicom_pipeline.py /chemin/vers/fichier.dcm
     python test_dicom_pipeline.py /chemin/vers/fichier.dcm --no-detect
     python test_dicom_pipeline.py /chemin/vers/fichier.dcm --keep-pngs /tmp/debug
@@ -49,7 +49,7 @@ if PREPUS_PATH not in sys.path:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def weasis_available() -> bool:
-    """True si le JAR weasis-dcm2png est buildé et que java est dans le PATH."""
+    """True if the weasis-dcm2png JAR is built and java is in the PATH."""
     return os.path.exists(WEASIS_JAR) and shutil.which("java") is not None
 
 
@@ -70,7 +70,7 @@ def export_dicom_to_pngs_weasis(dicom_path: str, out_dir: str) -> tuple:
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        # Extraire le message d'erreur pertinent (ignorer les warnings SLF4J)
+        # Extract the relevant error message (ignore the SLF4J warnings)
         err_lines = [l for l in result.stderr.splitlines()
                      if "SLF4J" not in l and l.strip()]
         raise RuntimeError(
@@ -92,7 +92,7 @@ def export_dicom_to_pngs_weasis(dicom_path: str, out_dir: str) -> tuple:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 1. FPS depuis les métadonnées DICOM
+# 1. FPS from the DICOM metadata
 # ══════════════════════════════════════════════════════════════════════════════
 
 def read_dicom_fps(ds) -> float:
@@ -144,7 +144,7 @@ def _decode_frames_encapsulated(ds) -> np.ndarray:
 
     for i, raw in enumerate(raw_frames):
         if len(raw) == 0:
-            # Frame vide : réutiliser la précédente ou créer un noir
+            # Empty frame: reuse the previous one or create a black one
             if prev is not None:
                 decoded.append(prev.copy())
             else:
@@ -158,7 +158,7 @@ def _decode_frames_encapsulated(ds) -> np.ndarray:
                 dtype=np.uint8 if ds.BitsAllocated == 8 else np.uint16,
             )
         else:
-            # Autres syntaxes encapsulées — laisser pydicom gérer frame unique
+            # Other encapsulated syntaxes — let pydicom handle a single frame
             import pydicom
             import io
             single = pydicom.dcmread(
@@ -167,7 +167,7 @@ def _decode_frames_encapsulated(ds) -> np.ndarray:
             )
             arr = single.pixel_array if hasattr(single, "pixel_array") else np.frombuffer(raw, dtype=np.uint8)
 
-        # Reshape selon la géométrie du DICOM
+        # Reshape according to the DICOM geometry
         if spp > 1:
             arr = arr.reshape(h, w, spp)
         else:
@@ -206,8 +206,8 @@ def export_dicom_to_pngs(dicom_path: str, out_dir: str) -> tuple:
     try:
         pixels = ds.pixel_array  # (T, H, W) | (T, H, W, 3) | (H, W) | (H, W, 3)
     except RuntimeError:
-        # Fallback pour les fichiers encapsulés avec frames vides (ex. JPEG 2000
-        # dont certaines frames ont length=0 dans le Basic Offset Table).
+        # Fallback for encapsulated files with empty frames (e.g. JPEG 2000
+        # where some frames have length=0 in the Basic Offset Table).
         pixels = _decode_frames_encapsulated(ds)
 
     # ── Normalisation bit-depth ───────────────────────────────────────────────
@@ -233,7 +233,7 @@ def export_dicom_to_pngs(dicom_path: str, out_dir: str) -> tuple:
         pixels = pixels[np.newaxis]           # mono-frame grayscale → (1, H, W)
     elif pixels.ndim == 3 and pixels.shape[2] in (3, 4):
         pixels = pixels[np.newaxis]           # mono-frame color    → (1, H, W, C)
-    # else: déjà (T, H, W) ou (T, H, W, C)
+    # else: already (T, H, W) or (T, H, W, C)
 
     n = pixels.shape[0]
 
@@ -269,7 +269,7 @@ def pngs_to_mp4(png_dir: str, fps: float, out_mp4: str) -> None:
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"ffmpeg a échoué :\n{r.stderr}")
-    # Compte les frames encodées depuis stderr
+    # Count the encoded frames from stderr
     for line in r.stderr.splitlines():
         if "frame=" in line:
             print(f"    ffmpeg : {line.strip()}")
@@ -292,7 +292,7 @@ def run_prepus(mp4_path: str, out_dir: str) -> tuple:
         input_file=mp4_path,
         output_dir=out_dir,
         thresh=-1,
-        back_scan_conversion=True,   # nécessaire pour produire video.mp4
+        back_scan_conversion=True,   # required to produce video.mp4
         backscan_width=512,
         backscan_height=512,
         save_mask=False,
@@ -349,22 +349,22 @@ def run_detect(crop_frames: np.ndarray, info: dict | None) -> list:
     c   = crop_frames                                  # (T, H_c, W_c)
     rgb = np.stack([c, c, c], axis=-1)                 # (T, H_c, W_c, 3)
 
-    # Sous-échantillonnage temporel identique à pipeline.py (DETECT_EVERY_N=4)
+    # Temporal subsampling identical to pipeline.py (DETECT_EVERY_N=4)
     indices = list(range(0, len(rgb), DETECT_EVERY_N))
     sampled = rgb[indices]
     print(f"    Détection sur {len(sampled)}/{len(rgb)} frames (stride={DETECT_EVERY_N})")
 
     detector = STARHEDetect()  # = STARHEDetectModel
-    # predict_batch attend list[(H,W,3)] — pas un array 4D
+    # predict_batch expects list[(H,W,3)] — not a 4D array
     dets_sampled = detector.predict_batch(list(sampled))  # list[list[dict]]
 
-    # Réexpansion : chaque frame non-analysée reçoit les détections de la frame
-    # précédente (même comportement que pipeline.py)
+    # Re-expansion: each non-analyzed frame receives the detections of the
+    # previous frame (same behavior as pipeline.py)
     dets = [[] for _ in range(len(rgb))]
     for pos, idx in enumerate(indices):
         dets[idx] = dets_sampled[pos]
 
-    # Remappage crop → coordonnées DICOM originales
+    # Remap crop → original DICOM coordinates
     dets = map_detections_to_dicom_coords(dets, info)
     return dets
 
@@ -415,7 +415,7 @@ def main():
                       "buildez avec: cd third_party/weasis-dcm2png && mvn package)")
             fps, n_frames = export_dicom_to_pngs(args.dicom_path, png_dir)
 
-        # Copie éventuelle pour debug
+        # Optional copy for debugging
         if args.keep_pngs:
             os.makedirs(args.keep_pngs, exist_ok=True)
             for f in os.listdir(png_dir):
@@ -448,7 +448,7 @@ def main():
             n_det_frames = sum(1 for fd in detections if fd)
             print(f"    Frames avec détections : {n_det_frames} / {len(detections)}")
 
-        # ── Résultats ────────────────────────────────────────────────────────
+        # ── Results ───────────────────────────────────────────────────────────
         print()
         print("=" * 52)
         print(f"  FICHIER        : {os.path.basename(args.dicom_path)}")

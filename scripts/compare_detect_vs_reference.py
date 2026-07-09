@@ -50,7 +50,7 @@ _CKPT   = os.path.join(
 from starhe_plugin.config import DETECT_EVERY_N, DETECT_SCORE_THRESHOLD
 
 
-# ─── Stubs identiques à _rtmdet_runner.py (AVANT tout import mmcv/mmdet) ──────
+# ─── Stubs identical to _rtmdet_runner.py (BEFORE any mmcv/mmdet import) ──────
 if "mmcv._ext" not in sys.modules:
     class _CExtStub(types.ModuleType):
         def __getattr__(self, name):
@@ -139,7 +139,7 @@ def _log(msg: str) -> None:
 
 
 def _load_models():
-    """Construit le modèle officiel (init_detector) et notre runner."""
+    """Builds the official model (init_detector) and our runner."""
     from mmdet.apis import init_detector, inference_detector
     from mmcv.transforms import Compose
 
@@ -306,7 +306,7 @@ def main():
              f"(max_bbox_diff={max_bbox_diff:.4f}px, max_score_diff={max_score_diff:.6f}) "
              f"— det. officiel={n_det_frames_off}, det. notre projet={n_det_frames_ours}")
 
-    # ── Ligne récapitulative GLOBAL ────────────────────────────────────────────
+    # ── GLOBAL summary line ───────────────────────────────────────────────────
     total_sampled  = sum(r["n_frames_analyses"] for r in rows)
     total_perfect  = sum(int(r["frames_bit_exactes"].split("/")[0]) for r in rows)
     rows.append({

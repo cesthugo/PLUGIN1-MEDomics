@@ -1,19 +1,19 @@
 """
-ui/live_tab.py — Onglet « Analyse en direct » de l'interface STARHE
+ui/live_tab.py — "Live analysis" tab of the STARHE interface
 ====================================================================
-Frame Tkinter autonome embarquant :
-  - panneau gauche  : sélection de la source, contrôles start/stop,
-                      compteurs FPS / frames, statut
-  - panneau droit   : canvas temps-réel avec overlay bboxes + ROI
-  - encart résultats : score de risque coloré + nb de détections
+Standalone Tkinter frame embedding:
+  - left panel   : source selection, start/stop controls,
+                   FPS / frame counters, status
+  - right panel  : real-time canvas with bbox + ROI overlay
+  - results box  : colored risk score + number of detections
 
-Sources supportées
-------------------
-  - 📡  C-STORE DICOM  (via live_receiver.py — intégré ici)
-  - 📂  Dossier         (polling, fichiers .dcm ajoutés au fur et à mesure)
-  - �  HDMI            (carte de capture → sonde échographique en direct)
+Supported sources
+-----------------
+  - 📡  C-STORE DICOM  (via live_receiver.py — integrated here)
+  - 📂  Folder          (polling, .dcm files added over time)
+  - �  HDMI            (capture card → live ultrasound probe)
 
-Intégration dans STARHEApp
+Integration into STARHEApp
 --------------------------
     from starhe_plugin.ui.live_tab import LiveTab
     tab = LiveTab(parent_frame, logger=self._log)
@@ -21,9 +21,9 @@ Intégration dans STARHEApp
 
 Thread safety
 -------------
-LivePipeline appelle on_result() depuis son thread interne.
-Toute mise à jour Tkinter est postée via self.after(0, …) pour rester
-dans le thread principal.
+LivePipeline calls on_result() from its internal thread.
+Every Tkinter update is posted via self.after(0, …) to stay
+in the main thread.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from tkinter import ttk, filedialog
 
 import numpy as np
 
-# Importations optionnelles (présentes si les dépendances sont installées)
+# Optional imports (present if the dependencies are installed)
 try:
     from PIL import Image, ImageTk
     _PIL_OK = True
@@ -61,7 +61,7 @@ except ImportError:
 
 from starhe_plugin.ai.live_pipeline import LivePipeline
 
-# ── Palette (identique à prototype_tkinter.py) ─────────────────────────────
+# ── Palette (identical to prototype_tkinter.py) ────────────────────────────
 SIDEBAR_BG  = "#151521"
 SIDEBAR_HOV = "#1e1e2e"
 SBAR_FG     = "#e2e8f0"
@@ -89,8 +89,8 @@ FONT_SMALL  = ("Segoe UI",  8)
 FONT_MONO   = ("Consolas",  8)
 FONT_NAV    = ("Segoe UI", 13, "bold")
 
-SIDEBAR_W   = 270   # largeur du panneau gauche (px)
-CANVAS_MIN_W = 480  # taille minimale du canvas
+SIDEBAR_W   = 270   # width of the left panel (px)
+CANVAS_MIN_W = 480  # minimum canvas size
 CANVAS_MIN_H = 360
 
 
@@ -99,7 +99,7 @@ CANVAS_MIN_H = 360
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _ndarray_to_photoimage(arr: np.ndarray, max_w: int, max_h: int) -> "ImageTk.PhotoImage":
-    """Convertit un ndarray uint8 (H,W) ou (H,W,3) en PhotoImage adapté au canvas."""
+    """Converts a uint8 ndarray (H,W) or (H,W,3) into a canvas-fitted PhotoImage."""
     if arr.ndim == 2:
         img = Image.fromarray(arr, mode="L").convert("RGB")
     else:
@@ -109,7 +109,7 @@ def _ndarray_to_photoimage(arr: np.ndarray, max_w: int, max_h: int) -> "ImageTk.
 
 
 def _draw_detections_on_array(frame: np.ndarray, detections: list[dict]) -> np.ndarray:
-    """Superpose les bboxes de détection sur une copie du frame."""
+    """Overlays the detection bboxes on a copy of the frame."""
     if not _CV2_OK:
         return frame
     vis = frame.copy()
@@ -134,7 +134,7 @@ def _make_btn(
     width: int | None = None,
     anchor: str = "w",
 ) -> tk.Frame:
-    """Bouton cliquable cross-platform (macOS ignore bg/fg sur tk.Button)."""
+    """Cross-platform clickable button (macOS ignores bg/fg on tk.Button)."""
     kw: dict = dict(bg=bg, padx=2, pady=2, bd=0, relief="flat")
     frame = tk.Frame(parent, **kw, cursor="hand2")
     lbl_kw: dict = dict(bg=bg, fg=fg, font=font, padx=padx, pady=pady,
@@ -162,7 +162,7 @@ def _make_btn(
 
 
 def _sh(parent, title: str) -> tk.Frame:
-    """En-tête de section (barre bleue + texte majuscule)."""
+    """Section header (blue bar + uppercase text)."""
     row = tk.Frame(parent, bg=SIDEBAR_BG)
     row.pack(fill="x", padx=8, pady=(10, 2))
     tk.Frame(row, bg=BLUE, width=3).pack(side="left", fill="y")
@@ -172,16 +172,16 @@ def _sh(parent, title: str) -> tk.Frame:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Récepteur de dossier (polling)
+#  Folder receiver (polling)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _FolderWatcher(threading.Thread):
     """
-    Surveille un dossier et pousse les fichiers .dcm vers le pipeline.
-    S'arrête proprement via stop().
+    Watches a folder and pushes the .dcm files to the pipeline.
+    Stops cleanly via stop().
     """
 
-    POLL_INTERVAL = 0.5   # secondes entre deux scans
+    POLL_INTERVAL = 0.5   # seconds between two scans
 
     def __init__(self, folder: str, pipeline: LivePipeline, logger: logging.Logger,
                  on_preview: Callable[[np.ndarray], None] | None = None):
@@ -218,7 +218,7 @@ class _FolderWatcher(threading.Thread):
         try:
             ds = pydicom.dcmread(str(path), force=True)
             arr = ds.pixel_array
-            # Normalisation uint8 si nécessaire
+            # uint8 normalization if needed
             if arr.dtype != np.uint8:
                 mn, mx = arr.min(), arr.max()
                 if mx > mn:
@@ -236,10 +236,10 @@ class _FolderWatcher(threading.Thread):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Résolutions HDMI proposées dans l'interface
+#  HDMI resolutions offered in the interface
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Mapping libellé → (largeur, hauteur) ; None = laisser la carte de capture choisir
+# Label → (width, height) mapping; None = let the capture card choose
 _HDMI_RESOLUTIONS: dict[str, tuple[int | None, int | None]] = {
     "Auto (détection)":      (None, None),
     "1920 × 1080  Full HD":  (1920, 1080),
@@ -250,15 +250,15 @@ _HDMI_RESOLUTIONS: dict[str, tuple[int | None, int | None]] = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Découverte des périphériques de capture (HDMI, cartes de capture USB…)
+#  Capture device discovery (HDMI, USB capture cards…)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _list_capture_devices() -> list[tuple[int, str, float, int, int]]:
     """
-    Retourne [(index_cv2, nom_lisible, fps, width, height), …] pour tous les
-    périphériques de capture vidéo reconnus par le système.
-    Inclut la résolution pour permettre de distinguer une carte de capture HDMI
-    d'une caméra intégrée ou d'un iPhone via Continuity Camera.
+    Returns [(cv2_index, readable_name, fps, width, height), …] for all the
+    video capture devices recognized by the system.
+    Includes the resolution to help distinguish an HDMI capture card
+    from a built-in camera or an iPhone via Continuity Camera.
     """
     import sys
 
@@ -302,15 +302,15 @@ def _list_capture_devices() -> list[tuple[int, str, float, int, int]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Lecteur HDMI (carte de capture via cv2.VideoCapture)
+#  HDMI reader (capture card via cv2.VideoCapture)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _HDMIReader(threading.Thread):
     """
-    Lit les frames depuis une carte de capture HDMI (cv2.VideoCapture).
-    Permet de recevoir le flux vidéo d'une sonde échographique branchée
-    via HDMI → carte de capture USB → ordinateur.
-    La résolution peut être imposée (sinon la carte choisit automatiquement).
+    Reads frames from an HDMI capture card (cv2.VideoCapture).
+    Allows receiving the video stream of an ultrasound probe connected
+    via HDMI → USB capture card → computer.
+    The resolution can be forced (otherwise the card chooses automatically).
     """
 
     def __init__(self, device: int, pipeline: LivePipeline,
@@ -363,7 +363,7 @@ class _HDMIReader(threading.Thread):
                 self._on_error(msg)
             return
 
-        # Imposer la résolution si demandée
+        # Force the resolution if requested
         if self._width and self._height:
             cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self._width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
@@ -393,14 +393,14 @@ class _HDMIReader(threading.Thread):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Récepteur DICOM C-STORE SCP (pynetdicom)
+#  DICOM C-STORE SCP receiver (pynetdicom)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _DicomReceiver:
     """
-    Serveur DICOM C-STORE minimal (AE title : STARHE_LIVE).
-    Pousse les pixels de chaque instance reçue vers le pipeline.
-    Nécessite pynetdicom.
+    Minimal DICOM C-STORE server (AE title: STARHE_LIVE).
+    Pushes the pixels of each received instance to the pipeline.
+    Requires pynetdicom.
     """
 
     def __init__(self, port: int, pipeline: LivePipeline, logger: logging.Logger,
@@ -409,7 +409,7 @@ class _DicomReceiver:
         self._pipe       = pipeline
         self._log        = logger
         self._on_preview = on_preview
-        self._ae         = None   # ApplicationEntity pynetdicom
+        self._ae         = None   # pynetdicom ApplicationEntity
 
     def start(self):
         try:
@@ -445,7 +445,7 @@ class _DicomReceiver:
                         arr = np.zeros_like(arr, dtype=np.uint8)
                 if arr.ndim == 2:
                     arr = np.stack([arr, arr, arr], axis=-1)
-                # Si multi-frame : itérer sur les frames
+                # If multi-frame: iterate over the frames
                 if arr.ndim == 4:
                     for frame in arr:
                         if self._on_preview is not None:
@@ -475,14 +475,14 @@ class _DicomReceiver:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  LiveTab — Frame principale
+#  LiveTab — Main frame
 # ─────────────────────────────────────────────────────────────────────────────
 
 class LiveTab(tk.Frame):
     """
-    Onglet « Analyse en direct » embarquable dans STARHEApp ou autonome.
+    "Live analysis" tab, embeddable in STARHEApp or standalone.
 
-    Utilisation autonome :
+    Standalone usage:
         root = tk.Tk()
         tab = LiveTab(root)
         tab.pack(fill="both", expand=True)
@@ -497,52 +497,52 @@ class LiveTab(tk.Frame):
         super().__init__(parent, bg=MAIN_BG, **kw)
         self._log = logger or logging.getLogger(__name__)
 
-        # État courant
+        # Current state
         self._pipeline  : LivePipeline | None = None
         self._source_runner               = None   # _HDMIReader | _FolderWatcher | _DicomReceiver
         self._running   : bool = False
 
-        # HDMI : indique si une vraie carte de capture a été identifiée lors du scan
+        # HDMI: whether a real capture card was identified during the scan
         self._hdmi_capture_card_found: bool = False
 
-        # Dernière frame brute reçue de la source (écrite par thread source, lue par tick UI)
-        # L'affectation simple est atomique sous le GIL de CPython.
+        # Latest raw frame received from the source (written by source thread, read by UI tick)
+        # A plain assignment is atomic under the CPython GIL.
         self._preview_frame: np.ndarray | None = None
 
-        # Dernières bboxes connues issues du pipeline (mises à jour par on_result)
+        # Latest known bboxes from the pipeline (updated by on_result)
         self._latest_bboxes: list[dict] = []
 
-        # ID du after() du tick vidéo (pour l'annulation)
+        # ID of the video tick's after() (for cancellation)
         self._preview_tick_id: str | None = None
 
-        # Statistiques source (frames brutes reçues)
-        self._input_fps_times: list[float] = []  # timestamps sur 1 s
-        self._frame_count: int = 0               # total frames reçues depuis start
+        # Source statistics (raw frames received)
+        self._input_fps_times: list[float] = []  # timestamps over 1 s
+        self._frame_count: int = 0               # total frames received since start
 
-        # Référence PhotoImage (évite la garbage collection)
+        # PhotoImage reference (avoids garbage collection)
         self._photo_ref: "ImageTk.PhotoImage | None" = None
 
         self._build_ui()
 
-    # ── Construction de l'interface ───────────────────────────────────────────
+    # ── Interface construction ────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Panneau gauche (sidebar)
+        # Left panel (sidebar)
         self._sidebar = tk.Frame(self, bg=SIDEBAR_BG, width=SIDEBAR_W)
         self._sidebar.pack(side="left", fill="y")
         self._sidebar.pack_propagate(False)
         self._build_sidebar(self._sidebar)
 
-        # Séparateur vertical
+        # Vertical separator
         tk.Frame(self, bg=BORDER, width=1).pack(side="left", fill="y")
 
-        # Zone principale
+        # Main area
         self._main = tk.Frame(self, bg=MAIN_BG)
         self._main.pack(side="left", fill="both", expand=True)
         self._build_main(self._main)
 
     def _build_sidebar(self, parent: tk.Frame):
-        # ── En-tête ────────────────────────────────────────────────────────
+        # ── Header ─────────────────────────────────────────────────────────
         hdr = tk.Frame(parent, bg=SIDEBAR_BG, height=54)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
@@ -582,7 +582,7 @@ class LiveTab(tk.Frame):
                 font=FONT_BODY, anchor="w",
             ).pack(fill="x", padx=14, pady=1)
 
-        # ── Paramètres de source ───────────────────────────────────────────
+        # ── Source parameters ──────────────────────────────────────────────
         _sh(sc, "Paramètres")
 
         # — C-STORE port —
@@ -595,7 +595,7 @@ class LiveTab(tk.Frame):
                  bg="#1a1a2e", fg=SBAR_FG, insertbackground=SBAR_FG,
                  relief="flat", font=FONT_BODY).pack(side="left", padx=6)
 
-        # — Dossier —
+        # — Folder —
         self._folder_frame = tk.Frame(sc, bg=SIDEBAR_BG)
         self._folder_var = tk.StringVar(value="")
         tk.Label(self._folder_frame, text="Chemin :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
@@ -611,11 +611,11 @@ class LiveTab(tk.Frame):
                                 padx=6, pady=3)
         _browse_btn.grid(row=0, column=2, padx=(4, 0))
 
-        # — HDMI / Carte de capture —
+        # — HDMI / Capture card —
         self._hdmi_frame = tk.Frame(sc, bg=SIDEBAR_BG)
         self._hdmi_scanned = False
 
-        # Ligne 0 : libellé + bouton Rafraîchir
+        # Row 0: label + Refresh button
         hdmi_row0 = tk.Frame(self._hdmi_frame, bg=SIDEBAR_BG)
         hdmi_row0.pack(fill="x")
         tk.Label(hdmi_row0, text="Périphérique :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
@@ -625,15 +625,15 @@ class LiveTab(tk.Frame):
                                   padx=6, pady=2)
         _hdmi_refresh.pack(side="right")
 
-        # Ligne 1 : Combobox des périphériques de capture
-        self._hdmi_device_var = tk.StringVar(value="")  # vide jusqu'au scan
+        # Row 1: Combobox of capture devices
+        self._hdmi_device_var = tk.StringVar(value="")  # empty until the scan
         self._hdmi_combo = ttk.Combobox(
             self._hdmi_frame, textvariable=self._hdmi_device_var,
             state="readonly", font=FONT_SMALL, width=24,
         )
         self._hdmi_combo.pack(fill="x", pady=(2, 4))
 
-        # Ligne 2 : Résolution
+        # Row 2: Resolution
         tk.Label(self._hdmi_frame, text="Résolution :", bg=SIDEBAR_BG, fg=SBAR_MUTED,
                  font=FONT_SMALL).pack(anchor="w")
         self._hdmi_res_var = tk.StringVar(value="Auto (détection)")
@@ -645,7 +645,7 @@ class LiveTab(tk.Frame):
         self._hdmi_res_combo.current(0)
         self._hdmi_res_combo.pack(fill="x", pady=(2, 4))
 
-        # Note d'info
+        # Info note
         self._hdmi_warn_lbl = tk.Label(
             self._hdmi_frame,
             text="⚠  Matériel requis : carte de capture USB\n"
@@ -656,10 +656,10 @@ class LiveTab(tk.Frame):
         )
         self._hdmi_warn_lbl.pack(anchor="w", pady=(0, 2))
 
-        # Affichage initial
+        # Initial display
         self._on_source_changed()
 
-        # Options pipeline
+        # Pipeline options
         _sh(sc, "Pipeline")
         opt_row = tk.Frame(sc, bg=SIDEBAR_BG)
         opt_row.pack(fill="x", padx=10, pady=2)
@@ -670,7 +670,7 @@ class LiveTab(tk.Frame):
                        activebackground=SIDEBAR_BG, activeforeground=SBAR_FG,
                        font=FONT_SMALL).pack(side="left")
 
-        # ── Contrôles ──────────────────────────────────────────────────────
+        # ── Controls ───────────────────────────────────────────────────────
         _sh(sc, "Contrôles")
         self._start_btn = _make_btn(sc, "▶  Démarrer", self._start_live,
                                     bg=BLUE, fg="#ffffff", font=FONT_BTN_P,
@@ -681,7 +681,7 @@ class LiveTab(tk.Frame):
                                    pady=8)
         self._stop_btn.pack(fill="x", padx=10, pady=(0, 4))
 
-        # ── Statut ─────────────────────────────────────────────────────────
+        # ── Status ─────────────────────────────────────────────────────────
         _sh(sc, "Statut")
         status_frame = tk.Frame(sc, bg=SIDEBAR_BG)
         status_frame.pack(fill="x", padx=10, pady=(2, 0))
@@ -706,7 +706,7 @@ class LiveTab(tk.Frame):
                                      bg=SIDEBAR_BG, fg=SBAR_FG, font=FONT_SMALL)
         self._frames_lbl.grid(row=1, column=1, sticky="w", padx=6)
 
-        # ── Résultats ──────────────────────────────────────────────────────
+        # ── Results ────────────────────────────────────────────────────────
         _sh(sc, "Résultats")
         res_frame = tk.Frame(sc, bg=SIDEBAR_BG)
         res_frame.pack(fill="x", padx=10, pady=(2, 6))
@@ -733,7 +733,7 @@ class LiveTab(tk.Frame):
         self._det_count_lbl.grid(row=2, column=1, sticky="w", padx=6)
 
     def _build_main(self, parent: tk.Frame):
-        # ── En-tête carte ──────────────────────────────────────────────────
+        # ── Card header ────────────────────────────────────────────────────
         hdr = tk.Frame(parent, bg=CARD_BG, height=36)
         hdr.pack(fill="x", padx=13, pady=(10, 0))
         hdr.pack_propagate(False)
@@ -745,7 +745,7 @@ class LiveTab(tk.Frame):
                                      bg="#fef2f2", fg="#dc2626",
                                      font=("Segoe UI", 7, "bold"),
                                      padx=7, pady=2)
-        # Badge masqué tant que pas démarré
+        # Badge hidden until started
         self._live_badge_visible = False
 
         # ── Canvas ────────────────────────────────────────────────────────
@@ -769,7 +769,7 @@ class LiveTab(tk.Frame):
         )
         self._canvas_image_id: int | None = None
 
-    # ── Callbacks sidebar ─────────────────────────────────────────────────────
+    # ── Sidebar callbacks ─────────────────────────────────────────────────────
 
     def _on_source_changed(self):
         src = self._source_var.get()
@@ -783,7 +783,7 @@ class LiveTab(tk.Frame):
             self._folder_frame.pack(fill="x", padx=10, pady=2)
         elif src == self.SOURCE_HDMI:
             self._hdmi_frame.pack(fill="x", padx=10, pady=2)
-            # Scan paresseux : déclenché au premier affichage seulement
+            # Lazy scan: triggered on first display only
             if not self._hdmi_scanned:
                 self._hdmi_scanned = True
                 threading.Thread(target=self._refresh_hdmi_devices, daemon=True).start()
@@ -794,27 +794,27 @@ class LiveTab(tk.Frame):
             self._folder_var.set(path)
 
     def _refresh_hdmi_devices(self):
-        """Détecte les périphériques de capture vidéo et met à jour le Combobox HDMI."""
+        """Detects the video capture devices and updates the HDMI Combobox."""
         self._hdmi_scanned = True
         devices = _list_capture_devices()  # [(idx, name, fps, w, h), …]
 
-        # Mots-clés pour identifier les cartes de capture HDMI
+        # Keywords to identify HDMI capture cards
         _PREFER  = {"capture", "hdmi", "elgato", "avermedia", "magewell",
                     "usb video", "usb capture", "video capture"}
-        # Mots-clés pour exclure les caméras intégrées / iPhones
+        # Keywords to exclude built-in cameras / iPhones
         _EXCLUDE = {"iphone", "ipad", "facetime", "continuity",
                     "macbook", "built-in", "integrated", "isight"}
 
         def _pick_preferred(devs: list) -> int:
-            # 1ère passe : nom explicitement reconnu comme carte de capture
+            # 1st pass: name explicitly recognized as a capture card
             for i, (_, name, fps, w, h) in enumerate(devs):
                 if any(k in name.lower() for k in _PREFER):
                     return i
-            # 2ème passe : écarter les caméras connues (iPhone, FaceTime…)
+            # 2nd pass: discard known cameras (iPhone, FaceTime…)
             for i, (_, name, fps, w, h) in enumerate(devs):
                 if not any(k in name.lower() for k in _EXCLUDE):
                     return i
-            # 3ème passe : sélectionner la plus haute résolution
+            # 3rd pass: select the highest resolution
             return max(range(len(devs)), key=lambda i: devs[i][3] * devs[i][4])
 
         def _update():
@@ -837,7 +837,7 @@ class LiveTab(tk.Frame):
             self._hdmi_combo["values"] = labels
             preferred = _pick_preferred(devices)
             self._hdmi_combo.current(preferred)
-            # Avertir si aucun périphérique reconnu comme carte de capture
+            # Warn if no device was recognized as a capture card
             sel_name = devices[preferred][1].lower()
             card_found = any(k in sel_name for k in _PREFER)
             self._hdmi_capture_card_found = card_found
@@ -855,7 +855,7 @@ class LiveTab(tk.Frame):
                 )
         self.after(0, _update)
 
-    # ── Démarrage / arrêt ─────────────────────────────────────────────────────
+    # ── Start / stop ──────────────────────────────────────────────────────────
 
     def _start_live(self):
         if self._running:
@@ -863,7 +863,7 @@ class LiveTab(tk.Frame):
 
         src = self._source_var.get()
 
-        # Validation des paramètres
+        # Parameter validation
         if src == self.SOURCE_CSTORE:
             try:
                 port = int(self._port_var.get())
@@ -900,25 +900,25 @@ class LiveTab(tk.Frame):
             res_label = self._hdmi_res_var.get()
             hdmi_w, hdmi_h = _HDMI_RESOLUTIONS.get(res_label, (None, None))
 
-        # Callback appelé par la source pour chaque frame brute (thread source)
+        # Callback called by the source for each raw frame (source thread)
         def _on_preview_raw(frame: np.ndarray) -> None:
-            self._preview_frame = frame          # atomic sous le GIL
+            self._preview_frame = frame          # atomic under the GIL
             now = time.monotonic()
             self._input_fps_times.append(now)
             self._frame_count += 1
 
-        # Callback appelé si la source rencontre une erreur fatale
+        # Callback called if the source hits a fatal error
         def _on_source_error(msg: str) -> None:
             self.after(0, lambda m=msg: self._set_status(m[:60], error=True))
 
-        # Créer et démarrer le pipeline
+        # Create and start the pipeline
         self._pipeline = LivePipeline(
             on_result=self._on_pipeline_result,
             enable_risk=self._risk_var.get(),
         )
         self._pipeline.start()
 
-        # Démarrer la source
+        # Start the source
         if src == self.SOURCE_CSTORE:
             self._source_runner = _DicomReceiver(
                 port, self._pipeline, self._log, on_preview=_on_preview_raw)
@@ -941,21 +941,21 @@ class LiveTab(tk.Frame):
         self._preview_frame = None
         self._set_status("En cours…", running=True)
         self._show_live_badge(True)
-        # Démarre la boucle d'affichage (~30 fps)
+        # Start the display loop (~30 fps)
         self._preview_tick()
 
     def _stop_live(self):
         if not self._running:
             return
-        # Stoppe le tick d'affichage
+        # Stop the display tick
         if self._preview_tick_id is not None:
             self.after_cancel(self._preview_tick_id)
             self._preview_tick_id = None
-        # Arrêt de la source
+        # Stop the source
         if self._source_runner is not None:
             self._source_runner.stop()
             self._source_runner = None
-        # Arrêt du pipeline
+        # Stop the pipeline
         if self._pipeline is not None:
             self._pipeline.stop()
             self._pipeline = None
@@ -963,25 +963,25 @@ class LiveTab(tk.Frame):
         self._set_status("Arrêté", running=False)
         self._show_live_badge(False)
 
-    # ── Boucle d'affichage (~30 fps) ─────────────────────────────────────────
+    # ── Display loop (~30 fps) ────────────────────────────────────────────────
 
     def _preview_tick(self) -> None:
         """
-        Appelé toutes les ~33 ms dans le main thread.
-        Affiche la dernière frame brute reçue de la source, avec overlay bboxes.
-        Découplé du pipeline : la frame s'affiche même si l'inférence est lente.
+        Called every ~33 ms in the main thread.
+        Displays the latest raw frame received from the source, with bbox overlay.
+        Decoupled from the pipeline: the frame is displayed even if inference is slow.
         """
         if not self._running:
             return
 
-        frame = self._preview_frame  # lecture atomique (GIL)
+        frame = self._preview_frame  # atomic read (GIL)
         if frame is not None and _PIL_OK:
             bboxes = self._latest_bboxes
             vis = _draw_detections_on_array(frame, bboxes) if bboxes else frame
             cw = max(self._canvas.winfo_width(),  CANVAS_MIN_W)
             ch = max(self._canvas.winfo_height(), CANVAS_MIN_H)
             photo = _ndarray_to_photoimage(vis, cw, ch)
-            self._photo_ref = photo  # évite la garbage collection
+            self._photo_ref = photo  # avoids garbage collection
             if self._canvas_image_id is None:
                 self._canvas.delete(self._canvas_text)
                 self._canvas_image_id = self._canvas.create_image(
@@ -989,7 +989,7 @@ class LiveTab(tk.Frame):
             else:
                 self._canvas.itemconfigure(self._canvas_image_id, image=photo)
 
-        # Mise à jour FPS source (glissant sur 1 s)
+        # Source FPS update (sliding over 1 s)
         now = time.monotonic()
         cutoff = now - 1.0
         self._input_fps_times = [t for t in self._input_fps_times if t >= cutoff]
@@ -1000,21 +1000,21 @@ class LiveTab(tk.Frame):
         # Reschedule
         self._preview_tick_id = self.after(33, self._preview_tick)
 
-    # ── Callback pipeline (thread externe → Tkinter via after) ────────────────
+    # ── Pipeline callback (external thread → Tkinter via after) ───────────────
 
     def _on_pipeline_result(self, result: dict):
-        """Appelé depuis le thread pipeline — poste la mise à jour dans le main thread."""
+        """Called from the pipeline thread — posts the update to the main thread."""
         self.after(0, lambda r=result: self._apply_result(r))
 
     def _apply_result(self, r: dict):
         """
-        Met à jour les bboxes et les labels sidebar depuis le résultat pipeline.
-        L'affichage de la frame est géré indépendamment par _preview_tick.
+        Updates the bboxes and the sidebar labels from the pipeline result.
+        Frame display is handled independently by _preview_tick.
         """
-        # Mise à jour des bboxes connues → utilisées par _preview_tick
+        # Update the known bboxes → used by _preview_tick
         self._latest_bboxes = r.get("detections", [])
 
-        # ── Résultats risque ───────────────────────────────────────────────
+        # ── Risk results ───────────────────────────────────────────────────
         risk_score = r.get("risk_score")
         risk_label = r.get("risk_label")
         if risk_score is not None:
@@ -1034,14 +1034,14 @@ class LiveTab(tk.Frame):
             self._risk_score_lbl.configure(text="—", fg=SBAR_MUTED)
             self._risk_label_lbl.configure(text="calibration…", fg=SBAR_MUTED)
 
-        # ── Compteur détections ────────────────────────────────────────────
+        # ── Detection counter ──────────────────────────────────────────────
         n = len(self._latest_bboxes)
         self._det_count_lbl.configure(
             text=str(n),
             fg=RISK_HIGH_FG if n > 0 else SBAR_MUTED,
         )
 
-    # ── Helpers d'état ────────────────────────────────────────────────────────
+    # ── State helpers ─────────────────────────────────────────────────────────
 
     def _set_status(self, text: str, *, running: bool = False, error: bool = False):
         if error:
@@ -1061,9 +1061,9 @@ class LiveTab(tk.Frame):
             self._live_badge.pack_forget()
             self._live_badge_visible = False
 
-    # ── Nettoyage ─────────────────────────────────────────────────────────────
+    # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def destroy(self):
-        """Arrête proprement la session avant de détruire le widget."""
+        """Cleanly stops the session before destroying the widget."""
         self._stop_live()
         super().destroy()

@@ -1,24 +1,24 @@
 """
-run_starhe.py — Point d'entrée MEDomics pour le plugin STARHE
+run_starhe.py — MEDomics entry point for the STARHE plugin
 ==============================================================
-Ce script sert de **pont** entre la plateforme MEDomics et le pipeline
-STARHE qui tourne dans son propre venv (torch, mmdet, etc.).
+This script serves as a **bridge** between the MEDomics platform and the
+STARHE pipeline that runs in its own venv (torch, mmdet, etc.).
 
-Protocole :
-  1. MEDomics Go appelle :  condaEnv -u run_starhe.py --json-param <json> --id <id>
-  2. Ce script lance le pipeline STARHE dans un subprocess (venv dédié)
-  3. Il traduit les lignes GO_PRINT|…  → protocol MEDomics (progress*_*, response-ready*_*)
-  4. Le résultat est renvoyé à MEDomics via GoExecutionScript.send_response()
+Protocol:
+  1. MEDomics Go calls:  condaEnv -u run_starhe.py --json-param <json> --id <id>
+  2. This script launches the STARHE pipeline in a subprocess (dedicated venv)
+  3. It translates the GO_PRINT|… lines → MEDomics protocol (progress*_*, response-ready*_*)
+  4. The result is returned to MEDomics via GoExecutionScript.send_response()
 
-json_param attendu :
+Expected json_param:
 {
-    "dicom_path"           : str,     ← obligatoire
-    "anon_mode"            : str,     ← "hash" | "remove" | "none" (défaut: "hash")
-    "run_detection"        : bool,    ← défaut: true
-    "back_scan_conversion" : bool,    ← défaut: true
-    "backscan_width"       : int,     ← défaut: 512
-    "backscan_height"      : int,     ← défaut: 512
-    "patient_id"           : str      ← optionnel, pour tagging MongoDB
+    "dicom_path"           : str,     ← required
+    "anon_mode"            : str,     ← "hash" | "remove" | "none" (default: "hash")
+    "run_detection"        : bool,    ← default: true
+    "back_scan_conversion" : bool,    ← default: true
+    "backscan_width"       : int,     ← default: 512
+    "backscan_height"      : int,     ← default: 512
+    "patient_id"           : str      ← optional, for MongoDB tagging
 }
 """
 
@@ -28,9 +28,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# ── Accès aux libs MEDomics ──────────────────────────────────────────────────
-# Ce script tourne dans l'env Python de MEDomics (conda/venv MEDomics),
-# PAS dans le venv STARHE. On a donc accès à med_libs/ via sys.path.
+# ── Access to the MEDomics libs ──────────────────────────────────────────────
+# This script runs in the MEDomics Python env (conda/venv MEDomics),
+# NOT in the STARHE venv. We therefore have access to med_libs/ via sys.path.
 sys.path.append(
     str(Path(os.path.dirname(os.path.abspath(__file__))).parent.parent))
 
@@ -41,16 +41,16 @@ json_params_dict, id_ = parse_arguments()
 go_print("running run_starhe.py:" + id_)
 
 
-# ── Détection du plugin STARHE ───────────────────────────────────────────────
+# ── STARHE plugin detection ──────────────────────────────────────────────────
 
 def _find_starhe_paths() -> tuple[Path, Path, Path]:
     """
-    Localise le répertoire du plugin STARHE, son venv Python, et le
-    dossier modules/ parent.
+    Locates the STARHE plugin directory, its Python venv, and the
+    parent modules/ directory.
 
-    Ordre de recherche :
-      1. Variable d'environnement STARHE_PLUGIN_DIR
-      2. Dossier frère starhe_plugin/ (même parent que ce script)
+    Search order:
+      1. STARHE_PLUGIN_DIR environment variable
+      2. Sibling starhe_plugin/ directory (same parent as this script)
 
     Returns:
         (plugin_root, venv_python, modules_dir)
@@ -58,13 +58,13 @@ def _find_starhe_paths() -> tuple[Path, Path, Path]:
     if "STARHE_PLUGIN_DIR" in os.environ:
         root = Path(os.environ["STARHE_PLUGIN_DIR"])
     else:
-        # starhe/ et starhe_plugin/ sont frères sous modules/
+        # starhe/ and starhe_plugin/ are siblings under modules/
         root = Path(__file__).resolve().parent.parent / "starhe_plugin"
 
     if not root.is_dir():
         raise FileNotFoundError(
-            f"Répertoire starhe_plugin introuvable : {root}\n"
-            f"Définissez STARHE_PLUGIN_DIR ou placez le plugin à côté de ce script."
+            f"starhe_plugin directory not found: {root}\n"
+            f"Set STARHE_PLUGIN_DIR or place the plugin next to this script."
         )
 
     if sys.platform == "win32":
@@ -74,22 +74,22 @@ def _find_starhe_paths() -> tuple[Path, Path, Path]:
 
     if not py.exists():
         raise FileNotFoundError(
-            f"Venv STARHE introuvable : {py}\n"
-            f"Exécutez d'abord le script de setup (setup.sh ou setup.ps1)."
+            f"STARHE venv not found: {py}\n"
+            f"Run the setup script first (setup.sh or setup.ps1)."
         )
 
     modules_dir = root.parent  # pythonCode/modules/
     return root, py, modules_dir
 
 
-# ── Script MEDomics ──────────────────────────────────────────────────────────
+# ── MEDomics script ───────────────────────────────────────────────────────────
 
 class GoExecScriptSTARHE(GoExecutionScript):
     """
-    Adapter MEDomics → STARHE.
+    MEDomics → STARHE adapter.
 
-    Lance le pipeline STARHE en subprocess (venv dédié) et traduit
-    le protocole GO_PRINT vers le protocole MEDomics (progress / response).
+    Launches the STARHE pipeline as a subprocess (dedicated venv) and translates
+    the GO_PRINT protocol to the MEDomics protocol (progress / response).
     """
 
     def __init__(self, json_params: dict, _id: str = None):
@@ -106,10 +106,10 @@ class GoExecScriptSTARHE(GoExecutionScript):
         if not Path(dicom_path).exists():
             return {"error": {"message": f"Fichier DICOM introuvable : {dicom_path}"}}
 
-        # ── Localisation du venv STARHE ───────────────────────────────────
+        # ── Locate the STARHE venv ────────────────────────────────────────
         plugin_root, starhe_python, modules_dir = _find_starhe_paths()
 
-        # ── Construction de la commande subprocess ────────────────────────
+        # ── Build the subprocess command ──────────────────────────────────
         anon_mode  = json_config.get("anon_mode", "hash")
         bs_width   = str(json_config.get("backscan_width", 512))
         bs_height  = str(json_config.get("backscan_height", 512))
@@ -131,7 +131,7 @@ class GoExecScriptSTARHE(GoExecutionScript):
                "PYTHONPATH": str(modules_dir),
                "PYTHONUTF8": "1"}
 
-        # ── Exécution + traduction du protocole ──────────────────────────
+        # ── Execution + protocol translation ──────────────────────────────
         self.set_progress(label="Lancement du pipeline STARHE…", now=0)
 
         proc = subprocess.Popen(

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# run_tkinter.sh — Lanceur du prototype STARHE Tkinter (macOS / Linux)
-# Équivalent de run_tkinter.ps1 pour les systèmes Unix.
+# run_tkinter.sh — Launcher for the STARHE Tkinter prototype (macOS / Linux)
+# Equivalent of run_tkinter.ps1 for Unix systems.
 #
-# Ce script est autonome : il vérifie les prérequis, crée le venv si absent,
-# installe les dépendances, puis lance l'interface Tkinter.
+# This script is standalone: it checks the prerequisites, creates the venv if missing,
+# installs the dependencies, then launches the Tkinter interface.
 
 set -euo pipefail
 
@@ -14,7 +14,7 @@ MODULES="$SCRIPT_DIR/pythonCode/modules"
 PREPUS="$SCRIPT_DIR/third_party/prepUS"
 REQUIREMENTS="$SCRIPT_DIR/pythonCode/modules/starhe_plugin/requirements.txt"
 
-# ── 1. Vérifier que Python 3.13 est disponible sur le système ────────────────
+# ── 1. Check that Python 3.13 is available on the system ─────────────────────
 PYTHON_SYS=""
 for cmd in python3.13 python3; do
     if command -v "$cmd" &>/dev/null; then
@@ -36,7 +36,7 @@ if [ -z "$PYTHON_SYS" ]; then
     exit 1
 fi
 
-# ── 2. Vérifier tkinter (macOS Homebrew ne l'inclut pas par défaut) ──────────
+# ── 2. Check tkinter (macOS Homebrew does not include it by default) ─────────
 if ! "$PYTHON_SYS" -c "import _tkinter" 2>/dev/null; then
     echo "Erreur : tkinter n'est pas disponible pour Python 3.13." >&2
     if [[ "$OSTYPE" == darwin* ]]; then
@@ -47,7 +47,7 @@ if ! "$PYTHON_SYS" -c "import _tkinter" 2>/dev/null; then
     exit 1
 fi
 
-# ── 3. Créer le venv si absent ───────────────────────────────────────────────
+# ── 3. Create the venv if missing ────────────────────────────────────────────
 if [ ! -f "$PYTHON" ]; then
     echo "Venv introuvable — création avec $PYTHON_SYS..."
     "$PYTHON_SYS" -m venv "$VENV_DIR"
@@ -57,7 +57,7 @@ if [ ! -f "$PYTHON" ]; then
     echo "Venv créé et dépendances installées."
 fi
 
-# ── 4. Installer prepUS si absent ───────────────────────────────────────────
+# ── 4. Install prepUS if missing ─────────────────────────────────────────────
 if ! "$PYTHON" -c "import prepUS" 2>/dev/null; then
     echo "prepUS absent du venv — installation depuis third_party/prepUS..."
     "$PYTHON" -m pip install sonocrop --no-deps --quiet
@@ -65,7 +65,7 @@ if ! "$PYTHON" -c "import prepUS" 2>/dev/null; then
     echo "prepUS installé avec succès."
 fi
 
-# ── 5. Télécharger les poids IA si absents ───────────────────────────────────
+# ── 5. Download the AI weights if missing ────────────────────────────────────
 MODELS_DIR="$SCRIPT_DIR/pythonCode/modules/starhe_plugin/models"
 RISK_PTH="$MODELS_DIR/best_acc_mean_cls_f1_epoch_14.pth"
 DET_PTH="$MODELS_DIR/best_coco_bbox_mAP_50_iter_2100.pth"
@@ -74,7 +74,7 @@ if [ ! -f "$RISK_PTH" ] || [ ! -f "$DET_PTH" ]; then
     "$PYTHON" "$SCRIPT_DIR/download_models.py"
 fi
 
-# ── 6. Lancer l'interface ────────────────────────────────────────────────────
+# ── 6. Launch the interface ──────────────────────────────────────────────────
 echo "Lancement STARHE Tkinter (Python $("$PYTHON" --version 2>&1))..."
 cd "$MODULES"
 exec "$PYTHON" -m starhe_plugin.ui.prototype_tkinter

@@ -1,10 +1,10 @@
 """
-pipeline_mp4.py — Pipeline STARHE pour fichiers MP4 directs
+pipeline_mp4.py — STARHE pipeline for direct MP4 files
 ============================================================
-Identique à pipeline.py mais sans chargement DICOM ni anonymisation.
-Les frames sont lues directement depuis un fichier .mp4 via OpenCV.
+Identical to pipeline.py but without DICOM loading or anonymization.
+Frames are read directly from an .mp4 file via OpenCV.
 
-Point d'entrée appelé par le serveur Go (handlers_mp4.go).
+Entry point called by the Go server (handlers_mp4.go).
 """
 
 import threading
@@ -29,21 +29,21 @@ def run_pipeline_mp4(
     analysis_mode: str | None = None,
 ) -> dict:
     """
-    Exécute le pipeline STARHE sur un fichier MP4.
+    Runs the STARHE pipeline on an MP4 file.
 
-    Étapes :
-      1. Lecture MP4 (cv2.VideoCapture)
-      2. Prétraitement prepUS
-      3. Inférence STARHE-RISK
-      4. Inférence STARHE-DETECT
-      5. Sauvegarde MongoDB
+    Steps:
+      1. MP4 reading (cv2.VideoCapture)
+      2. prepUS preprocessing
+      3. STARHE-RISK inference
+      4. STARHE-DETECT inference
+      5. MongoDB save
 
-    Retourne un dict de résultats (émis aussi via go_result).
+    Returns a result dict (also emitted via go_result).
     """
     TOTAL_STEPS = 5
     step = 0
 
-    # ── 1. Lecture MP4 ────────────────────────────────────────────────────────
+    # ── 1. MP4 reading ────────────────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Lecture du fichier MP4…")
 
     cap = cv2.VideoCapture(mp4_path)
@@ -68,11 +68,11 @@ def run_pipeline_mp4(
     if not raw_frames:
         raise RuntimeError("Le fichier MP4 ne contient aucune frame lisible.")
 
-    # (T, H, W, 3) uint8 RGB — même format que pipeline.py après extraction
+    # (T, H, W, 3) uint8 RGB — same format as pipeline.py after extraction
     frames_rgb = np.stack(raw_frames)
     go_print("info", f"Frames lues : {len(frames_rgb)}")
 
-    # ── Préchauffage DETECT en arrière-plan (pendant prepUS + RISK) ───────────
+    # ── DETECT warm-up in the background (during prepUS + RISK) ───────────────
     _detect_model_box: list = []
     _detect_exc_box:   list = []
 
@@ -87,7 +87,7 @@ def run_pipeline_mp4(
         detect_thread = threading.Thread(target=_warm_detect, daemon=True)
         detect_thread.start()
 
-    # ── 2. Prétraitement prepUS ───────────────────────────────────────────────
+    # ── 2. prepUS preprocessing ───────────────────────────────────────────────
     crop_only_frames = info = None
     if run_detection or run_risk:
         go_progress(step := step + 1, TOTAL_STEPS,
@@ -103,7 +103,7 @@ def run_pipeline_mp4(
         go_progress(step, TOTAL_STEPS, "prepUS ignoré.")
 
     if crop_only_frames is not None:
-        _c = crop_only_frames          # (T, H_crop, W_crop) uint8 gris
+        _c = crop_only_frames          # (T, H_crop, W_crop) uint8 gray
         frames_processed = np.stack([_c, _c, _c], axis=-1)  # (T, H_crop, W_crop, 3)
     else:
         frames_processed = frames_rgb
@@ -167,12 +167,12 @@ def run_pipeline_mp4(
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")
 
-    # ── Remappage crop → espace vidéo original ────────────────────────────────
+    # ── Remap crop → original video space ─────────────────────────────────────
     detections_per_frame = map_detections_to_dicom_coords(detections_per_frame, info)
     if any(d for d in detections_per_frame):
         go_print("info", "Détections remappées vers l'espace original.")
 
-    # ── 5. Sauvegarde MongoDB ─────────────────────────────────────────────────
+    # ── 5. MongoDB save ───────────────────────────────────────────────────────
     if analysis_mode is None:
         r = "1" if run_risk else "0"
         d = "1" if run_detection else "0"

@@ -1,7 +1,7 @@
   #!/usr/bin/env bash
-# start_react.sh — lance le serveur Go STARHE puis l'UI React/Vite.
+# start_react.sh — launches the STARHE Go server then the React/Vite UI.
 #
-# Usage :
+# Usage:
 #   ./start_react.sh
 #
 # Logs :
@@ -59,7 +59,7 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── Vérification venv Python ─────────────────────────────────────────────────
+# ── Python venv verification ─────────────────────────────────────────────────
 if [[ ! -f "$VENV_PYTHON" ]]; then
   log "Venv Python introuvable — lancement du setup..."
   bash "$ROOT_DIR/scripts/setup.sh"
@@ -70,9 +70,9 @@ if [[ ! -f "$VENV_PYTHON" ]]; then
   log "Venv Python prêt."
 fi
 
-# ── Choix du port Go ─────────────────────────────────────────────────────────
-# Si STARHE_PORT est déjà défini dans l'environnement, on le respecte.
-# Sinon on part de 8082 et on cherche le premier port libre.
+# ── Go port selection ────────────────────────────────────────────────────────
+# If STARHE_PORT is already set in the environment, respect it.
+# Otherwise start from 8082 and look for the first free port.
 find_free_port() {
   local port="${1:-8082}"
   while lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1; do

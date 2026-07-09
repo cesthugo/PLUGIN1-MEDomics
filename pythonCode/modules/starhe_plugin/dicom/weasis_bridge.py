@@ -1,14 +1,14 @@
 """
-weasis_bridge.py — Décodage DICOM via le CLI Java weasis-dcm2png
+weasis_bridge.py — DICOM decoding via the weasis-dcm2png Java CLI
 =================================================================
 
-Reproduit la chaîne d'entraînement de Jérémy : DICOM → PNG (avec Modality LUT
-+ VOI LUT appliquées comme dans Weasis) → numpy. La sortie est ensuite
-injectée dans `prepus_bridge` (preprocess_with_prepus[_inmem]) à la place du
-chemin pydicom direct.
+Reproduces Jérémy's training chain: DICOM → PNG (with Modality LUT
++ VOI LUT applied as in Weasis) → numpy. The output is then
+fed into `prepus_bridge` (preprocess_with_prepus[_inmem]) instead of the
+direct pydicom path.
 
-Le JAR est vendorisé dans `third_party/weasis-dcm2png/dist/` ; les libs
-natives OpenCV+DCM4CHE sont dans `dist/native/` (chargées via
+The JAR is vendored in `third_party/weasis-dcm2png/dist/`; the native
+OpenCV+DCM4CHE libs are in `dist/native/` (loaded via
 `-Djava.library.path`).
 """
 
@@ -29,11 +29,11 @@ from starhe_plugin.config    import PROJECT_ROOT, TEMP_DIR
 from starhe_plugin.utils.go_print import go_print
 
 
-# ── Chemins des artefacts Weasis ─────────────────────────────────────────────
-# En mode dev : pointe vers `third_party/weasis-dcm2png/dist/` du dépôt.
-# En mode bundle Electron : `STARHE_WEASIS_DIR` est défini par main.ts et
-# pointe vers `STARHE.app/Contents/Resources/weasis-dcm2png/` (extraResources),
-# qui contient directement `weasis-dcm2png.jar` + `native/`.
+# ── Paths to the Weasis artifacts ────────────────────────────────────────────
+# In dev mode: points to the repo's `third_party/weasis-dcm2png/dist/`.
+# In Electron bundle mode: `STARHE_WEASIS_DIR` is set by main.ts and
+# points to `STARHE.app/Contents/Resources/weasis-dcm2png/` (extraResources),
+# which directly contains `weasis-dcm2png.jar` + `native/`.
 _WEASIS_DIST_ENV = os.environ.get("STARHE_WEASIS_DIR")
 if _WEASIS_DIST_ENV:
     WEASIS_DIST_DIR = Path(_WEASIS_DIST_ENV)
@@ -45,23 +45,23 @@ WEASIS_NATIVE_DIR  = WEASIS_DIST_DIR / "native"
 
 
 def _java_bin() -> str | None:
-    """Résout l'exécutable `java` à utiliser.
+    """Resolves the `java` executable to use.
 
-    Priorité :
-    1. `STARHE_JAVA_BIN` (défini par Electron en mode packagé → JRE Temurin
-       embarquée dans `STARHE.app/Contents/Resources/jre/bin/java`).
-    2. JRE Temurin bundlé dans le dépôt (renderer/build-resources/jre-*/bin/java)
-       — disponible après `scripts/fetch_jre.sh`. Évite la dépendance au PATH
-       système (sur macOS, /usr/bin/java est un stub installeur, pas une JVM).
-    3. `java` du PATH système (mode dev avec `brew install openjdk@17`).
+    Priority:
+    1. `STARHE_JAVA_BIN` (set by Electron in packaged mode → Temurin JRE
+       embedded in `STARHE.app/Contents/Resources/jre/bin/java`).
+    2. Temurin JRE bundled in the repo (renderer/build-resources/jre-*/bin/java)
+       — available after `scripts/fetch_jre.sh`. Avoids the dependency on the
+       system PATH (on macOS, /usr/bin/java is an installer stub, not a JVM).
+    3. `java` from the system PATH (dev mode with `brew install openjdk@17`).
 
-    Retourne `None` si rien n'est trouvé ou si la JVM est un stub macOS.
+    Returns `None` if nothing is found or if the JVM is a macOS stub.
     """
     env_bin = os.environ.get("STARHE_JAVA_BIN")
     if env_bin and Path(env_bin).is_file():
         return env_bin
 
-    # JRE bundlé dans le dépôt (plusieurs variantes possibles selon la plateforme)
+    # JRE bundled in the repo (several variants possible depending on the platform)
     import platform
     arch = "arm64" if platform.machine() == "arm64" else "x64"
     os_name = "mac" if sys.platform == "darwin" else ("win" if sys.platform == "win32" else "linux")
@@ -80,10 +80,10 @@ def _java_bin() -> str | None:
 
 
 def weasis_available() -> bool:
-    """True si le JAR + une JVM fonctionnelle sont disponibles.
+    """True if the JAR + a working JVM are available.
 
-    Sur macOS, `/usr/bin/java` est parfois un stub installeur qui ouvre une
-    fenêtre au lieu de lancer la JVM → on vérifie avec `java -version`.
+    On macOS, `/usr/bin/java` is sometimes an installer stub that opens a
+    window instead of launching the JVM → check with `java -version`.
     """
     if not WEASIS_JAR.is_file():
         return False
@@ -104,17 +104,17 @@ def weasis_available() -> bool:
 
 def export_dicom_to_pngs_weasis(dicom_path: str | Path,
                                 out_dir:    str | Path) -> Tuple[float, int]:
-    """Lance le JAR weasis-dcm2png sur `dicom_path`, écrit les PNG dans `out_dir`.
+    """Runs the weasis-dcm2png JAR on `dicom_path`, writes the PNGs to `out_dir`.
 
-    Returns (fps, n_frames). Raise RuntimeError si la JVM/JAR échoue
-    (ex. transfer syntax JPEG 2000 non supportée par weasis).
+    Returns (fps, n_frames). Raises RuntimeError if the JVM/JAR fails
+    (e.g. JPEG 2000 transfer syntax not supported by weasis).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     java = _java_bin()
     if java is None:
-        raise RuntimeError("java introuvable (ni STARHE_JAVA_BIN ni PATH)")
+        raise RuntimeError("java not found (neither STARHE_JAVA_BIN nor PATH)")
 
     cmd = [
         java,
@@ -132,7 +132,7 @@ def export_dicom_to_pngs_weasis(dicom_path: str | Path,
             f"stderr={proc.stderr.strip()[:400]}"
         )
 
-    # Parse `fps=…` et `frames=…` sur stdout
+    # Parse `fps=…` and `frames=…` from stdout
     fps:      float = 0.0
     n_frames: int   = 0
     for line in proc.stdout.splitlines():
@@ -149,19 +149,19 @@ def export_dicom_to_pngs_weasis(dicom_path: str | Path,
                 pass
 
     if n_frames == 0:
-        # Fallback : compter les PNG produits
+        # Fallback: count the produced PNGs
         n_frames = len(list(out_dir.glob("*.png")))
     if n_frames == 0:
-        raise RuntimeError(f"weasis-dcm2png n'a produit aucun PNG dans {out_dir}")
+        raise RuntimeError(f"weasis-dcm2png produced no PNG in {out_dir}")
 
     return fps, n_frames
 
 
 def _pngs_to_numpy(png_dir: Path) -> np.ndarray:
-    """Lit tous les PNG triés et retourne (T, H, W, 3) uint8 RGB."""
+    """Reads all sorted PNGs and returns (T, H, W, 3) uint8 RGB."""
     paths = sorted(png_dir.glob("*.png"))
     if not paths:
-        raise RuntimeError(f"Aucun PNG trouvé dans {png_dir}")
+        raise RuntimeError(f"No PNG found in {png_dir}")
 
     frames = []
     for p in paths:
@@ -176,10 +176,10 @@ def frames_via_weasis(dicom_path: str | Path,
                       ) -> Tuple[np.ndarray, float]:
     """DICOM → PNG (Weasis LUT) → numpy RGB (T, H, W, 3).
 
-    Returns (frames_rgb_uint8, fps). Lève RuntimeError si la conversion
-    échoue ; l'appelant doit alors retomber sur le chemin pydicom.
+    Returns (frames_rgb_uint8, fps). Raises RuntimeError if the conversion
+    fails; the caller must then fall back to the pydicom path.
 
-    Le dossier de travail temporaire est nettoyé automatiquement.
+    The temporary work directory is cleaned up automatically.
     """
     cleanup = False
     if work_dir is None:

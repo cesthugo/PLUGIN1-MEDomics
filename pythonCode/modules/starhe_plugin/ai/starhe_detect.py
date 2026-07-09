@@ -1,18 +1,18 @@
 """
-ai/starhe_detect.py — Wrapper STARHE-DETECT (RTMDet ou DINO via subprocess)
+ai/starhe_detect.py — STARHE-DETECT wrapper (RTMDet or DINO via subprocess)
 ============================================================================
-Stratégie : subprocess persistant (mode serveur) pour RTMDet.
-Le runner est lancé UNE SEULE FOIS par instance STARHEDetectModel,
-le modèle reste en mémoire, les frames sont envoyées via stdin JSON.
+Strategy: persistent subprocess (server mode) for RTMDet.
+The runner is launched ONLY ONCE per STARHEDetectModel instance,
+the model stays in memory, frames are sent via stdin JSON.
 
-  - Aucun import de mmdet / mmcv côté plugin principal
-  - Le runner applique ses propres stubs et patches Python 3.13
-  - Communication : stdin/stdout JSON (une ligne par requête/réponse)
-  - Fallback one-shot pour DINO (pas de mode serveur implémenté)
+  - No mmdet / mmcv import on the main plugin side
+  - The runner applies its own stubs and Python 3.13 patches
+  - Communication: stdin/stdout JSON (one line per request/response)
+  - One-shot fallback for DINO (no server mode implemented)
 
-Backend sélectionné par DETECT_BACKEND dans config.py :
-  "rtmdet" (défaut) → ai/models/_rtmdet_runner.py  (mode serveur)
-  "dino"            → ai/models/_dino_runner.py     (mode one-shot)
+Backend selected by DETECT_BACKEND in config.py:
+  "rtmdet" (default) → ai/models/_rtmdet_runner.py  (server mode)
+  "dino"             → ai/models/_dino_runner.py     (one-shot mode)
 """
 
 import os
@@ -40,19 +40,19 @@ from starhe_plugin.config import (
 )
 from starhe_plugin.utils.go_print import go_print
 
-# Chemins vers les scripts runner (même dossier que ce fichier + models/)
+# Paths to the runner scripts (same directory as this file + models/)
 _RTMDET_RUNNER = Path(__file__).parent / "models" / "_rtmdet_runner.py"
 _DINO_RUNNER   = Path(__file__).parent / "models" / "_dino_runner.py"
 
 
-# ─── Fonction one-shot (legacy / DINO) ───────────────────────────────────────
+# ─── One-shot function (legacy / DINO) ───────────────────────────────────────
 
 def run_inference(image_path: str,
                   score_thr: float = DETECT_SCORE_THRESHOLD,
                   backend: str = DETECT_BACKEND) -> list:
     """
-    Lance l'inférence de détection sur une image via subprocess one-shot.
-    Utilisé pour DINO ou comme fallback si le mode serveur n'est pas disponible.
+    Runs detection inference on an image via a one-shot subprocess.
+    Used for DINO or as a fallback if server mode is not available.
     """
     image_path = Path(image_path).resolve()
     if not image_path.exists():
@@ -103,15 +103,15 @@ def run_inference(image_path: str,
             pass
 
 
-# ─── Classe de haut niveau ────────────────────────────────────────────────────
+# ─── High-level class ─────────────────────────────────────────────────────────
 
 class STARHEDetectModel:
     """
-    Interface pour STARHE-DETECT avec subprocess persistant (RTMDet).
+    Interface for STARHE-DETECT with a persistent subprocess (RTMDet).
 
-    Au premier appel à predict(), lance le runner en mode serveur et
-    maintient le processus ouvert pour toute la durée de vie de l'objet.
-    Le modèle RTMDet (428 MB) est chargé UNE SEULE FOIS.
+    On the first call to predict(), launches the runner in server mode and
+    keeps the process open for the whole lifetime of the object.
+    The RTMDet model (428 MB) is loaded ONLY ONCE.
 
     Usage
     -----
@@ -119,7 +119,7 @@ class STARHEDetectModel:
         for frame in frames:
             dets = model.predict(frame)
 
-    Ou sans context manager (close() manuel obligatoire) :
+    Or without a context manager (manual close() required):
         model = STARHEDetectModel()
         dets  = model.predict(frame)
         model.close()
@@ -129,17 +129,17 @@ class STARHEDetectModel:
         self._backend    = backend
         self._device     = device or INFERENCE_DEVICE  # "auto" | "cpu" | "cuda" | "mps"
         self._proc       = None          # subprocess.Popen
-        self._tmp_dir    = None          # dossier temporaire (fallback one-shot)
+        self._tmp_dir    = None          # temporary directory (one-shot fallback)
         self.batch_size  = 1             # updated by _start_server() if auto
         if backend == "rtmdet":
             self._start_server()
         else:
             go_print("info", f"STARHE-DETECT initialisé (backend={backend}, mode one-shot).")
 
-    # ── Cycle de vie du serveur ───────────────────────────────────────────────
+    # ── Server lifecycle ──────────────────────────────────────────────────────
 
     def _start_server(self):
-        """Lance le runner RTMDet en mode serveur et attend le signal READY."""
+        """Launches the RTMDet runner in server mode and waits for the READY signal."""
         cmd = [
             sys.executable,
             str(_RTMDET_RUNNER),
@@ -151,8 +151,8 @@ class STARHEDetectModel:
         if self._device != "auto":
             cmd += ["--device", self._device]
         if DETERMINISTIC_INFERENCE:
-            # Force CPU + float64 dans le subprocess runner pour reproductibilité
-            # cross-plateforme (élimine MPS/CUDA vs CPU et BLAS MKL↔Accelerate).
+            # Force CPU + float64 in the runner subprocess for cross-platform
+            # reproducibility (eliminates MPS/CUDA vs CPU and MKL↔Accelerate BLAS).
             cmd += ["--deterministic"]
         go_print("info", "STARHE-DETECT : démarrage du serveur RTMDet (chargement modèle)…")
         self._proc = subprocess.Popen(
@@ -163,7 +163,7 @@ class STARHEDetectModel:
             text=True,
             bufsize=1,          # line-buffered
         )
-        # Attendre le signal READY du runner (inclut les infos hardware)
+        # Wait for the runner's READY signal (includes hardware info)
         ready_line = self._proc.stdout.readline().strip()
         if "[rtmdet_server] READY" not in ready_line:
             stderr_out = self._proc.stderr.read(2000) if self._proc.stderr else ""
@@ -203,7 +203,7 @@ class STARHEDetectModel:
                  f", device={device_str}{mem_str}")
 
     def close(self):
-        """Ferme proprement le subprocess serveur."""
+        """Cleanly closes the server subprocess."""
         if self._proc is not None and self._proc.poll() is None:
             try:
                 self._proc.stdin.write("__EXIT__\n")
@@ -212,7 +212,7 @@ class STARHEDetectModel:
             except Exception:
                 self._proc.kill()
             self._proc = None
-        # Nettoyage du dossier temporaire
+        # Clean up the temporary directory
         if self._tmp_dir and os.path.isdir(self._tmp_dir):
             import shutil
             shutil.rmtree(self._tmp_dir, ignore_errors=True)
@@ -230,13 +230,13 @@ class STARHEDetectModel:
         except Exception:
             pass
 
-    # ── Inférence ─────────────────────────────────────────────────────────────
+    # ── Inference ─────────────────────────────────────────────────────────────
 
     def predict(self, frame: np.ndarray,
                 score_thr: float = DETECT_SCORE_THRESHOLD) -> list:
         """
         frame     : (H, W, 3) uint8 RGB
-        score_thr : seuil de confiance minimum
+        score_thr : minimum confidence threshold
         """
         return self.predict_batch([frame], score_thr=score_thr)[0]
 
@@ -280,7 +280,7 @@ class STARHEDetectModel:
             return [self._predict_oneshot(f, score_thr) for f in frames]
 
     def _predict_oneshot(self, frame: np.ndarray, score_thr: float) -> list:
-        """Fallback : subprocess one-shot (ancien comportement)."""
+        """Fallback: one-shot subprocess (legacy behavior)."""
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="starhe_frm_")
         try:
             os.close(tmp_fd)

@@ -1,4 +1,4 @@
-// components/PatientTabBar.tsx — Barre des patients (onglets patients)
+// components/PatientTabBar.tsx — Patient bar (patient tabs)
 import { PTAB_BG, PTAB_ACT_BG, BLUE } from '../../utilities/starhe/colors';
 import type { Patient } from '../../utilities/starhe/types';
 

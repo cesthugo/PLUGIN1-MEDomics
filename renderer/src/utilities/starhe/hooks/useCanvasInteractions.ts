@@ -1,7 +1,7 @@
-// hooks/useCanvasInteractions.ts — Pan / Zoom / Mesure / Scroll série
+// hooks/useCanvasInteractions.ts — Pan / Zoom / Measure / Series scroll
 //
-// Réplique les interactions du canvas Tkinter de prototype_tkinter.py.
-// Le hook retourne des gestionnaires d'événements à attacher au <canvas>.
+// Replicates the Tkinter canvas interactions of prototype_tkinter.py.
+// The hook returns event handlers to attach to the <canvas>.
 
 import { useCallback, useEffect, useRef } from 'react';
 import type { ViewMode, Measure } from '../types';
@@ -43,7 +43,7 @@ export interface InteractCallbacks {
   onContextMenu:      (x: number, y: number) => void;
 }
 
-// ── Calcul de la transformation image → écran ─────────────────────────────────
+// ── Computation of the image → screen transform ───────────────────────────────
 
 export function computeTransform(
   imgW:    number,
@@ -76,13 +76,13 @@ export function imgToScreen(
   return [ix * t.scale + t.offX, iy * t.scale + t.offY];
 }
 
-// ── Label de mesure : position écran ─────────────────────────────────────────────────
+// ── Measure label: screen position ───────────────────────────────────────────────────
 
 /**
- * Calcule la position écran du label d'une mesure.
- * Si `labelOffset` est défini (vecteur en coords image depuis le milieu du segment),
- * l'utilise directement. Sinon place le label à OFFSET px perpendiculairement
- * au segment (être côté « haut écran »). Retourne de côté si hors-canvas.
+ * Computes the screen position of a measure's label.
+ * If `labelOffset` is defined (a vector in image coords from the segment midpoint),
+ * uses it directly. Otherwise places the label OFFSET px perpendicular
+ * to the segment (on the "screen top" side). Flips to the other side if off-canvas.
  */
 export function getMeasureLabelScreenPos(
   p1: [number, number],
@@ -99,14 +99,14 @@ export function getMeasureLabelScreenPos(
     return [mx + labelOffset[0] * t.scale, my + labelOffset[1] * t.scale];
   }
 
-  // Direction perp. normalisée (identique en espace image et écran après normalisation)
+  // Normalized perpendicular direction (identical in image and screen space after normalization)
   const dxI = p2[0] - p1[0], dyI = p2[1] - p1[1];
   const len  = Math.hypot(dxI, dyI) || 1;
   let px = -dyI / len, py = dxI / len;
-  if (py > 0) { px = -px; py = -py; } // préfère le côté "haut"
+  if (py > 0) { px = -px; py = -py; } // prefers the "top" side
   const OFFSET = 30;
   let lx = mx + px * OFFSET, ly = my + py * OFFSET;
-  // Retourne de côté si hors-canvas
+  // Flips to the other side if off-canvas
   if (lx < 12 || lx > canvasW - 12 || ly < 12 || ly > canvasH - 12) {
     lx = mx - px * OFFSET;
     ly = my - py * OFFSET;
@@ -114,7 +114,7 @@ export function getMeasureLabelScreenPos(
   return [lx, ly];
 }
 
-/** Convertit la position par défaut du label en offset image (pour initier un drag). */
+/** Converts the label's default position into an image offset (to start a drag). */
 function getDefaultLabelOffset(
   p1: [number, number],
   p2: [number, number],
@@ -128,7 +128,7 @@ function getDefaultLabelOffset(
   return [(lx - mx) / t.scale, (ly - my) / t.scale];
 }
 
-// ── Distance d'un point à un segment ──────────────────────────────────────────
+// ── Distance from a point to a segment ────────────────────────────────────────
 
 function distToSegment(
   px: number, py: number,
@@ -141,7 +141,7 @@ function distToSegment(
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
-// ── Hit-test sur les mesures ──────────────────────────────────────────────────
+// ── Hit-test on the measures ──────────────────────────────────────────────────
 
 function measureHit(
   x: number, y: number,
@@ -159,7 +159,7 @@ function measureHit(
   }
   return null;
 }
-/** Hit-test sur le label d'une mesure (zone élargie pour facilité de clic). */
+/** Hit-test on a measure's label (enlarged area for easier clicking). */
 function labelHit(
   x: number, y: number,
   measures: Measure[],
@@ -181,7 +181,7 @@ export function useCanvasInteractions(
   getState: () => InteractState,
   cbs: InteractCallbacks,
 ) {
-  // ── État du drag (lbm press)
+  // ── Drag state (lbm press)
   const dragRef = useRef<{
     startX:   number;
     startY:   number;
@@ -191,10 +191,10 @@ export function useCanvasInteractions(
     mode:     ViewMode;
   } | null>(null);
 
-  // État de la mesure en cours de dessin
+  // State of the measure being drawn
   const drawingRef = useRef<[number, number] | null>(null); // premier point (coords image)
 
-  // Édition d'une mesure existante
+  // Editing an existing measure
   const editRef = useRef<{
     segIdx:          number;
     part:            'p1' | 'p2' | 'seg' | 'label';
@@ -203,7 +203,7 @@ export function useCanvasInteractions(
     origLabelOffset?: [number, number];
   } | null>(null);
 
-  // Glissement droit (contraste/luminosité)
+  // Right drag (contrast/brightness)
   const rclickRef = useRef<{
     startX:    number;
     startY:    number;
@@ -212,7 +212,7 @@ export function useCanvasInteractions(
     t0:        number;
   } | null>(null);
 
-  // Prévisualisation du segment en cours (pour le parent)
+  // Preview of the in-progress segment (for the parent)
   const previewRef = useRef<[[number, number], [number, number]] | null>(null);
   const _previewSetter = useRef<((p: typeof previewRef.current) => void) | null>(null);
 
@@ -222,10 +222,10 @@ export function useCanvasInteractions(
     }, [],
   );
 
-  // ── Nettoyage global des drags ────────────────────────────────────────────────
-  // Lorsque la souris est relâchée EN DEHORS du canvas (ex. en glissant le
-  // séparateur du mode multi-panneaux), le mouseup natif du canvas ne se déclenche
-  // pas et dragRef resterait non-null. Le listener global sur window corrige cela.
+  // ── Global drag cleanup ───────────────────────────────────────────────────────
+  // When the mouse is released OUTSIDE the canvas (e.g. while dragging the
+  // multi-panel separator), the canvas's native mouseup does not fire
+  // and dragRef would stay non-null. The global window listener fixes this.
   useEffect(() => {
     const clearDrags = () => {
       dragRef.current   = null;
@@ -243,7 +243,7 @@ export function useCanvasInteractions(
     return computeTransform(s.imgW, s.imgH, s.canvasW, s.canvasH, s.zoom, s.panX, s.panY);
   }, [getState]);
 
-  // ── Molette : zoom centré sur le curseur ──────────────────────────────────────
+  // ── Wheel: cursor-centered zoom ───────────────────────────────────────────────
 
   const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
@@ -286,7 +286,7 @@ export function useCanvasInteractions(
     if (s.viewMode === 'measure') {
       const measures = s.measuresByFrame[s.frameIdx] ?? [];
 
-      // Vérifie d'abord un hit sur le label (priorité plus haute que le segment)
+      // Check a hit on the label first (higher priority than the segment)
       const li = labelHit(mx, my, measures, t, s.canvasW, s.canvasH);
       if (li !== null) {
         cbs.onMeasureSelect(s.frameIdx, li);
@@ -361,7 +361,7 @@ export function useCanvasInteractions(
         const diy    = curImg[1] - ed.startImg[1];
 
         if (ed.part === 'label') {
-          // Déplacement du label : on met à jour l'offset depuis le milieu du segment
+          // Label move: update the offset from the segment midpoint
           cbs.onMeasureLabelMove(s.frameIdx, ed.segIdx, [
             ed.origLabelOffset![0] + dix,
             ed.origLabelOffset![1] + diy,
@@ -381,7 +381,7 @@ export function useCanvasInteractions(
       }
     }
 
-    // Clic droit maintenu (contraste/luminosité)
+    // Right-click held (contrast/brightness)
     if (rclickRef.current) {
       const r  = rclickRef.current;
       const dx = mx - r.startX, dy = my - r.startY;
@@ -452,22 +452,22 @@ export function useCanvasInteractions(
     }
   }, [cbs]);
 
-  // ── Suppression mesure sélectionnée (Delete / Backspace) ─────────────────────
+  // ── Delete the selected measure (Delete / Backspace) ─────────────────────────
 
   const onKeyDown = useCallback((e: KeyboardEvent) => {
     const s = getState();
     if (s.viewMode === 'measure' && s.selectedMeasure !== null &&
         (e.key === 'Delete' || e.key === 'Backspace')) {
-      // Signale au parent une suppression via onMeasureMove avec pts spéciales
+      // Signals a deletion to the parent via onMeasureMove with special pts
       // (convention : pts nulles = suppression)
       cbs.onMeasureMove(s.frameIdx, s.selectedMeasure, [[-1, -1], [-1, -1]]);
       cbs.onMeasureSelect(s.frameIdx, null);
     }
   }, [getState, cbs]);
 
-  // ── Quitter le canvas : annule tout drag en cours ───────────────────────────
-  // Empêche l'état de drag de « fuir » vers des interactions extérieures
-  // (ex. glisser le séparateur du mode multi-panneaux).
+  // ── Leaving the canvas: cancels any drag in progress ─────────────────────────
+  // Prevents the drag state from "leaking" into outside interactions
+  // (e.g. dragging the multi-panel separator).
   const onMouseLeave = useCallback(() => {
     dragRef.current   = null;
     rclickRef.current = null;

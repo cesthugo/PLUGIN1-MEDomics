@@ -1,21 +1,21 @@
-// components/DetectionGallery.tsx — Panneau droit : galerie des frames détectées
+// components/DetectionGallery.tsx — Right panel: gallery of detected frames
 //
-// Affiche la liste scrollable des frames où STARHE-DETECT a trouvé une lésion,
-// avec l'image miniature et les bounding boxes en superposition SVG.
-// Cliquer sur une frame navigue directement vers elle.
+// Displays the scrollable list of frames where STARHE-DETECT found a lesion,
+// with the thumbnail image and the bounding boxes as an SVG overlay.
+// Clicking a frame navigates directly to it.
 
 import React from 'react';
 import type { Detection } from '../../utilities/starhe/types';
 import { SIDEBAR_BG, BLUE, SBAR_MUTED } from '../../utilities/starhe/colors';
 
-// ── Miniature d'une frame avec bbox SVG overlay ───────────────────────────────
+// ── Frame thumbnail with SVG bbox overlay ─────────────────────────────────────
 
 interface ThumbProps {
   b64:      string;
   dets:     Detection[];
   frameIdx: number;
-  imgW:     number; // cols DICOM (largeur image)
-  imgH:     number; // rows DICOM (hauteur image)
+  imgW:     number; // DICOM cols (image width)
+  imgH:     number; // DICOM rows (image height)
   onClick:  () => void;
 }
 
@@ -105,11 +105,11 @@ function FrameThumb({ b64, dets, frameIdx, imgW, imgH, onClick }: ThumbProps) {
   );
 }
 
-// ── Composant principal ───────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export interface DetectionGalleryProps {
   framesB64:   string[];
-  detections:  Detection[][];   // tableau[frame] → liste de détections
+  detections:  Detection[][];   // array[frame] → list of detections
   imgW:        number;          // cols DICOM
   imgH:        number;          // rows DICOM
   onGotoFrame: (idx: number) => void;
@@ -126,7 +126,7 @@ export function DetectionGallery({
   sidebarBg,
   textColor,
 }: DetectionGalleryProps) {
-  // Filtre : seulement les frames avec au moins une détection
+  // Filter: only the frames with at least one detection
   const detFrames = detections
     .map((dets, i) => ({ i, dets }))
     .filter(x => x.dets.length > 0);

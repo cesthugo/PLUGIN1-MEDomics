@@ -1,29 +1,29 @@
 /**
- * starhe.jsx — Page MEDomics pour le plugin STARHE
+ * starhe.jsx — MEDomics page for the STARHE plugin
  *
- * Charge le frontend STARHE (React/Vite) dans un iframe et lui injecte
- * la base URL du serveur Go MEDomics via postMessage (protocol STARHE_INIT).
- * Le serveur MEDomics proxifie ensuite les routes /starhe/* vers notre
- * serveur Go STARHE standalone (voir starhe_blueprint.go).
+ * Loads the STARHE frontend (React/Vite) into an iframe and injects into it
+ * the base URL of the MEDomics Go server via postMessage (STARHE_INIT protocol).
+ * The MEDomics server then proxies the /starhe/* routes to our
+ * standalone STARHE Go server (see starhe_blueprint.go).
  *
- * ── Installation dans MEDomics ──────────────────────────────────────────────
+ * ── Installation into MEDomics ──────────────────────────────────────────────
  *
- * 1. Copier ce fichier dans :
+ * 1. Copy this file to:
  *       MEDomics/renderer/components/mainPages/starhe.jsx
  *
- * 2. Copier le build React du plugin dans :
- *       MEDomics/renderer/public/starhe-ui/   (copier le contenu de renderer/dist/)
+ * 2. Copy the plugin's React build to:
+ *       MEDomics/renderer/public/starhe-ui/   (copy the contents of renderer/dist/)
  *
- * 3. Dans renderer/components/layout/layoutManager.jsx :
+ * 3. In renderer/components/layout/layoutManager.jsx:
  *       import StarhePage from '../mainPages/starhe'
- *       // Ajouter dans le switch renderContentComponent :
+ *       // Add to the renderContentComponent switch:
  *       case "starhe": return <StarhePage pageId={pageId} />
  *
- * 4. Dans renderer/components/layout/iconSidebar.jsx :
- *       // Ajouter un Nav.Link avec dispatchLayout({ type: "openStarhe" })
+ * 4. In renderer/components/layout/iconSidebar.jsx:
+ *       // Add a Nav.Link with dispatchLayout({ type: "openStarhe" })
  *
- * 5. Dans renderer/components/layout/layoutContext.jsx :
- *       // Ajouter le case "openStarhe" dans le reducer dispatchLayout
+ * 5. In renderer/components/layout/layoutContext.jsx:
+ *       // Add the "openStarhe" case in the dispatchLayout reducer
  */
 
 import { useContext, useEffect, useRef, useState } from 'react'
@@ -34,8 +34,8 @@ const StarhePage = () => {
   const iframeRef = useRef(null)
   const [loading, setLoading] = useState(true)
 
-  // Quand l'iframe signale qu'elle est prête (STARHE_READY),
-  // injecter la base URL du serveur Go MEDomics (qui proxifie vers STARHE).
+  // When the iframe signals that it is ready (STARHE_READY),
+  // inject the base URL of the MEDomics Go server (which proxies to STARHE).
   useEffect(() => {
     const handleMessage = (e) => {
       if (e.data?.type === 'STARHE_READY' && port && iframeRef.current) {
@@ -49,8 +49,8 @@ const StarhePage = () => {
     return () => window.removeEventListener('message', handleMessage)
   }, [port])
 
-  // Dev : pointe vers le serveur Vite du plugin (cd renderer && npm run dev)
-  // Prod : pointe vers le build copié dans renderer/public/starhe-ui/
+  // Dev: points to the plugin's Vite server (cd renderer && npm run dev)
+  // Prod: points to the build copied into renderer/public/starhe-ui/
   const starheUrl =
     process.env.NODE_ENV === 'development'
       ? 'http://localhost:5173'

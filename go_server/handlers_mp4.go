@@ -1,9 +1,9 @@
-// handlers_mp4.go — Endpoints STARHE pour le chargement et l'analyse de fichiers MP4
+// handlers_mp4.go — STARHE endpoints for loading and analyzing MP4 files
 //
-// POST /starhe/mp4/load    → charge un MP4 via Python et retourne les frames en JPEG base64
-//   Accept uniquement multipart/form-data (upload navigateur)
+// POST /starhe/mp4/load    → loads an MP4 via Python and returns the frames as base64 JPEG
+//   Only accepts multipart/form-data (browser upload)
 //
-// POST /starhe/mp4/analyze → analyse un MP4 (pipeline sans DICOM) via Python, stream SSE
+// POST /starhe/mp4/analyze → analyzes an MP4 (DICOM-less pipeline) via Python, SSE stream
 package main
 
 import (
@@ -26,13 +26,13 @@ import (
 
 // ── POST /starhe/mp4/load ──────────────────────────────────────────────────
 //
-// Accepte deux modes :
-//   1. multipart/form-data : champ "file" (.mp4), "quality" (int), "max_dim" (int)
+// Accepts two modes:
+//   1. multipart/form-data : "file" field (.mp4), "quality" (int), "max_dim" (int)
 //   2. application/json   : {"mp4_path": "/tmp/starhe_mp4_<hash>.mp4", "quality": 70, "max_dim": 640}
-//      (pour recharger un fichier temporaire déjà présent sur le serveur)
+//      (to reload a temporary file already present on the server)
 //
-// Réponse : JSON retourné par loader_mp4_cli.py (même format que loader_cli.py)
-// avec "server_path" injecté pour que le client sache quel chemin envoyer à /starhe/mp4/analyze.
+// Response: JSON returned by loader_mp4_cli.py (same format as loader_cli.py)
+// with "server_path" injected so the client knows which path to send to /starhe/mp4/analyze.
 func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 	quality := 70
 	maxDim  := 640
@@ -41,7 +41,7 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 
 	ct := r.Header.Get("Content-Type")
 	if strings.Contains(ct, "application/json") {
-		// ── Mode JSON : chemin absolu d'un fichier temporaire déjà présent ──
+		// ── JSON mode: absolute path of a temporary file already present ────
 		var body struct {
 			Mp4Path string `json:"mp4_path"`
 			Quality int    `json:"quality"`
@@ -59,7 +59,7 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		// Sécurité : on n'accepte que les fichiers que nous avons créés nous-mêmes
+		// Security: only accept files that we created ourselves
 		cleanPath := filepath.Clean(body.Mp4Path)
 		base := filepath.Base(cleanPath)
 		tmpDir := filepath.Clean(os.TempDir())
@@ -80,8 +80,8 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 		if body.Quality >= 1 && body.Quality <= 95 { quality = body.Quality }
 		if body.MaxDim  >= 64 && body.MaxDim  <= 4096 { maxDim = body.MaxDim   }
 	} else {
-		// ── Mode multipart : upload depuis le navigateur ──────────────────
-		// Limite à 500 MB (vidéos mp4 peuvent être volumineuses)
+		// ── Multipart mode: upload from the browser ─────────────────────────
+		// 500 MB limit (mp4 videos can be large)
 		if err := r.ParseMultipartForm(500 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": "impossible de parser le formulaire : " + err.Error(),
@@ -98,7 +98,7 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer f.Close()
 
-		// Paramètres optionnels
+		// Optional parameters
 		if v := r.FormValue("quality"); v != "" {
 			if n, errV := strconv.Atoi(v); errV == nil { quality = n }
 		}
@@ -108,7 +108,7 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 		if quality < 1 || quality > 95  { quality = 70  }
 		if maxDim  < 64 || maxDim > 4096 { maxDim = 640 }
 
-		// Lit le contenu pour calculer le hash SHA-256 (même contenu → même chemin)
+		// Read the content to compute the SHA-256 hash (same content → same path)
 		fileBytes, err := io.ReadAll(f)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -132,7 +132,7 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	} // end multipart else
 
-	// Timeout généreux : 120 s pour les vidéos longues
+	// Generous timeout: 120 s for long videos
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
@@ -170,7 +170,7 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Injecte server_path et le nom de fichier original dans la réponse
+	// Inject server_path and the original file name into the response
 	var obj map[string]interface{}
 	if err := json.Unmarshal(out, &obj); err == nil {
 		obj["server_path"] = tmpPath
@@ -187,7 +187,7 @@ func mp4LoadHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(out) //nolint:errcheck
 }
 
-// mp4AnalyzeRequest représente le corps de la requête POST /starhe/mp4/analyze.
+// mp4AnalyzeRequest represents the body of the POST /starhe/mp4/analyze request.
 type mp4AnalyzeRequest struct {
 	Mp4Path            string `json:"mp4_path"`
 	RunRisk            bool   `json:"run_risk"`
@@ -197,8 +197,8 @@ type mp4AnalyzeRequest struct {
 	BackscanHeight     int    `json:"backscan_height"`
 }
 
-// computeAnalysisModeMp4 calcule la clé de cache analysis_mode pour un fichier MP4.
-// Inclut source=mp4 pour distinguer des analyses DICOM sur le même file_path.
+// computeAnalysisModeMp4 computes the analysis_mode cache key for an MP4 file.
+// Includes source=mp4 to distinguish from DICOM analyses on the same file_path.
 func computeAnalysisModeMp4(req mp4AnalyzeRequest) string {
 	r := "0"
 	if req.RunRisk {
@@ -217,9 +217,9 @@ func computeAnalysisModeMp4(req mp4AnalyzeRequest) string {
 
 // ── POST /starhe/mp4/analyze ───────────────────────────────────────────────
 //
-// Lance pipeline_mp4.py en subprocess et streame la sortie au format SSE.
+// Launches pipeline_mp4.py as a subprocess and streams the output as SSE.
 //
-// Corps de requête JSON :
+// JSON request body:
 //
 //	{
 //	  "mp4_path":            "/tmp/starhe_mp4_<hash>.mp4",
@@ -257,7 +257,7 @@ func mp4AnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		req.BackscanHeight = 512
 	}
 
-	// En-têtes SSE
+	// SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -268,7 +268,7 @@ func mp4AnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Vérification du cache MongoDB
+	// Check the MongoDB cache
 	analysisMode := computeAnalysisModeMp4(req)
 	if cached, err := findCachedResult(r.Context(), req.Mp4Path, analysisMode); err != nil {
 		log.Printf("avertissement cache MongoDB (mp4): %v", err)
@@ -278,7 +278,7 @@ func mp4AnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Construction des arguments subprocess
+	// Build the subprocess arguments
 	args := []string{
 		req.Mp4Path,
 		"--backscan_width",  strconv.Itoa(req.BackscanWidth),
@@ -324,9 +324,5 @@ func mp4AnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := cmd.Wait(); err != nil && r.Context().Err() == nil {
-		log.Printf("pipeline_mp4 Python terminé avec erreur: %v", err)
-	}
-
-	writeSSE(w, flusher, "[DONE]")
+	finishSSE(w, flusher, cmd.Wait(), r.Context().Err(), "pipeline_mp4 Python")
 }

@@ -1,29 +1,29 @@
-// hooks/useDisplaySettings.ts — Paramètres d'affichage persistants (localStorage)
+// hooks/useDisplaySettings.ts — Persistent display settings (localStorage)
 
 import { useState, useEffect, useCallback } from 'react';
 
 const STORAGE_KEY = 'starhe_display_settings';
 
-// ── Interface des paramètres ──────────────────────────────────────────────────
+// ── Settings interface ────────────────────────────────────────────────────────
 
 export interface DisplaySettings {
-  /** Facteur d'agrandissement du texte (0.8 – 1.6). Appliqué via injection CSS proportionnelle. */
+  /** Text magnification factor (0.8 – 1.6). Applied via proportional CSS injection. */
   fontScale:  number;
-  /** Police CSS (valeur CSS complète, ex. "'Segoe UI', system-ui, sans-serif"). */
+  /** CSS font (full CSS value, e.g. "'Segoe UI', system-ui, sans-serif"). */
   fontFamily: string;
-  /** Couleur principale du texte (hex). */
+  /** Main text color (hex). */
   textColor:  string;
-  /** Couleur de fond du panneau latéral (hex). */
+  /** Side panel background color (hex). */
   sidebarBg:  string;
-  /** Couleur de fond de la zone principale (hex). */
+  /** Main area background color (hex). */
   mainBg:     string;
-  /** Modèles IA à exécuter lors du clic sur "Lancer l'analyse". */
+  /** AI models to run when clicking "Lancer l'analyse". */
   analysisMode: 'both' | 'risk_only' | 'detect_only';
-  /** Afficher ou masquer la console de log en bas de l'interface. */
+  /** Show or hide the log console at the bottom of the interface. */
   showConsole: boolean;
 }
 
-// ── Valeurs par défaut (identiques au thème actuel) ───────────────────────────
+// ── Default values (identical to the current theme) ───────────────────────────
 
 export const DISPLAY_DEFAULTS: DisplaySettings = {
   fontScale:    1.0,
@@ -42,7 +42,7 @@ function loadSettings(): DisplaySettings {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DISPLAY_DEFAULTS };
     const parsed = JSON.parse(raw) as Partial<DisplaySettings>;
-    // Merge avec les defaults pour résister aux nouvelles clés ajoutées en v future
+    // Merge with the defaults to tolerate new keys added in a future version
     return { ...DISPLAY_DEFAULTS, ...parsed };
   } catch {
     return { ...DISPLAY_DEFAULTS };
@@ -53,7 +53,7 @@ function saveSettings(s: DisplaySettings): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   } catch {
-    // Silencieux en cas d'erreur de stockage (mode privé, quota, etc.)
+    // Silent on a storage error (private mode, quota, etc.)
   }
 }
 
@@ -62,7 +62,7 @@ function saveSettings(s: DisplaySettings): void {
 export function useDisplaySettings() {
   const [settings, setSettings] = useState<DisplaySettings>(loadSettings);
 
-  // Persistance automatique à chaque changement
+  // Automatic persistence on every change
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);

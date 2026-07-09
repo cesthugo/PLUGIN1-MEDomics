@@ -1,20 +1,20 @@
-// StarhePlugin/index.tsx — Composant racine du plugin STARHE pour MEDomics
+// StarhePlugin/index.tsx — Root component of the STARHE plugin for MEDomics
 //
-// Réplique intégrale de prototype_tkinter.py (STARHEApp) en React :
-//   - Barre de titre sombre MEDomics
-//   - Sidebar gauche (270 px) : contrôles + résultats
-//   - Zone centrale claire : visionneuse DICOM + console log
-//   - Barre patients (haut de la carte) + barre onglets fichiers (bas)
-//   - Multi-onglets / multi-patients
-//   - Playback avec multiplicateur de vitesse
-//   - Pan / Zoom / Mesure / Series Scroll
-//   - Contraste / Luminosité (dialogues flottants + clic droit)
-//   - Menu contextuel clic droit
-//   - Analyse IA via SSE (pipeline STARHE)
-//   - Cache MongoDB (réinitialisation)
-//   - Thème clair / sombre
-//   - Fenêtre "Analyse en direct"
-//   - Raccourcis clavier (Espace, ←/→, P, M, S, R, C, L, ±, B, Ctrl+0/+/-)
+// Full replica of prototype_tkinter.py (STARHEApp) in React:
+//   - Dark MEDomics title bar
+//   - Left sidebar (270 px): controls + results
+//   - Light central area: DICOM viewer + log console
+//   - Patient bar (top of the card) + file tab bar (bottom)
+//   - Multi-tab / multi-patient
+//   - Playback with a speed multiplier
+//   - Pan / Zoom / Measure / Series Scroll
+//   - Contrast / Brightness (floating dialogs + right-click)
+//   - Right-click context menu
+//   - AI analysis via SSE (STARHE pipeline)
+//   - MongoDB cache (reset)
+//   - Light / dark theme
+//   - "Live analysis" window
+//   - Keyboard shortcuts (Space, ←/→, P, M, S, R, C, L, ±, B, Ctrl+0/+/-)
 
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -48,7 +48,7 @@ import type { LayoutMode }     from '../components/starhe/LayoutPickerModal';
 import { MultiPanelView }      from '../components/starhe/MultiPanelView';
 import { FileThumbnailStrip }  from '../components/starhe/FileThumbnailStrip';
 
-// ── ID auto-incrémenté ────────────────────────────────────────────────────────
+// ── Auto-incremented ID ───────────────────────────────────────────────────────
 let _nextTabId = 1;
 const nextTabId = () => _nextTabId++;
 let _nextLogId = 1;
@@ -79,36 +79,36 @@ function makeDefaultTab(): TabState {
   };
 }
 
-// ── Composant principal ───────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export interface StarhePluginProps {
-  /** Couleur de fond de la zone principale (surcharge thème) */
+  /** Main area background color (theme override) */
   mainBg?: string;
-  /** Hauteur totale (défaut : 100vh) */
+  /** Total height (default: 100vh) */
   height?: string | number;
-  /** Largeur totale (défaut : 100%) */
+  /** Total width (default: 100%) */
   width?: string | number;
 }
 
 export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: StarhePluginProps) {
-  // ── Onglets et patients ────────────────────────────────────────────────────
+  // ── Tabs and patients ──────────────────────────────────────────────────────
   const [tabs,             setTabs]            = useState<TabState[]>([]);
   const [activeTabId,      setActiveTabId]     = useState<number>(-1);
   const [patients,         setPatients]        = useState<Patient[]>([]);
   const [activePatientName, setActivePatientName] = useState<string>('');
 
-  // Ref pour lire l'état courant dans closeTab (lecture synchrone hors updater)
+  // Ref to read the current state in closeTab (synchronous read outside the updater)
   const tabsRef     = useRef<TabState[]>(tabs);
   tabsRef.current   = tabs;
   const patientsRef = useRef<Patient[]>(patients);
   patientsRef.current = patients;
 
-  // Dérivés : calculés à chaque render à partir des IDs stables
+  // Derived: computed on each render from the stable IDs
   const activeTabIdx = tabs.findIndex(t => t.id === activeTabId);
   const activeTab    = activeTabIdx >= 0 ? tabs[activeTabIdx] : null;
   const activePatientIdx = patients.findIndex(p => p.name === activePatientName);
 
-  // ── Lecture vidéo ──────────────────────────────────────────────────────────
+  // ── Video playback ─────────────────────────────────────────────────────────
   const [isPlaying, setIsPlaying] = useState(false);
 
   const handleFrameChange = useCallback((idx: number) => {
@@ -138,10 +138,10 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const { status: analysisStatus, progress, startAnalysis, cancelAnalysis, lastResult }
     = usePipelineSSE(addLog);
 
-  // Onglet pour lequel l'analyse a été lancée (ID stable, indépendant de l'onglet actif)
+  // Tab for which the analysis was launched (stable ID, independent of the active tab)
   const [analysisTargetTabId, setAnalysisTargetTabId] = useState<number>(-1);
 
-  // Quand un résultat arrive, l'injecter dans l'onglet *cible* (pas nécessairement l'actif)
+  // When a result arrives, inject it into the *target* tab (not necessarily the active one)
   useEffect(() => {
     if (!lastResult || analysisTargetTabId < 0) return;
     setTabs(prev => prev.map(t => {
@@ -154,21 +154,21 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }));
   }, [lastResult, analysisTargetTabId]);
 
-  // ── Réglages d'affichage (persistés dans localStorage) ────────────────────
+  // ── Display settings (persisted in localStorage) ──────────────────────────
   const { settings: displaySettings, updateSettings, resetSettings } = useDisplaySettings();
   const [showSettings, setShowSettings] = useState(false);
-  // ── Injection CSS dynamique (taille + police + couleur du texte) ─────────────────
-  // Principe : sélecteurs CSS [style*="font-size: Npx"] + !important pour scaler
-  // proportionnellement toutes les tailles inline sans toucher au layout.
+  // ── Dynamic CSS injection (size + font + text color) ─────────────────────────────
+  // Principle: CSS selectors [style*="font-size: Npx"] + !important to scale
+  // all inline sizes proportionally without touching the layout.
   const styleContent = useMemo(() => {
     const s  = displaySettings.fontScale;
     const ff = displaySettings.fontFamily;
-    // Tailles px utilisées dans l'interface — scaler chacune proportionnellement
+    // px sizes used in the interface — scale each proportionally
     const sizes = [9, 10, 11, 12, 13, 14, 16, 18, 20, 22];
     const fontSizeRules = sizes
       .map(n => `.starhe-root [style*="font-size: ${n}px"] { font-size: ${(n * s).toFixed(1)}px !important; }`)
       .join('\n');
-    // textColor : injecté seulement si différent du défaut (sinon on écraserait les couleurs sémantiques)
+    // textColor: injected only if different from the default (otherwise we would override the semantic colors)
     const colorRule = displaySettings.textColor !== DISPLAY_DEFAULTS.textColor
       ? `.starhe-root * { color: ${displaySettings.textColor} !important; }`
       : '';
@@ -188,28 +188,28 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }
     el.textContent = styleContent;
   }, [styleContent]);
-  // ── Thème ──────────────────────────────────────────────────────────────────
+  // ── Theme ──────────────────────────────────────────────────────────────────
   const [darkMode, setDarkMode] = useState(false);
   const effectiveMainBg = mainBg ?? (darkMode ? '#1a1a2e' : displaySettings.mainBg);
   const cardBg = darkMode ? '#16213e' : CARD_BG;
   const cardTitleFg = darkMode ? '#89b4fa' : BLUE_TEXT;
 
-  // ── Dialogues contraste / luminosité ──────────────────────────────────────
+  // ── Contrast / brightness dialogs ──────────────────────────────────────────
   const [showContrast,   setShowContrast]   = useState(false);
   const [showBrightness, setShowBrightness] = useState(false);
 
   // ── Menu contextuel ────────────────────────────────────────────────────────
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
-  // ── Fenêtre live ───────────────────────────────────────────────────────────
+  // ── Live window ────────────────────────────────────────────────────────────
   const [showLive,  setShowLive]  = useState(false);
   const [showBatch, setShowBatch] = useState(false);
 
-  // ── Repli des sidebars (gauche : contrôles DICOM · droite : galerie détections) ─
+  // ── Sidebar collapse (left: DICOM controls · right: detection gallery) ─
   const [leftSidebarOpen,  setLeftSidebarOpen]  = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
 
-  // ── Drag & drop d'un fichier sur la vue simple → passage en split côte à côte ─
+  // ── Drag & drop of a file onto the single view → switch to side-by-side split ─
   const [singleViewDragOver, setSingleViewDragOver] = useState(false);
 
   // ── Vue multi-panneaux ─────────────────────────────────────────────────────
@@ -219,13 +219,13 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // ── Chargement DICOM ───────────────────────────────────────────────────────
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
 
-  // Détection Electron : via l'API preload (méthode fiable avec contextIsolation)
-  // ou via le userAgent (fallback si preload absent)
+  // Electron detection: via the preload API (reliable method with contextIsolation)
+  // or via the userAgent (fallback if the preload is absent)
   const isElectron = typeof window !== 'undefined' &&
     (window.electronAPI !== undefined ||
      navigator.userAgent.includes('Electron'));
 
-  // ── Injection d'un onglet après chargement réussi ─────────────────────────
+  // ── Inject a tab after a successful load ──────────────────────────────────
   const addTab = useCallback((
     displayName: string,
     dicomPath:   string,
@@ -239,10 +239,10 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       dicomPath,
       data,
     };
-    // Functional updaters : chaque appel reçoit le résultat du précédent (React batchs)
-    // → sûr même si plusieurs fichiers chargent simultanément avant le prochain render
+    // Functional updaters: each call receives the result of the previous one (React batches)
+    // → safe even if several files load simultaneously before the next render
     setTabs(prev => [...prev, newTab]);
-    setActiveTabId(newTab.id);  // ID stable — pas d'index périmé
+    setActiveTabId(newTab.id);  // stable ID — no stale index
     setPatients(prev => {
       const existIdx = prev.findIndex(p => p.name === data.patientName);
       if (existIdx >= 0) {
@@ -256,7 +256,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     addLog(`DICOM loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
-  // ── Injection d'un onglet MP4 après chargement réussi ────────────────────
+  // ── Inject an MP4 tab after a successful load ─────────────────────────────
   const addMp4Tab = useCallback((
     displayName: string,
     serverPath:  string,
@@ -286,7 +286,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     addLog(`MP4 loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
-  // ── Ouverture d'un résultat batch en onglet (helper partagé) ─────────────
+  // ── Open a batch result in a tab (shared helper) ─────────────────────────
   const openBatchResultAsTab = useCallback(async (result: BatchResultToOpen): Promise<number> => {
     const name = result.name;
     addLog(`Loading: ${name}`, 'info');
@@ -321,7 +321,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     return newTab.id;
   }, [addLog]);
 
-  // Chargement par chemin absolu (Electron ou saisie manuelle)
+  // Loading by absolute path (Electron or manual input)
   const doLoadPath = useCallback(async (path: string, displayName: string) => {
     if (loadingPaths.has(path)) return;
     setLoadingPaths(prev => new Set([...prev, path]));
@@ -340,7 +340,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }
   }, [addLog, addTab, loadingPaths]);
 
-  // Chargement par upload d'octets (navigateur standard sans Electron)
+  // Loading by byte upload (standard browser without Electron)
   const doLoadFile = useCallback(async (file: File) => {
     if (loadingPaths.has(file.name)) return;
     setLoadingPaths(prev => new Set([...prev, file.name]));
@@ -359,17 +359,17 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }
   }, [addLog, addTab, loadingPaths]);
 
-  // Chargement DICOM — fichiers individuels ET dossier entier (un seul bouton)
+  // DICOM loading — individual files AND a whole folder (a single button)
   const onLoadDicom = useCallback(async () => {
     if (isElectron && window.electronAPI?.openDicomFiles) {
-      // Mode Electron : dialogue natif système → chemins absolus réels
+      // Electron mode: native system dialog → real absolute paths
       const paths = await window.electronAPI.openDicomFiles();
       for (const p of paths) {
         const name = p.split(/[\\/]/).pop() ?? p;
         await doLoadPath(p, name);
       }
     } else {
-      // Mode navigateur : input unique qui accepte fichiers ET contenu de dossier
+      // Browser mode: a single input that accepts files AND folder contents
       const isDicom = (f: File) => {
         const n = f.name.toLowerCase();
         return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
@@ -382,20 +382,20 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
       (folderInput as any).webkitdirectory = true;
       (folderInput as any).multiple = true;
 
-      // Lance d'abord le sélecteur de fichiers, puis (annulation) le sélecteur de dossier
+      // Launch the file picker first, then (on cancel) the folder picker
       const loadFiles = async (input: HTMLInputElement) => {
         const files = Array.from(input.files ?? []).filter(isDicom);
         for (const file of files) await doLoadFile(file);
       };
 
-      // On écoute le focus de la fenêtre pour détecter l'annulation du premier picker
+      // Listen to the window focus to detect the first picker's cancellation
       let resolved = false;
       fileInput.onchange = async () => { resolved = true; await loadFiles(fileInput); };
       folderInput.onchange = async () => { resolved = true; await loadFiles(folderInput); };
 
       fileInput.click();
 
-      // Si le premier dialog est fermé sans sélection, proposer le picker dossier
+      // If the first dialog is closed without a selection, offer the folder picker
       window.addEventListener('focus', function handler() {
         window.removeEventListener('focus', handler);
         setTimeout(() => {
@@ -405,7 +405,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }
   }, [isElectron, doLoadPath, doLoadFile]);
 
-  // Chargement fichiers DICOM individuels (second bouton de la sidebar)
+  // Loading individual DICOM files (second button of the sidebar)
   const onLoadDicomFiles = useCallback(async () => {
     const isDicom = (f: File) => {
       const n = f.name.toLowerCase();
@@ -452,7 +452,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     input.click();
   }, [doLoadMp4File]);
 
-  // Chargement par chemin absolu tapé manuellement (mode dev / Electron avancé)
+  // Loading by manually typed absolute path (dev mode / advanced Electron)
   const onLoadPath = useCallback((path: string) => {
     const name = path.split(/[\\/]/).pop() ?? path;
     doLoadPath(path, name);
@@ -499,7 +499,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     updateActiveTab(t => ({ ...t, frameIdx: 0 }));
   }, [isPlaying, updateActiveTab]);
 
-  // ── Analyse ────────────────────────────────────────────────────────────────
+  // ── Analysis ───────────────────────────────────────────────────────────────
 
   const onRunPipeline = useCallback(() => {
     if (!activeTab?.data) return;
@@ -564,7 +564,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     updateActiveTab(t => ({ ...t, frameIdx: idx }));
   }, [isPlaying, updateActiveTab]);
 
-  // ── Mesures ────────────────────────────────────────────────────────────────
+  // ── Measures ───────────────────────────────────────────────────────────────
 
   const onMeasureAdd = useCallback((frameIdx: number, measure: Measure) => {
     updateActiveTab(t => {
@@ -583,7 +583,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
         if (newPts[0][0] === -1) {
           segs.splice(segIdx, 1);
         } else {
-          segs[segIdx] = { ...segs[segIdx], pts: newPts }; // préserve labelOffset
+          segs[segIdx] = { ...segs[segIdx], pts: newPts }; // preserves labelOffset
         }
         frames[frameIdx] = segs;
         return { ...t, measuresByFrame: frames };
@@ -622,7 +622,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }));
   }, [updateActiveTab]);
 
-  // ── Onglets ────────────────────────────────────────────────────────────────
+  // ── Tabs ───────────────────────────────────────────────────────────────────
 
   const switchTab = useCallback((tabId: number) => {
     if (!tabsRef.current.some(t => t.id === tabId)) return;
@@ -642,9 +642,9 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     setMultiPanel(prev => {
       if (!prev) return prev;
       const next = [...prev.tabIds];
-      // Anti-doublon : si le fichier est déjà affiché ailleurs, on échange les
-      // deux cases (l'ancien occupant migre vers la case source) plutôt que de
-      // laisser le même fichier dans deux panneaux.
+      // De-duplication: if the file is already shown elsewhere, swap the
+      // two cells (the previous occupant moves to the source cell) rather than
+      // leaving the same file in two panels.
       const from = next.findIndex((id, idx) => id === tabId && idx !== slotIdx);
       const displaced = next[slotIdx];
       next[slotIdx] = tabId;
@@ -654,8 +654,8 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     switchTab(tabId);
   }, [switchTab]);
 
-  // Drop d'un fichier sur la vue simple → passage en split côte à côte
-  // [fichier courant, fichier déposé]. No-op si on redépose le fichier courant.
+  // Drop a file onto the single view → switch to side-by-side split
+  // [current file, dropped file]. No-op if re-dropping the current file.
   const onDropToSingleView = useCallback((droppedId: number) => {
     if (!activeTab || droppedId === activeTab.id) return;
     setMultiPanel({ layout: 'split-v', tabIds: [activeTab.id, droppedId] });
@@ -665,7 +665,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   const onExpandLayout = useCallback((tabId: number) => {
     setMultiPanel(prev => {
       if (!prev) return prev;
-      // Anti-doublon : ne rien faire si le fichier est déjà dans un panneau.
+      // De-duplication: do nothing if the file is already in a panel.
       if (prev.tabIds.includes(tabId)) return prev;
       const nextLayout: LayoutMode =
         prev.layout === 'split-v' || prev.layout === 'split-h' ? 'quad' : prev.layout;
@@ -687,7 +687,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
 
   const closeTab = useCallback((tabId: number) => {
     const currentTabs = tabsRef.current;
-    // Pas de side effects dans les updaters (évite le double-appel React StrictMode)
+    // No side effects in the updaters (avoids the React StrictMode double-call)
     if (currentTabs.length <= 1) {
       setTabs([]);
       setActiveTabId(-1);
@@ -709,7 +709,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     if (newPatient) setActivePatientName(newPatient.name);
   }, []);
 
-  // ── Raccourcis clavier ─────────────────────────────────────────────────────
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -799,9 +799,9 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     activePatientIdx, patients, switchTab, closeTab,
   ]);
 
-  // ── Patient actif : tabs associés ──────────────────────────────────────────
+  // ── Active patient: associated tabs ────────────────────────────────────────
   const activePatient = activePatientIdx >= 0 ? patients[activePatientIdx] : null;
-  // patientTabs : onglets fichiers du patient actif, dans l'ordre des tabs (pas tabIds)
+  // patientTabs: file tabs of the active patient, in tab order (not tabIds)
   const activePatientTabIds = new Set(activePatient?.tabIds ?? []);
   const patientTabs = tabs.filter(t => activePatientTabIds.has(t.id));
 
@@ -1011,7 +1011,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             ) : (
               <div
                 style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', minHeight: 0 }}
-                // Déposer un autre fichier ici → vue côte à côte (split-v).
+                // Drop another file here → side-by-side view (split-v).
                 onDragOver={e => {
                   if (!activeTab) return;
                   e.preventDefault();
@@ -1141,8 +1141,8 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             setShowLayoutPicker(false);
             if (layout === 'single') { setMultiPanel(null); return; }
             const slots = layout === 'quad' ? 4 : 2;
-            // Onglet actif en premier, puis les autres onglets distincts —
-            // sans doublon (un même fichier n'apparaît pas dans deux panneaux).
+            // Active tab first, then the other distinct tabs —
+            // without duplicates (the same file does not appear in two panels).
             const others = tabs.map(t => t.id).filter(id => id !== activeTabId);
             const ids = [activeTabId, ...others].slice(0, slots);
             while (ids.length < slots) ids.push(-1);
@@ -1246,9 +1246,9 @@ function PatientTab({ name, active, onClick }: { name: string; active: boolean; 
   );
 }
 
-// ── Bouton de repli d'une sidebar ──────────────────────────────────────────────
-// Fin bandeau vertical discret (remplace le séparateur 1 px) avec un chevron.
-// Toujours visible — permet de masquer puis réafficher le panneau adjacent.
+// ── Sidebar collapse button ─────────────────────────────────────────────────────
+// Thin discreet vertical strip (replaces the 1 px separator) with a chevron.
+// Always visible — allows hiding then re-showing the adjacent panel.
 
 function SidebarToggle({
   side,
@@ -1259,7 +1259,7 @@ function SidebarToggle({
   open: boolean;
   onToggle: () => void;
 }) {
-  // Chevron : « rentrer » le panneau quand ouvert, « sortir » quand fermé.
+  // Chevron: "retract" the panel when open, "extend" when closed.
   const char = side === 'left'
     ? (open ? '‹' : '›')
     : (open ? '›' : '‹');

@@ -1,10 +1,10 @@
-// handlers_dicom.go — Endpoints supplémentaires pour le service DICOM (chargement frames)
+// handlers_dicom.go — Additional endpoints for the DICOM service (frame loading)
 //
-// POST /starhe/dicom/load   → charge un DICOM via Python et retourne toutes les frames en JPEG base64
-//   Accept deux formats :
-//     - multipart/form-data  : champ "file" (upload navigateur), paramètres "quality" et "max_dim"
+// POST /starhe/dicom/load   → loads a DICOM via Python and returns all frames as base64 JPEG
+//   Accepts two formats:
+//     - multipart/form-data  : "file" field (browser upload), "quality" and "max_dim" parameters
 //     - application/json     : {"dicom_path":"...","quality":70,"max_dim":640} (Electron / CLI)
-// DELETE /starhe/cache      → supprime le cache MongoDB d'un fichier par path (?path=...)
+// DELETE /starhe/cache      → deletes a file's MongoDB cache by path (?path=...)
 package main
 
 import (
@@ -26,29 +26,29 @@ import (
 
 // ── POST /starhe/dicom/load ────────────────────────────────────────────────
 //
-// Accepte deux formats :
+// Accepts two formats:
 //
-//  1. multipart/form-data (upload navigateur) :
-//     champ "file"     → octets du fichier DICOM
-//     champ "quality"  → int optionnel (défaut 70)
-//     champ "max_dim"  → int optionnel (défaut 640)
+//  1. multipart/form-data (browser upload):
+//     "file" field     → DICOM file bytes
+//     "quality" field  → optional int (default 70)
+//     "max_dim" field  → optional int (default 640)
 //
-//  2. application/json (Electron / saisie chemin) :
-//     { "dicom_path": "/chemin/absolu/fichier.dcm", "quality": 70, "max_dim": 640 }
+//  2. application/json (Electron / path input):
+//     { "dicom_path": "/absolute/path/file.dcm", "quality": 70, "max_dim": 640 }
 //
-// Réponse : JSON retourné directement par loader_cli.py.
+// Response: JSON returned directly by loader_cli.py.
 func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 	quality := 70
 	maxDim  := 640
 	var dicomPath string
-	var tmpToDelete string  // fichier temporaire à supprimer après traitement
-	var originalName string  // nom original fourni par le navigateur (mode upload)
+	var tmpToDelete string  // temporary file to delete after processing
+	var originalName string  // original name provided by the browser (upload mode)
 
 	ct := r.Header.Get("Content-Type")
 
 	if strings.Contains(ct, "multipart/form-data") {
-		// ── Mode upload navigateur ──────────────────────────────────────────
-		// Limite à 500 MB en mémoire (les DICOM multi-frames peuvent être lourds)
+		// ── Browser upload mode ─────────────────────────────────────────────
+		// 500 MB in-memory limit (multi-frame DICOMs can be heavy)
 		if err := r.ParseMultipartForm(500 << 20); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": "impossible de parser le formulaire : " + err.Error(),
@@ -65,7 +65,7 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer f.Close()
 
-		// Lit le contenu en mémoire pour calculer le hash SHA-256
+		// Read the content into memory to compute the SHA-256 hash
 		fileBytes, err := io.ReadAll(f)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -74,13 +74,13 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Nom déterministe basé sur le contenu : même fichier → même chemin → cache hit
+		// Deterministic content-based name: same file → same path → cache hit
 		hash := sha256.Sum256(fileBytes)
 		hashStr := hex.EncodeToString(hash[:])[:24]
 		tmpPath := filepath.Join(os.TempDir(), "starhe_upload_"+hashStr+".dcm")
 		tmpToDelete = tmpPath
 
-		// N'écrit que si le fichier n'existe pas encore (même contenu déjà présent)
+		// Only write if the file does not exist yet (same content already present)
 		if _, statErr := os.Stat(tmpPath); os.IsNotExist(statErr) {
 			if err := os.WriteFile(tmpPath, fileBytes, 0600); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -93,7 +93,7 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		dicomPath = tmpPath
 		originalName = header.Filename
 
-		// Paramètres optionnels depuis le formulaire
+		// Optional parameters from the form
 		if v := r.FormValue("quality"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil {
 				quality = n
@@ -106,7 +106,7 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	} else {
-		// ── Mode JSON (Electron / saisie chemin) ───────────────────────────
+		// ── JSON mode (Electron / path input) ───────────────────────────────
 		var req struct {
 			DicomPath string `json:"dicom_path"`
 			Quality   int    `json:"quality"`
@@ -138,15 +138,15 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		if req.MaxDim  > 0 { maxDim  = req.MaxDim  }
 	}
 
-	// En mode upload : conserve le fichier temp — il sera utilisé par /starhe/analyze.
-	// Il est supprimé via DELETE /starhe/cache?path=<server_path>.
-	// (pas de defer os.Remove ici)
+	// In upload mode: keep the temp file — it will be used by /starhe/analyze.
+	// It is deleted via DELETE /starhe/cache?path=<server_path>.
+	// (no defer os.Remove here)
 
-	// Borne les paramètres
+	// Clamp the parameters
 	if quality < 1 || quality > 95 { quality = 70  }
 	if maxDim  < 64 || maxDim > 4096 { maxDim = 640 }
 
-	// Timeout : 300 s pour les gros fichiers DICOM multi-frames (J2K Lossless lent à décoder)
+	// Timeout: 300 s for large multi-frame DICOM files (J2K Lossless is slow to decode)
 	ctx, cancel := context.WithTimeout(r.Context(), 300*time.Second)
 	defer cancel()
 
@@ -163,19 +163,19 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 
 	out, err := cmd.Output()
 	if err != nil {
-		// En cas d'erreur, nettoyer le temp si applicable
+		// On error, clean up the temp file if applicable
 		if tmpToDelete != "" {
 			os.Remove(tmpToDelete)
 		}
-		// loader_cli.py écrit l'erreur JSON+traceback sur stdout avant sys.exit(1).
-		// On l'inclut dans la réponse pour que le client puisse afficher l'erreur réelle.
+		// loader_cli.py writes the JSON error + traceback to stdout before sys.exit(1).
+		// Include it in the response so the client can display the actual error.
 		errResp := map[string]string{
 			"error":  "subprocess Python échoué : " + err.Error(),
 			"stderr": stderr.String(),
 		}
 		if len(out) > 0 {
 			errResp["stdout"] = string(out)
-			// Si le JSON Python contient un champ "error", on l'expose directement.
+			// If the Python JSON contains an "error" field, expose it directly.
 			var pyErr map[string]string
 			if jsonErr := json.Unmarshal(out, &pyErr); jsonErr == nil {
 				if msg, ok := pyErr["error"]; ok {
@@ -190,8 +190,8 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Si le fichier vient d'un upload multipart, injecter server_path dans le JSON
-	// afin que le client React sache quel chemin envoyer à /starhe/analyze.
+	// If the file came from a multipart upload, inject server_path into the JSON
+	// so the React client knows which path to send to /starhe/analyze.
 	if tmpToDelete != "" {
 		var obj map[string]interface{}
 		if err := json.Unmarshal(out, &obj); err == nil {
@@ -205,7 +205,7 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Transmet le JSON au client
+	// Forward the JSON to the client
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write(out) //nolint:errcheck
@@ -213,9 +213,9 @@ func dicomLoadHandler(w http.ResponseWriter, r *http.Request) {
 
 // ── DELETE /starhe/cache ───────────────────────────────────────────────────
 //
-// Paramètre URL : ?path=<dicom_path_absolu>
+// URL parameter: ?path=<absolute_dicom_path>
 //
-// Supprime les documents MongoDB dont le champ "file_path" correspond au chemin fourni.
+// Deletes the MongoDB documents whose "file_path" field matches the given path.
 func deleteCacheHandler(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {

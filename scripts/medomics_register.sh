@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# medomics_register.sh — Enregistre le plugin STARHE dans MEDomics
+# medomics_register.sh — Registers the STARHE plugin in MEDomics
 #
-# Copie plugin.json dans tous les dossiers userData MEDomics détectés
-# (production : MEDomics, développement : medomics-platform (development)).
+# Copies plugin.json into all the detected MEDomics userData directories
+# (production: MEDomics, development: medomics-platform (development)).
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -19,7 +19,7 @@ else
   BASE="${XDG_CONFIG_HOME:-$HOME/.config}"
 fi
 
-# Liste des dossiers userData possibles (prod + dev)
+# List of possible userData directories (prod + dev)
 TARGETS=(
   "$BASE/MEDomics"
   "$BASE/medomics-platform"
@@ -28,7 +28,7 @@ TARGETS=(
 
 INSTALLED=0
 for TARGET in "${TARGETS[@]}"; do
-  # N'installe que dans les dossiers qui existent déjà (app déjà lancée au moins une fois)
+  # Only installs into directories that already exist (app launched at least once)
   if [ -d "$TARGET" ]; then
     PLUGINS_DIR="$TARGET/plugins/starhe"
     mkdir -p "$PLUGINS_DIR"

@@ -1,46 +1,46 @@
 """
-ai/live_pipeline.py — Pipeline STARHE temps-réel (streaming DICOM)
+ai/live_pipeline.py — Real-time STARHE pipeline (DICOM streaming)
 ===================================================================
-Traite des frames individuelles au fil de l'eau, sans nécessiter
-l'intégralité du clip à l'avance.
+Processes individual frames on the fly, without requiring
+the whole clip in advance.
 
-Différences vs pipeline.py (batch) :
-  - Pas de prepUS/backscan : incompatible avec le traitement frame-à-frame.
-    Utilise crop.py (ROI détecté sur les N premières frames) à la place.
-  - STARHE-DETECT : inférence à chaque frame reçue (ou toutes les N via
-    DETECT_EVERY_N), bbox communiquée immédiatement.
-  - STARHE-RISK : mis à jour toutes les RISK_UPDATE_INTERVAL nouvelles frames
-    sur une fenêtre glissante des RISK_WINDOW_FRAMES dernières frames.
-  - Conçu pour tourner dans un thread de fond ; communique via queue.
+Differences vs pipeline.py (batch):
+  - No prepUS/backscan: incompatible with frame-by-frame processing.
+    Uses crop.py (ROI detected on the first N frames) instead.
+  - STARHE-DETECT: inference on each received frame (or every N via
+    DETECT_EVERY_N), bbox reported immediately.
+  - STARHE-RISK: updated every RISK_UPDATE_INTERVAL new frames
+    on a sliding window of the last RISK_WINDOW_FRAMES frames.
+  - Designed to run in a background thread; communicates via queue.
 
-Usage typique
+Typical usage
 -------------
     from starhe_plugin.ai.live_pipeline import LivePipeline
 
     def on_result(r: dict):
-        # appelé dans le thread pipeline — synchroniser avec l'UI si besoin
+        # called in the pipeline thread — synchronize with the UI if needed
         print(r["detections"], r["risk_score"])
 
     pipe = LivePipeline(on_result=on_result)
     pipe.start()
 
-    # Depuis le récepteur DICOM / capture vidéo :
+    # From the DICOM receiver / video capture:
     pipe.push_frame(frame_rgb_uint8)   # (H, W, 3) uint8 RGB
 
     pipe.stop()
 
-Format du dict résultat émis dans on_result
--------------------------------------------
+Format of the result dict emitted to on_result
+----------------------------------------------
     {
-        "frame_idx"  : int,             # numéro de frame depuis start()
-        "timestamp"  : float,           # time.monotonic() à l'arrivée de la frame
-        "detections" : [                # liste vide si rien détecté
+        "frame_idx"  : int,             # frame number since start()
+        "timestamp"  : float,           # time.monotonic() at frame arrival
+        "detections" : [                # empty list if nothing detected
             {"bbox": [x0,y0,x1,y1], "score": float, "label": "tumor"},
             ...
         ],
-        "risk_score"  : float | None,   # None tant que le buffer n'est pas assez rempli
+        "risk_score"  : float | None,   # None until the buffer is filled enough
         "risk_label"  : str   | None,
-        "roi"         : (x0,y0,x1,y1) | None,   # ROI crop détecté
+        "roi"         : (x0,y0,x1,y1) | None,   # detected crop ROI
     }
 """
 
@@ -65,26 +65,26 @@ from starhe_plugin.utils.go_print import go_print
 
 log = logging.getLogger(__name__)
 
-# ── Constantes live ───────────────────────────────────────────────────────────
+# ── Live constants ────────────────────────────────────────────────────────────
 
-# Nombre de frames dans la fenêtre glissante pour STARHE-RISK
+# Number of frames in the sliding window for STARHE-RISK
 RISK_WINDOW_FRAMES = 160
 
-# Mise à jour du score RISK toutes les N nouvelles frames
+# RISK score update every N new frames
 RISK_UPDATE_INTERVAL = 16
 
-# Nombre de frames accumulées avant d'estimer le ROI (crop)
+# Number of frames accumulated before estimating the ROI (crop)
 ROI_CALIBRATION_FRAMES = 30
 
-# Taille max de la queue d'entrée (frames en attente de traitement)
-# Au-delà, les frames les plus anciennes sont supprimées (backpressure)
+# Max size of the input queue (frames awaiting processing)
+# Beyond that, the oldest frames are dropped (backpressure)
 INPUT_QUEUE_MAXSIZE = 8
 
 
 class LiveRingBuffer:
     """
-    Buffer circulaire thread-safe.
-    Stocke les N dernières frames RGB (H, W, 3) uint8.
+    Thread-safe circular buffer.
+    Stores the last N RGB frames (H, W, 3) uint8.
     """
 
     def __init__(self, maxlen: int = RISK_WINDOW_FRAMES):
@@ -96,7 +96,7 @@ class LiveRingBuffer:
             self._buf.append(frame)
 
     def snapshot(self) -> np.ndarray | None:
-        """Retourne (T, H, W, 3) ou None si buffer vide."""
+        """Returns (T, H, W, 3) or None if the buffer is empty."""
         with self._lock:
             if not self._buf:
                 return None
@@ -109,19 +109,19 @@ class LiveRingBuffer:
 
 class LivePipeline:
     """
-    Pipeline STARHE non-bloquant pour l'analyse frame-à-frame.
+    Non-blocking STARHE pipeline for frame-by-frame analysis.
 
-    Paramètres
+    Parameters
     ----------
     on_result : callable (dict) → None
-        Callback appelé dans le thread pipeline à chaque frame traitée.
-        Doit être thread-safe ou poster dans une queue UI.
+        Callback invoked in the pipeline thread for each processed frame.
+        Must be thread-safe or post into a UI queue.
     detect_every_n : int
-        Lance STARHE-DETECT toutes les N frames (défaut : config.DETECT_EVERY_N).
+        Runs STARHE-DETECT every N frames (default: config.DETECT_EVERY_N).
     score_thr : float
-        Seuil de confiance STARHE-DETECT.
+        STARHE-DETECT confidence threshold.
     enable_risk : bool
-        Active STARHE-RISK (désactiver pour réduire la latence si non nécessaire).
+        Enables STARHE-RISK (disable to reduce latency if not needed).
     """
 
     def __init__(
@@ -136,29 +136,29 @@ class LivePipeline:
         self._score_thr      = score_thr
         self._enable_risk    = enable_risk
 
-        # Queue d'entrée : le récepteur empile, le thread pipeline dépile
+        # Input queue: the receiver pushes, the pipeline thread pops
         self._input_q: queue.Queue[np.ndarray | None] = queue.Queue(
             maxsize=INPUT_QUEUE_MAXSIZE
         )
 
         self._ring = LiveRingBuffer(RISK_WINDOW_FRAMES)
 
-        self._frame_idx    = 0          # compteur de frames reçues
-        self._last_dets    : list = []  # dernières détections (propagées entre strides)
-        self._last_risk    : dict | None = None  # dernier résultat RISK
+        self._frame_idx    = 0          # counter of received frames
+        self._last_dets    : list = []  # latest detections (propagated between strides)
+        self._last_risk    : dict | None = None  # latest RISK result
         self._roi          : tuple | None = None  # (x0, y0, x1, y1) crop
 
-        # Modèles — initialisés dans le thread (évite les problèmes de fork/pickling)
+        # Models — initialized inside the thread (avoids fork/pickling issues)
         self._detect_model = None
         self._risk_model   = None
 
         self._thread  : threading.Thread | None = None
         self._stop_evt: threading.Event = threading.Event()
 
-    # ── API publique ──────────────────────────────────────────────────────────
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def start(self) -> None:
-        """Démarre le thread de traitement et charge les modèles."""
+        """Starts the processing thread and loads the models."""
         if self._thread and self._thread.is_alive():
             return
         self._stop_evt.clear()
@@ -169,9 +169,9 @@ class LivePipeline:
         go_print("info", "LivePipeline : thread démarré.")
 
     def stop(self, timeout: float = 5.0) -> None:
-        """Arrête proprement le pipeline et libère les modèles."""
+        """Cleanly stops the pipeline and releases the models."""
         self._stop_evt.set()
-        # Débloquer le thread si en attente sur la queue
+        # Unblock the thread if it is waiting on the queue
         try:
             self._input_q.put_nowait(None)
         except queue.Full:
@@ -182,9 +182,9 @@ class LivePipeline:
 
     def push_frame(self, frame: np.ndarray) -> bool:
         """
-        Soumet une nouvelle frame (H, W, 3) uint8 RGB au pipeline.
-        Retourne True si acceptée, False si la queue est pleine (frame ignorée).
-        Les frames doivent venir dans l'ordre chronologique.
+        Submits a new (H, W, 3) uint8 RGB frame to the pipeline.
+        Returns True if accepted, False if the queue is full (frame dropped).
+        Frames must arrive in chronological order.
         """
         if not isinstance(frame, np.ndarray) or frame.ndim != 3 or frame.shape[2] != 3:
             raise ValueError(f"frame doit être (H, W, 3) uint8 RGB, reçu shape={getattr(frame, 'shape', '?')}")
@@ -192,7 +192,7 @@ class LivePipeline:
             self._input_q.put_nowait(frame.copy())
             return True
         except queue.Full:
-            # Backpressure : on ignore la frame la plus ancienne et on insère la nouvelle
+            # Backpressure: drop the oldest frame and insert the new one
             try:
                 self._input_q.get_nowait()
             except queue.Empty:
@@ -208,10 +208,10 @@ class LivePipeline:
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    # ── Thread de traitement ──────────────────────────────────────────────────
+    # ── Processing thread ─────────────────────────────────────────────────────
 
     def _run(self) -> None:
-        """Corps du thread pipeline."""
+        """Body of the pipeline thread."""
         self._load_models()
 
         while not self._stop_evt.is_set():
@@ -220,7 +220,7 @@ class LivePipeline:
             except queue.Empty:
                 continue
 
-            if frame is None:   # signal d'arrêt
+            if frame is None:   # stop signal
                 break
 
             result = self._process_frame(frame)
@@ -255,24 +255,24 @@ class LivePipeline:
 
     def _process_frame(self, frame: np.ndarray) -> dict | None:
         """
-        Traite une frame individuelle :
-          1. Prétraitement léger (burnin + crop)
-          2. Mise à jour du ring buffer
-          3. STARHE-DETECT (toutes les detect_every_n frames)
-          4. STARHE-RISK   (toutes les RISK_UPDATE_INTERVAL frames)
-          5. Construction du résultat
+        Processes an individual frame:
+          1. Light preprocessing (burnin + crop)
+          2. Ring buffer update
+          3. STARHE-DETECT (every detect_every_n frames)
+          4. STARHE-RISK   (every RISK_UPDATE_INTERVAL frames)
+          5. Result construction
         """
         ts = time.monotonic()
         idx = self._frame_idx
         self._frame_idx += 1
 
         # ── 1. Burnin removal ─────────────────────────────────────────────────
-        # remove_pixel_burnin attend (T, H, W, 3) → on wrape en batch de 1
+        # remove_pixel_burnin expects (T, H, W, 3) → wrap into a batch of 1
         frames_batch = frame[np.newaxis, ...]              # (1, H, W, 3)
         frames_batch = remove_pixel_burnin(frames_batch)
         frame = frames_batch[0]                            # (H, W, 3)
 
-        # ── 2. Calibration ROI (premières frames) + crop ─────────────────────
+        # ── 2. ROI calibration (first frames) + crop ─────────────────────────
         self._ring.push(frame)
 
         if self._roi is None and len(self._ring) >= ROI_CALIBRATION_FRAMES:
@@ -285,7 +285,7 @@ class LivePipeline:
         if idx % self._detect_every_n == 0:
             try:
                 dets = self._detect_model.predict(frame_cropped, score_thr=self._score_thr)
-                # Remappe les bbox dans le repère de la frame originale
+                # Remap the bboxes into the original frame's coordinate system
                 self._last_dets = self._remap_detections(dets)
             except Exception as exc:
                 go_print("error", f"LivePipeline DETECT: {exc}")
@@ -302,7 +302,7 @@ class LivePipeline:
             except Exception as exc:
                 go_print("error", f"LivePipeline RISK: {exc}")
 
-        # ── 5. Résultat ───────────────────────────────────────────────────────
+        # ── 5. Result ─────────────────────────────────────────────────────────
         return {
             "frame_idx"     : idx,
             "timestamp"     : ts,
@@ -310,18 +310,18 @@ class LivePipeline:
             "risk_score"    : self._last_risk["risk_score"] if self._last_risk else None,
             "risk_label"    : self._last_risk["risk_label"] if self._last_risk else None,
             "roi"           : self._roi,
-            # Frame originale (avant crop) pour affichage UI — clé préfixée _
+            # Original frame (before crop) for UI display — key prefixed with _
             "_frame_display": frame,
         }
 
-    # ── Helpers internes ──────────────────────────────────────────────────────
+    # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _estimate_roi(self, frames: np.ndarray) -> tuple[int, int, int, int] | None:
         """
-        Détecte le ROI (cône ultrason) sur les premières frames accumulées.
-        Utilise l'approche temporelle de crop.py (variabilité pixel).
-        Retourne (x0, y0, x1, y1) dans le repère de la frame originale,
-        ou None si la détection échoue.
+        Detects the ROI (ultrasound cone) on the first accumulated frames.
+        Uses crop.py's temporal approach (pixel variability).
+        Returns (x0, y0, x1, y1) in the original frame's coordinate system,
+        or None if detection fails.
         """
         try:
             return detect_ultrasound_roi_temporal(frames)
@@ -331,19 +331,19 @@ class LivePipeline:
 
     def _apply_crop(self, frame: np.ndarray) -> np.ndarray:
         """
-        Applique le crop ROI si disponible, sinon retourne la frame brute.
-        Redimensionne vers 512×512 pour normaliser l'entrée RTMDet.
+        Applies the ROI crop if available, otherwise returns the raw frame.
+        Resizes to 512×512 to normalize the RTMDet input.
         """
         if self._roi is not None:
             x0, y0, x1, y1 = self._roi
             h, w = frame.shape[:2]
-            # Clamper dans les bornes
+            # Clamp within bounds
             x0 = max(0, x0); y0 = max(0, y0)
             x1 = min(w, x1); y1 = min(h, y1)
             if x1 > x0 and y1 > y0:
                 frame = frame[y0:y1, x0:x1]
 
-        # Redimensionner vers 512×512 via F.interpolate (cross-plateforme)
+        # Resize to 512×512 via F.interpolate (cross-platform)
         if frame.shape[0] != 512 or frame.shape[1] != 512:
             t = torch.from_numpy(
                 np.ascontiguousarray(frame, dtype=np.float32)
@@ -354,9 +354,9 @@ class LivePipeline:
 
     def _remap_detections(self, dets: list) -> list:
         """
-        Si un crop a été appliqué, remet les bbox dans le repère de la frame
-        originale (avant crop + resize).
-        Sans crop : retourne les détections inchangées.
+        If a crop was applied, puts the bboxes back into the original
+        frame's coordinate system (before crop + resize).
+        Without a crop: returns the detections unchanged.
         """
         if not dets or self._roi is None:
             return dets

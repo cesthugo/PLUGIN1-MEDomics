@@ -1,7 +1,7 @@
-# medomics_register.ps1 — Enregistre le plugin STARHE dans MEDomics (Windows)
+# medomics_register.ps1 — Registers the STARHE plugin in MEDomics (Windows)
 #
-# Crée %APPDATA%\MEDomics\plugins\starhe\plugin.json
-# MEDomics détectera automatiquement le plugin au prochain démarrage.
+# Creates %APPDATA%\MEDomics\plugins\starhe\plugin.json
+# MEDomics will detect the plugin automatically on the next startup.
 $ErrorActionPreference = "Stop"
 
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path

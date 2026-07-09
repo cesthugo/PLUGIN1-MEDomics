@@ -1,15 +1,15 @@
 /**
- * starheServer.js — Gestion du serveur Go STARHE standalone dans MEDomics
+ * starheServer.js — Management of the standalone STARHE Go server inside MEDomics
  *
- * Le serveur Go STARHE (port STARHE_PORT) est un processus séparé du serveur
- * Go MEDomics principal. Il gère toutes les routes /starhe/* (DICOM, analyse,
- * SSE) et est proxifié par le blueprint Go MEDomics (voir blueprints/starhe/).
+ * The STARHE Go server (port STARHE_PORT) is a process separate from the main
+ * MEDomics Go server. It handles all /starhe/* routes (DICOM, analysis,
+ * SSE) and is proxied by the MEDomics Go blueprint (see blueprints/starhe/).
  *
- * En développement : le binaire est cherché dans PLUGIN1-MEDomics/go_server/.
- * En production    : le binaire doit être packagé dans resources/starhe/.
+ * In development: the binary is looked up in PLUGIN1-MEDomics/go_server/.
+ * In production : the binary must be packaged in resources/starhe/.
  *
- * Variable d'environnement optionnelle :
- *   STARHE_GO_SERVER_PATH  — chemin absolu vers le binaire (override dev/prod)
+ * Optional environment variable:
+ *   STARHE_GO_SERVER_PATH  — absolute path to the binary (dev/prod override)
  */
 
 import path from "path"
@@ -20,10 +20,10 @@ const STARHE_PORT = 8082
 let _starheProcess = null
 
 /**
- * Démarre le serveur Go STARHE en arrière-plan.
- * Résout une Promise avec le process, ou rejette si le binaire est introuvable.
+ * Starts the STARHE Go server in the background.
+ * Resolves a Promise with the process, or rejects if the binary cannot be found.
  *
- * @param {boolean} isProd - true si l'app est packagée (production)
+ * @param {boolean} isProd - true if the app is packaged (production)
  * @returns {Promise<ChildProcess>}
  */
 export function startStarheServer(isProd) {
@@ -35,19 +35,19 @@ export function startStarheServer(isProd) {
 
     const binaryName = process.platform === "win32" ? "go_server.exe" : "go_server"
 
-    // Chemin du binaire
+    // Binary path
     let binaryPath
     if (process.env.STARHE_GO_SERVER_PATH) {
-      // Override explicite (CI, tests, etc.)
+      // Explicit override (CI, tests, etc.)
       binaryPath = process.env.STARHE_GO_SERVER_PATH
     } else if (isProd) {
       binaryPath = path.join(process.resourcesPath, "starhe", binaryName)
     } else {
-      // Développement : PLUGIN1-MEDomics est un dossier frère de MEDomics
+      // Development: PLUGIN1-MEDomics is a sibling directory of MEDomics
       binaryPath = path.join(process.cwd(), "..", "PLUGIN1-MEDomics", "go_server", binaryName)
     }
 
-    // Chemin des modules Python
+    // Python modules path
     const pythonModPath = isProd
       ? path.join(process.resourcesPath, "starhe", "pythonCode", "modules")
       : path.join(process.cwd(), "..", "PLUGIN1-MEDomics", "pythonCode", "modules")
@@ -66,7 +66,7 @@ export function startStarheServer(isProd) {
       [STARHE_PORT, isProd ? "prod" : "dev", process.cwd(), require("os").tmpdir()],
       { env, windowsHide: true },
       (err) => {
-        if (err && err.killed) return // Arrêt normal
+        if (err && err.killed) return // Normal shutdown
         if (err) console.error("[STARHE] Erreur process :", err.message)
         _starheProcess = null
       }
@@ -89,8 +89,8 @@ export function startStarheServer(isProd) {
 }
 
 /**
- * Arrête proprement le serveur Go STARHE.
- * À appeler dans le handler `before-quit` de l'app Electron.
+ * Cleanly stops the STARHE Go server.
+ * To be called in the Electron app's `before-quit` handler.
  */
 export function stopStarheServer() {
   if (_starheProcess) {

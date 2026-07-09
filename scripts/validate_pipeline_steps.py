@@ -58,12 +58,12 @@ set_log_sink(_log)
 from starhe_plugin.dicom.prepus_bridge import preprocess_with_prepus
 from starhe_plugin.ai.starhe_risk       import STARHERiskModel
 
-# ── Chemins par défaut ────────────────────────────────────────────────────────
+# ── Default paths ─────────────────────────────────────────────────────────────
 DEFAULT_AV1_DIR   = "/Users/hugo/Desktop/STAGE/VIDEO TESTING BATCH MP4 - À TESTER/datasetAVANTPREPROCESS"
 DEFAULT_DATA_TEST = "/Users/hugo/Desktop/STAGE/STARHE_ADRIEN_DATA-PREPROCESSED/data_test"
 DEFAULT_OUTPUT    = str(_SCRIPT_DIR / "results" / "validate_pipeline_steps.csv")
 
-# CSV de référence (scores de juin 2024, torch ~2.0, entrainement originel)
+# Reference CSV (June 2024 scores, torch ~2.0, original training)
 _REF_CSV_SCORES = {
     "01-0006": 0.657305, "01-0014": 0.500657, "01-0046": 0.697929,
     "01-0086": 0.766944, "01-0088": 0.638932, "01-0095": 0.702870,
@@ -78,7 +78,7 @@ _REF_CSV_LABELS = {pid: ("Risque élevé" if s >= 0.5 else "Risque faible")
                    for pid, s in _REF_CSV_SCORES.items()}
 
 
-# ── Utilitaires ───────────────────────────────────────────────────────────────
+# ── Utilities ─────────────────────────────────────────────────────────────────
 
 def patient_id(name: str) -> str:
     m = re.search(r"(\d{2}-\d{4})", name)
@@ -120,20 +120,20 @@ def compute_psnr(a: np.ndarray, b: np.ndarray) -> float:
     return 20 * np.log10(255.0) - 10 * np.log10(mse)
 
 
-# ── ÉTAPE 2 : AV1 720p → prepUS → compare avec data_test ────────────────────
+# ── STEP 2: AV1 720p → prepUS → compare with data_test ──────────────────────
 
 def run_step2(av1_dir: str, data_test: str, risk_model: STARHERiskModel) -> list[dict]:
     """
     Pour chaque fichier AV1 720p (datasetAVANTPREPROCESS),
     applique prepUS et compare le crop avec le fichier data_test correspondant.
     """
-    # Index des fichiers data_test par patient ID
+    # Index of the data_test files by patient ID
     ref_files = {
         patient_id(f): os.path.join(data_test, f)
         for f in os.listdir(data_test) if f.endswith(".mp4")
     }
 
-    # Index des fichiers AV1 par patient ID
+    # Index of the AV1 files by patient ID
     av1_files = {
         patient_id(f): os.path.join(av1_dir, f)
         for f in os.listdir(av1_dir) if f.endswith(".mp4")
@@ -148,7 +148,7 @@ def run_step2(av1_dir: str, data_test: str, risk_model: STARHERiskModel) -> list
         row = {"etape": "2_prepus", "patient": pid, "erreur": ""}
 
         try:
-            # Lire le fichier AV1 720p (même que datasetAVANTPREPROCESS)
+            # Read the AV1 720p file (same as datasetAVANTPREPROCESS)
             av1_frames = read_mp4_frames_rgb(av1_files[pid])
             fps_cap = cv2.VideoCapture(av1_files[pid])
             fps = fps_cap.get(cv2.CAP_PROP_FPS) or 22.0
@@ -157,12 +157,12 @@ def run_step2(av1_dir: str, data_test: str, risk_model: STARHERiskModel) -> list
             row["av1_shape"] = f"{av1_frames.shape[1]}x{av1_frames.shape[2]}"
             row["av1_n_frames"] = len(av1_frames)
 
-            # Lire le fichier data_test de référence (gris)
+            # Read the reference data_test file (grayscale)
             ref_frames_gray = read_mp4_frames_gray(ref_files[pid])
             row["ref_shape"] = f"{ref_frames_gray.shape[2]}x{ref_frames_gray.shape[1]}" if ref_frames_gray.ndim >= 3 else f"?x{ref_frames_gray.shape[1]}"
             row["ref_n_frames"] = len(ref_frames_gray)
 
-            # Appliquer prepUS sur le fichier AV1
+            # Apply prepUS on the AV1 file
             t0 = time.perf_counter()
             crop_frames, info = preprocess_with_prepus(av1_frames, fps=fps)
             elapsed = time.perf_counter() - t0
@@ -172,7 +172,7 @@ def run_step2(av1_dir: str, data_test: str, risk_model: STARHERiskModel) -> list
             row["dims_identiques"] = "OUI" if row["our_shape"] == row["ref_shape"] else "NON"
             row["prepus_duree_s"] = f"{elapsed:.1f}"
 
-            # PSNR entre notre crop et data_test
+            # PSNR between our crop and data_test
             if row["dims_identiques"] == "OUI":
                 n = min(len(crop_frames), len(ref_frames_gray))
                 psnr = compute_psnr(crop_frames[:n], ref_frames_gray[:n])
@@ -180,13 +180,13 @@ def run_step2(av1_dir: str, data_test: str, risk_model: STARHERiskModel) -> list
             else:
                 row["psnr_db"] = "N/A (dims ≠)"
 
-            # Score RISK sur notre crop
+            # RISK score on our crop
             frames_rgb_ours = np.stack([crop_frames, crop_frames, crop_frames], axis=-1)
             r_our = risk_model.predict(frames_rgb_ours)
             row["score_notre_prepus"] = f"{r_our['risk_score']:.6f}"
             row["label_notre_prepus"] = r_our["risk_label"]
 
-            # Score RISK sur data_test (référence actuelle)
+            # RISK score on data_test (current reference)
             ref_rgb = np.stack([ref_frames_gray, ref_frames_gray, ref_frames_gray], axis=-1)
             r_ref = risk_model.predict(ref_rgb)
             row["score_data_test"]     = f"{r_ref['risk_score']:.6f}"
@@ -196,7 +196,7 @@ def run_step2(av1_dir: str, data_test: str, risk_model: STARHERiskModel) -> list
             row["delta_score"]         = f"{delta:+.6f}"
             row["labels_identiques"]   = "OUI" if r_our["risk_label"] == r_ref["risk_label"] else "NON"
 
-            # Score référence CSV (ancien, torch ~2.0)
+            # Reference CSV score (old, torch ~2.0)
             row["score_ref_csv"]   = f"{_REF_CSV_SCORES.get(pid, -1):.6f}"
             row["label_ref_csv"]   = _REF_CSV_LABELS.get(pid, "?")
             row["label_vs_csv"]    = "OUI" if r_ref["risk_label"] == _REF_CSV_LABELS.get(pid) else "NON"
@@ -218,7 +218,7 @@ def run_step2(av1_dir: str, data_test: str, risk_model: STARHERiskModel) -> list
     return rows
 
 
-# ── ÉTAPE 3 : data_test → RISK — dérive entre anciennes et nouvelles scores ──
+# ── STEP 3: data_test → RISK — drift between old and new scores ──────────────
 
 def run_step3(data_test: str, risk_model: STARHERiskModel) -> list[dict]:
     """
@@ -268,7 +268,7 @@ def run_step3(data_test: str, risk_model: STARHERiskModel) -> list[dict]:
     return rows
 
 
-# ── Résumé console ────────────────────────────────────────────────────────────
+# ── Console summary ───────────────────────────────────────────────────────────
 
 def _print_summary(step2_rows: list, step3_rows: list) -> None:
     sep = "─" * 90
@@ -372,7 +372,7 @@ def main() -> None:
 
     risk_model.close()
 
-    # Écrire le CSV
+    # Write the CSV
     all_keys: list[str] = []
     for r in all_rows:
         for k in r:

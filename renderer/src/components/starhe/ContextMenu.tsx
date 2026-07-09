@@ -1,6 +1,6 @@
-// components/ContextMenu.tsx — Menu contextuel clic droit du canvas
+// components/ContextMenu.tsx — Right-click context menu of the canvas
 //
-// Réplique _show_context_menu de prototype_tkinter.py.
+// Replicates _show_context_menu from prototype_tkinter.py.
 
 import React, { useEffect, useRef } from 'react';
 import type { ContextMenuItem, ViewMode } from '../../utilities/starhe/types';
@@ -16,7 +16,7 @@ export interface ContextMenuProps {
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
-  // Ferme sur clic extérieur ou Échap
+  // Closes on outside click or Esc
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
@@ -30,7 +30,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     };
   }, [onClose]);
 
-  // Ajuste la position pour ne pas sortir de l'écran
+  // Adjusts the position to stay within the screen
   const left = Math.min(x, window.innerWidth  - 220);
   const top  = Math.min(y, window.innerHeight - items.length * 32 - 8);
 
@@ -79,7 +79,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   );
 }
 
-// ── Helper : construit les items du menu contextuel principal du canvas ──────
+// ── Helper: builds the items of the canvas's main context menu ──────
 
 export function buildCanvasContextMenu({
   viewMode,

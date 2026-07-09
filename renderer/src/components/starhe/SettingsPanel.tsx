@@ -1,14 +1,14 @@
-// components/SettingsPanel.tsx — Panneau flottant de réglages d'affichage
+// components/SettingsPanel.tsx — Floating display-settings panel
 //
-// Apparaît en haut à droite quand l'utilisateur clique sur "⚙ Réglages".
-// Toutes les modifications sont appliquées en temps réel et persistées via le hook.
+// Appears at the top right when the user clicks "⚙ Réglages".
+// All changes are applied in real time and persisted via the hook.
 
 import React, { useEffect, useRef } from 'react';
 import type { DisplaySettings } from '../../utilities/starhe/hooks/useDisplaySettings';
 import { DISPLAY_DEFAULTS } from '../../utilities/starhe/hooks/useDisplaySettings';
 import { SIDEBAR_BG, SBAR_FG, SBAR_MUTED } from '../../utilities/starhe/colors';
 
-// ── Options de polices proposées ──────────────────────────────────────────────
+// ── Offered font options ──────────────────────────────────────────────────────
 
 const FONT_OPTIONS: { label: string; value: string }[] = [
   { label: 'Segoe UI (default)', value: "'Segoe UI', system-ui, sans-serif" },
@@ -28,19 +28,19 @@ interface SettingsPanelProps {
   onClose:   () => void;
 }
 
-// ── Composant ─────────────────────────────────────────────────────────────────
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export function SettingsPanel({ settings, onUpdate, onReset, onClose }: SettingsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Fermeture au clic extérieur
+  // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
-    // Délai léger pour éviter que le clic d'ouverture ferme immédiatement le panneau
+    // Slight delay to prevent the opening click from immediately closing the panel
     const id = setTimeout(() => document.addEventListener('mousedown', handler), 50);
     return () => {
       clearTimeout(id);
@@ -48,7 +48,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
     };
   }, [onClose]);
 
-  // Fermeture à la touche Échap
+  // Close on the Esc key
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handler);
@@ -71,7 +71,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
         boxShadow:    '0 8px 32px rgba(0,0,0,0.65)',
         zIndex:       2000,
         overflow:     'hidden',
-        // Le panneau lui-même utilise les settings courants pour la prévisualisation
+        // The panel itself uses the current settings for the preview
         fontFamily:   settings.fontFamily,
       }}
     >
@@ -230,7 +230,7 @@ export function SettingsPanel({ settings, onUpdate, onReset, onClose }: Settings
   );
 }
 
-// ── Sous-composants ───────────────────────────────────────────────────────────
+// ── Subcomponents ─────────────────────────────────────────────────────────────
 
 function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (

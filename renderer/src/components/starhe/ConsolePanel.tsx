@@ -1,4 +1,4 @@
-// components/ConsolePanel.tsx — Console de log style MEDomics (réplique Tkinter)
+// components/ConsolePanel.tsx — MEDomics-style log console (Tkinter replica)
 
 import React, { useEffect, useRef } from 'react';
 import type { LogEntry } from '../../utilities/starhe/types';

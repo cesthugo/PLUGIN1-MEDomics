@@ -1,12 +1,12 @@
-// hooks/useTabManager.ts — Gestion des onglets et des patients
+// hooks/useTabManager.ts — Tab and patient management
 //
-// Centralise tout l'état lié aux onglets (TabState[]) et aux patients (Patient[]).
-// Extrait de index.tsx pour alléger le composant racine.
+// Centralizes all the state related to tabs (TabState[]) and patients (Patient[]).
+// Extracted from index.tsx to lighten the root component.
 //
-// Responsabilités :
+// Responsibilities:
 //  - État : tabs, activeTabId, patients, activePatientName
-//  - Références synchrones (useRef) pour les lectures dans les callbacks
-//  - Valeurs dérivées : activeTab, activeTabIdx, activePatientIdx
+//  - Synchronous references (useRef) for reads inside the callbacks
+//  - Derived values: activeTab, activeTabIdx, activePatientIdx
 //  - Actions : addTab, openBatchResultAsTab, switchTab, closeTab, updateActiveTab
 
 import { useCallback, useRef, useState } from 'react';
@@ -15,7 +15,7 @@ import type { TabState, Patient, DicomData, LogLevel } from '../types';
 import type { BatchResultToOpen } from '../../../components/starhe/BatchModal';
 import { nextTabId } from '../utils';
 
-// ── Valeur initiale d'un onglet ───────────────────────────────────────────────
+// ── Initial value of a tab ────────────────────────────────────────────────────
 function makeDefaultTab(): TabState {
   return {
     id:              nextTabId(),
@@ -39,7 +39,7 @@ function makeDefaultTab(): TabState {
   };
 }
 
-// ── Interface publique du hook ─────────────────────────────────────────────────
+// ── Public hook interface ──────────────────────────────────────────────────────
 
 export interface TabManagerParams {
   addLog:       (msg: string, level: LogLevel) => void;
@@ -53,7 +53,7 @@ export interface TabManagerResult {
   activeTabId:       number;
   patients:          Patient[];
   activePatientName: string;
-  // Valeurs dérivées
+  // Derived values
   activeTab:         TabState | null;
   activeTabIdx:      number;
   activePatientIdx:  number;
@@ -65,7 +65,7 @@ export interface TabManagerResult {
   closeTab:             (tabId: number) => void;
   updateActiveTab:      (updater: (t: TabState) => TabState) => void;
   updateTabById:        (tabId: number, updater: (t: TabState) => TabState) => void;
-  // Setters exposés pour les cas d'usage directs (focus panneau, etc.)
+  // Setters exposed for direct use cases (panel focus, etc.)
   setActiveTabId:       React.Dispatch<React.SetStateAction<number>>;
   setActivePatientName: React.Dispatch<React.SetStateAction<string>>;
 }
@@ -81,21 +81,21 @@ export function useTabManager({
   const [patients,          setPatients]         = useState<Patient[]>([]);
   const [activePatientName, setActivePatientName] = useState<string>('');
 
-  // Références synchrones pour les lectures dans les callbacks
-  // (évite les closures périmées en React StrictMode ou en React batching)
+  // Synchronous references for reads inside the callbacks
+  // (avoids stale closures in React StrictMode or React batching)
   const tabsRef     = useRef<TabState[]>(tabs);
   tabsRef.current   = tabs;
   const patientsRef = useRef<Patient[]>(patients);
   patientsRef.current = patients;
 
-  // Valeurs dérivées — recalculées à chaque render
+  // Derived values — recomputed on each render
   const activeTabIdx    = tabs.findIndex(t => t.id === activeTabId);
   const activeTab       = activeTabIdx >= 0 ? tabs[activeTabIdx] : null;
   const activePatientIdx = patients.findIndex(p => p.name === activePatientName);
 
   // ── Helpers internes ────────────────────────────────────────────────────────
 
-  /** Ajoute ou met à jour un patient dans la liste */
+  /** Adds or updates a patient in the list */
   const upsertPatient = (
     prev:    Patient[],
     patName: string,
@@ -112,7 +112,7 @@ export function useTabManager({
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  /** Ajoute un onglet après un chargement DICOM réussi */
+  /** Adds a tab after a successful DICOM load */
   const addTab = useCallback((
     displayName: string,
     dicomPath:   string,
@@ -141,7 +141,7 @@ export function useTabManager({
     addLog(`MP4 loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
-  /** Charge un fichier (DICOM ou MP4) depuis un résultat batch et retourne l'ID du nouvel onglet */
+  /** Loads a file (DICOM or MP4) from a batch result and returns the new tab's ID */
   const openBatchResultAsTab = useCallback(async (result: BatchResultToOpen): Promise<number> => {
     addLog(`Loading: ${result.name}`, 'info');
 
@@ -189,7 +189,7 @@ export function useTabManager({
     try {
       data = await loadDicom(result.serverPath);
     } catch (err) {
-      // Temp file expiré — on re-uploade le fichier original si disponible
+      // Temp file expired — re-upload the original file if available
       const msg = err instanceof Error ? err.message : String(err);
       if (result.file && /introuvable|not found|no such file/i.test(msg)) {
         addLog(`Temporary file expired — re-uploading ${result.name}…`, 'info');
@@ -220,11 +220,11 @@ export function useTabManager({
     setActivePatientName(data.patientName);
     addLog(`DICOM loaded with results — ${data.frameCount} frame(s).`, 'success');
     return newTab.id;
-    // Note : setActiveTabId est intentionnellement absent ici.
-    // Le caller est responsable d'activer l'onglet (cas batch multi ou unique).
+    // Note: setActiveTabId is intentionally absent here.
+    // The caller is responsible for activating the tab (multi or single batch case).
   }, [addLog]);
 
-  /** Bascule vers un onglet existant */
+  /** Switches to an existing tab */
   const switchTab = useCallback((tabId: number) => {
     if (!tabsRef.current.some(t => t.id === tabId)) return;
     if (isPlaying) setIsPlaying(false);
@@ -233,7 +233,7 @@ export function useTabManager({
     if (patient) setActivePatientName(patient.name);
   }, [isPlaying, setIsPlaying]);
 
-  /** Ferme un onglet et sélectionne l'onglet voisin */
+  /** Closes a tab and selects the neighboring tab */
   const closeTab = useCallback((tabId: number) => {
     const currentTabs = tabsRef.current;
     if (currentTabs.length <= 1) {
@@ -257,12 +257,12 @@ export function useTabManager({
     if (newPatient) setActivePatientName(newPatient.name);
   }, [setIsPlaying]);
 
-  /** Met à jour l'onglet actif via un updater fonctionnel */
+  /** Updates the active tab via a functional updater */
   const updateActiveTab = useCallback((updater: (t: TabState) => TabState) => {
     setTabs(prev => prev.map(t => t.id === activeTabId ? updater(t) : t));
   }, [activeTabId]);
 
-  /** Met à jour un onglet quelconque par son ID (ex. injection résultat d'analyse) */
+  /** Updates any tab by its ID (e.g. injecting an analysis result) */
   const updateTabById = useCallback((tabId: number, updater: (t: TabState) => TabState) => {
     setTabs(prev => prev.map(t => t.id === tabId ? updater(t) : t));
   }, []);

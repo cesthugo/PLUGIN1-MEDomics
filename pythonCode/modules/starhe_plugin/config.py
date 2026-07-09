@@ -1,78 +1,78 @@
 """
-config.py — Configuration centrale du plug-in STARHE
-======================================================
-Toutes les constantes, chemins et hyperparamètres sont
-centralisés ici pour faciliter la maintenance.
+config.py — Central configuration of the STARHE plug-in
+========================================================
+All constants, paths and hyperparameters are
+centralized here to ease maintenance.
 """
 
 import os
 
-# ── Chemins de base ───────────────────────────────────────────────────────────
+# ── Base paths ────────────────────────────────────────────────────────────────
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 
-# Racine du dépôt (3 niveaux au-dessus de starhe_plugin/ → PLUGIN1-MEDomics/)
+# Repository root (3 levels above starhe_plugin/ → PLUGIN1-MEDomics/)
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "..", "..", ".."))
 
-# Dossier des fichiers DICOM (données locales de travail)
-# Configurable via variable d'environnement STARHE_DATA_DIR ;
-# par défaut : dossier "data/" à la racine du projet.
+# DICOM files directory (local working data)
+# Configurable via the STARHE_DATA_DIR environment variable;
+# default: "data/" directory at the project root.
 DATA_DIR     = os.environ.get("STARHE_DATA_DIR",
                               os.path.join(PROJECT_ROOT, "data"))
 MODELS_DIR   = os.path.join(BASE_DIR, "models")
 TEMP_DIR     = os.path.join(BASE_DIR, "temp")
 
-# Dossier des poids `.pth` téléchargés au runtime (Phase 4 Electron).
-# En mode dev : non défini → utilise MODELS_DIR (les .pth sont à côté des configs).
-# En mode packagé : Electron définit STARHE_WEIGHTS_DIR vers
-#                   `app.getPath('userData')/models/` (téléchargés au 1er lancement).
-# Les configs `.py` (rtmdet_starhe.py, etc.) restent toujours dans MODELS_DIR
-# (versionnées, bundlées par PyInstaller via spec datas).
+# Directory of `.pth` weights downloaded at runtime (Electron Phase 4).
+# In dev mode: not set → uses MODELS_DIR (the .pth files sit next to the configs).
+# In packaged mode: Electron sets STARHE_WEIGHTS_DIR to
+#                   `app.getPath('userData')/models/` (downloaded at first launch).
+# The `.py` configs (rtmdet_starhe.py, etc.) always remain in MODELS_DIR
+# (versioned, bundled by PyInstaller via spec datas).
 WEIGHTS_DIR  = os.environ.get("STARHE_WEIGHTS_DIR") or MODELS_DIR
 
-# Package Python `starhe` vendorisé (copié dans ai/vendor/ — autonome)
+# Vendored `starhe` Python package (copied into ai/vendor/ — self-contained)
 VENDOR_DIR   = os.path.join(BASE_DIR, "ai", "vendor")
 
-# Création automatique des dossiers s'ils n'existent pas
+# Automatically create the directories if they do not exist
 for _d in (MODELS_DIR, TEMP_DIR, WEIGHTS_DIR):
     os.makedirs(_d, exist_ok=True)
 
-# ── Modèles STARHE (artefacts locaux — autonomes, sans dépendance externe) ────
+# ── STARHE models (local artifacts — self-contained, no external dependency) ──
 
 # Classification (STARHE-RISK) — C3D
 STARHE_RISK_CHECKPOINT = os.path.join(WEIGHTS_DIR, "best_acc_mean_cls_f1_epoch_14.pth")
 
-# Backend C3D pour STARHE-RISK.
-# "mmaction2" : subprocess _c3d_runner.py utilisant les classes C3D et I3DHead
-#               de mmaction2 directement (sans registre mmengine). Requiert
-#               mmaction2==1.2.0 installé avec --no-deps dans le venv.
-#               Résultats bit-identiques à "pytorch" sur les mêmes tenseurs.
-# "pytorch"   : C3DRecognizer local (c3d.py), validé bit-identique à mmaction2,
-#               aucune dépendance mmaction2. Fallback automatique si mmaction2
-#               est absent ou si le subprocess échoue.
+# C3D backend for STARHE-RISK.
+# "mmaction2" : _c3d_runner.py subprocess using mmaction2's C3D and I3DHead
+#               classes directly (without the mmengine registry). Requires
+#               mmaction2==1.2.0 installed with --no-deps in the venv.
+#               Bit-identical results to "pytorch" on the same tensors.
+# "pytorch"   : local C3DRecognizer (c3d.py), validated bit-identical to mmaction2,
+#               no mmaction2 dependency. Automatic fallback if mmaction2
+#               is missing or the subprocess fails.
 C3D_BACKEND: str = os.environ.get("C3D_BACKEND", "mmaction2")
 
-# Détection (STARHE-DETECT) — modèle actif : "rtmdet" | "dino"
+# Detection (STARHE-DETECT) — active model: "rtmdet" | "dino"
 DETECT_BACKEND = "rtmdet"
 
-# Détection — RTMDet (défaut)
+# Detection — RTMDet (default)
 STARHE_DETECT_CONFIG     = os.path.join(MODELS_DIR,  "rtmdet_starhe.py")
 STARHE_DETECT_CHECKPOINT = os.path.join(WEIGHTS_DIR, "best_coco_bbox_mAP_50_iter_2100.pth")
 
-# Détection — DINO-DETR (optionnel)
-# Le config hérite de _base_/ via chemins relatifs → structure configs/ maintenue
+# Detection — DINO-DETR (optional)
+# The config inherits from _base_/ via relative paths → configs/ structure preserved
 STARHE_DINO_CONFIG     = os.path.join(MODELS_DIR,  "configs", "custom", "dino_starhe.py")
 STARHE_DINO_CHECKPOINT = os.path.join(WEIGHTS_DIR, "best_coco_bbox_mAP_50_iter_2100.pth")
 
-# Racine à ajouter au sys.path pour `import starhe` (package vendorisé)
-# Contient : vendor/starhe/__init__.py
+# Root to add to sys.path for `import starhe` (vendored package)
+# Contains: vendor/starhe/__init__.py
 STARHE_SHARE_ROOT = VENDOR_DIR
 
-# Score de confiance minimum pour afficher une détection
+# Minimum confidence score to display a detection
 DETECT_SCORE_THRESHOLD = 0.70
 
-# Échantillonnage temporel DETECT : 1 frame analysée toutes les N
-# Les N-1 frames intermédiaires héritent des détections de la frame analysée
-# 1 = toutes les frames (désactivé), 4 = gain ×4 (recommandé)
+# DETECT temporal subsampling: 1 frame analyzed out of every N
+# The N-1 intermediate frames inherit the detections of the analyzed frame
+# 1 = every frame (disabled), 4 = ×4 speedup (recommended)
 DETECT_EVERY_N = 4
 
 # RTMDet batch inference size.
@@ -90,74 +90,81 @@ DETECT_BATCH_SIZE = "auto"
 # "mps"   = force Apple Silicon GPU (raises if unavailable)
 INFERENCE_DEVICE = "auto"
 
-# ── Reproductibilité cross-plateforme ────────────────────────────────────────
-# Lorsque True, les deux modèles (RISK et DETECT) sont forcés sur CPU en
-# float64.  Float64 réduit l'erreur d'arrondi BLAS (MKL↔Accelerate) de ~1e-4
-# (float32) à ~1e-13 (float64), rendant les scores identiques bit-à-bit entre
-# Windows et macOS pour un même fichier DICOM.
+# ── Cross-platform reproducibility ───────────────────────────────────────────
+# When True, both models (RISK and DETECT) are forced onto CPU in
+# float64.  Float64 reduces the BLAS rounding error (MKL↔Accelerate) from ~1e-4
+# (float32) to ~1e-13 (float64), making scores bit-identical between
+# Windows and macOS for the same DICOM file.
 #
-# RISK  : "30.1% mac" vs "29.9% windows" → source : BLAS MKL↔Accelerate
-#         (float32 accumulation differ by ~0.002).  Float64 → identique.
-# DETECT: "48 frames mac" vs "44 frames windows" → source PRINCIPALE :
-#         Mac utilise MPS (Apple Silicon GPU), Windows utilise CPU → arithmétique
-#         complètement différente → scores borderline basculent autour de 0.70.
-#         Float64 sur CPU → identique sur les deux plateformes.
+# RISK  : "30.1% mac" vs "29.9% windows" → source: BLAS MKL↔Accelerate
+#         (float32 accumulation differ by ~0.002).  Float64 → identical.
+# DETECT: "48 frames mac" vs "44 frames windows" → MAIN source:
+#         Mac uses MPS (Apple Silicon GPU), Windows uses CPU → completely
+#         different arithmetic → borderline scores flip around 0.70.
+#         Float64 on CPU → identical on both platforms.
 #
-# Coût : ~2–3× plus lent sur CPU.  Désactiver (False) pour la prod rapide.
-DETERMINISTIC_INFERENCE: bool = True
+# Cost: ~2–3× slower on CPU.  Disable (False) for fast production runs.
+#
+# ⚠️  Set to False to reproduce Jérémy's native environment (Linux + GPU,
+#     float32): forcing CPU/float64 MOVES AWAY from his distribution. Switch back
+#     to True for bit-exact reproducibility across OSes.
+DETERMINISTIC_INFERENCE: bool = False
 
-# ── Bypass roundtrip MP4 dans prepUS ─────────────────────────────────────────
-# `cv2.VideoWriter(mp4v)` produit un bitstream dépendant du binaire FFmpeg lié
-# à OpenCV (macOS ARM Homebrew ≠ Linux ≠ Windows). Le pipeline standard écrit
-# `input.mp4` puis relit `video.mp4`, ce qui rend les crops C3D non-portables
-# entre OS pour le MÊME DICOM d'entrée.
+# ── MP4 roundtrip bypass in prepUS ───────────────────────────────────────────
+# `cv2.VideoWriter(mp4v)` produces a bitstream that depends on the FFmpeg binary
+# linked to OpenCV (macOS ARM Homebrew ≠ Linux ≠ Windows). The standard pipeline
+# writes `input.mp4` then reads back `video.mp4`, which makes the C3D crops
+# non-portable across OSes for the SAME input DICOM.
 #
-# True  : calcul prepUS 100 % numpy (preprocess_with_prepus_inmem). Sortie
-#         identique bit-à-bit cross-plateforme. Léger écart vs distribution
-#         d'entraînement (qui a vu des crops avec artefacts mp4v).
-# False : pipeline historique (preprocess_with_prepus) — reproduit exactement
-#         le chemin d'entraînement de Jérémy sur la même plateforme.
-PREPUS_BYPASS_MP4: bool = True
+# True  : 100% numpy prepUS computation (preprocess_with_prepus_inmem). Output
+#         bit-identical cross-platform. Slight deviation vs the training
+#         distribution (which saw crops with mp4v artifacts).
+# False : historical pipeline (preprocess_with_prepus) — reproduces exactly
+#         Jérémy's training path on the same platform.
+#
+# ⚠️  Set to False to reproduce Jérémy: the mp4v roundtrip is what the models
+#     saw during training. Switch back to True for cross-OS portability.
+PREPUS_BYPASS_MP4: bool = False
 
-# ── Décodage DICOM via weasis-dcm2png ────────────────────────────────────────
-# `pydicom.pixel_array` n'applique ni la Modality LUT ni la VOI LUT du DICOM,
-# alors que le pipeline d'entraînement de Jérémy passait par Weasis (LUT
-# appliquées) → PNG → ffmpeg → prepUS. Activer ce flag reproduit la phase
-# Weasis (LUT) pour réduire la divergence avec la distribution d'entraînement.
+# ── DICOM decoding via weasis-dcm2png ────────────────────────────────────────
+# `pydicom.pixel_array` applies neither the DICOM's Modality LUT nor its VOI LUT,
+# whereas Jérémy's training pipeline went through Weasis (LUTs
+# applied) → PNG → ffmpeg → prepUS. Enabling this flag reproduces the Weasis
+# phase (LUTs) to reduce the divergence from the training distribution.
 #
-# True  : DICOM → java -jar weasis-dcm2png → PNG → numpy. Nécessite Java sur
-#         le PATH + le JAR vendorisé (third_party/weasis-dcm2png/dist/).
-#         Fallback automatique vers pydicom si Java/JAR absent ou si weasis
-#         échoue (ex. JPEG 2000 non supporté par le JAR actuel).
-# False : pydicom direct via extract_frames(ds) — comportement historique,
-#         pas de LUT appliquée, pas de sous-processus Java.
+# True  : DICOM → java -jar weasis-dcm2png → PNG → numpy. Requires Java on
+#         the PATH + the vendored JAR (third_party/weasis-dcm2png/dist/).
+#         Automatic fallback to pydicom if Java/JAR is missing or if weasis
+#         fails (e.g. JPEG 2000 not supported by the current JAR).
+# False : direct pydicom via extract_frames(ds) — historical behavior,
+#         no LUT applied, no Java subprocess.
 USE_WEASIS_EXPORT: bool = True
 
-# ── Seuil de décision STARHE-RISK ────────────────────────────────────────────
-# Probabilité minimale (classe 1 = risque élevé) pour qualifier un patient
-# de « Risque élevé ».
+# ── STARHE-RISK decision threshold ───────────────────────────────────────────
+# Minimum probability (class 1 = high risk) to classify a patient
+# as "High risk".
 #
-# 0.50 = comportement argmax (défaut mmaction2 / Analyse A en entraînement)
-# 0.60 = réduit les faux positifs Supersonic au prix d'une sensibilité moindre
+# 0.50 = argmax behavior (mmaction2 default / Analysis A during training)
+# 0.60 = reduces Supersonic false positives at the cost of lower sensitivity
 #
-# Calibration sur ce jeu de test (47 patients) :
-#   Seuil 0.50 → Sens=90.9%  Spec=52.0%  Acc=70.2%  F1=0.741
-#   Seuil 0.60 → Sens=77.3%  Spec=64.0%  Acc=70.2%  F1=0.708
-#   Réf C3D    → Sens=77.3%  Spec=72.0%  Acc=74.5%
+# Calibration on this test set (47 patients):
+#   Threshold 0.50 → Sens=90.9%  Spec=52.0%  Acc=70.2%  F1=0.741
+#   Threshold 0.60 → Sens=77.3%  Spec=64.0%  Acc=70.2%  F1=0.708
+#   C3D ref        → Sens=77.3%  Spec=72.0%  Acc=74.5%
 RISK_THRESHOLD: float = 0.50
 
-# ── Paramètres de pré-traitement DICOM ───────────────────────────────────────
+# ── DICOM preprocessing parameters ───────────────────────────────────────────
 CROP_BLACK_THRESHOLD   = 10
 CROP_MIN_CONTENT_RATIO = 0.01
 
 # ── MongoDB ───────────────────────────────────────────────────────────────────
-# Surchargeable via variables d'environnement (cohérent avec go_server/config.go)
+# Overridable via environment variables (consistent with go_server/config.go)
 MONGO_URI        = os.environ.get("MONGO_URI",  "mongodb://localhost:54017/")
 MONGO_DB_NAME    = os.environ.get("MONGO_DB",   "medomics")
 MONGO_COLLECTION = os.environ.get("MONGO_COLL", "starhe_results")
 
-# ── Tags DICOM à anonymiser ───────────────────────────────────────────────────
-# (groupe, élément) selon le standard DICOM PS3.15 Annexe E
+# ── DICOM tags to anonymize ───────────────────────────────────────────────────
+# (group, element) per the DICOM PS3.15 Annex E standard
 DICOM_SENSITIVE_TAGS = [
     (0x0010, 0x0010),  # PatientName
     (0x0010, 0x0020),  # PatientID

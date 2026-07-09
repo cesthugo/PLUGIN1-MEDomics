@@ -1,7 +1,7 @@
-// config.go — Configuration du serveur STARHE
+// config.go — STARHE server configuration
 //
-// Toutes les valeurs peuvent être surchargées via variables d'environnement.
-// Exemple :
+// All values can be overridden via environment variables.
+// Example:
 //
 //	$env:PORT = "9090"
 //	$env:STARHE_PYTHON_EXE = "C:\Python313\python.exe"
@@ -16,20 +16,24 @@ import (
 )
 
 type appConfig struct {
-	// Réseau
+	// Network
 	Port string
 
-	// Python — mode "venv" (dev)
-	PythonExe     string // Chemin absolu vers python du venv
-	PythonModPath string // Dossier racine des modules Python (contient starhe_plugin/)
+	// Python — "venv" mode (dev)
+	PythonExe     string // Absolute path to the venv's python
+	PythonModPath string // Root directory of Python modules (contains starhe_plugin/)
 
-	// Python — mode "bundle" (Electron packagé). Si non vide, on utilise
-	// l'exécutable PyInstaller starhe_worker à la place du venv.
-	// Convention : starhe_worker --module <name> <args...>
+	// Python — "bundle" mode (packaged Electron). If non-empty, the
+	// PyInstaller starhe_worker executable is used instead of the venv.
+	// Convention: starhe_worker --module <name> <args...>
 	WorkerBin string
 
-	// UI — répertoire du build React servi sous /ui/
+	// UI — React build directory served under /ui/
 	UIDir string
+
+	// AI weights directory (.pth). Must mirror exactly the resolution
+	// in config.py: STARHE_WEIGHTS_DIR, else the plugin's models/.
+	WeightsDir string
 
 	// MongoDB
 	MongoURI        string
@@ -37,8 +41,8 @@ type appConfig struct {
 	MongoCollection string
 }
 
-// serverDir renvoie le répertoire absolu de l'exécutable Go (go_server/).
-// Utilisé pour calculer les chemins relatifs au projet indépendamment du CWD.
+// serverDir returns the absolute directory of the Go executable (go_server/).
+// Used to compute project-relative paths independently of the CWD.
 func serverDir() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -47,8 +51,8 @@ func serverDir() string {
 	return filepath.Dir(exe)
 }
 
-// defaultPythonExe renvoie le chemin absolu vers l'exécutable Python du venv,
-// calculé depuis le dossier de l'exécutable (go_server/).
+// defaultPythonExe returns the absolute path to the venv's Python executable,
+// computed from the executable's directory (go_server/).
 func defaultPythonExe() string {
 	base := filepath.Join(serverDir(), "..", "pythonCode", "modules", "starhe_plugin", ".venv")
 	if runtime.GOOS == "windows" {
@@ -62,9 +66,12 @@ var cfg = appConfig{
 
 	PythonExe:     envOr("STARHE_PYTHON_EXE", defaultPythonExe()),
 	PythonModPath: envOr("STARHE_PYTHON_PATH", filepath.Join(serverDir(), "..", "pythonCode", "modules")),
-	WorkerBin:     os.Getenv("STARHE_WORKER_BIN"), // vide en dev, défini par Electron en prod
+	WorkerBin:     os.Getenv("STARHE_WORKER_BIN"), // empty in dev, set by Electron in prod
 
 	UIDir: envOr("STARHE_UI_DIR", filepath.Join(serverDir(), "..", "renderer", "dist")),
+
+	WeightsDir: envOr("STARHE_WEIGHTS_DIR",
+		filepath.Join(serverDir(), "..", "pythonCode", "modules", "starhe_plugin", "models")),
 
 	MongoURI:        envOr("MONGO_URI", "mongodb://localhost:54017/"),
 	MongoDatabase:   envOr("MONGO_DB", "medomics"),
@@ -78,10 +85,10 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// pythonCmd construit la commande pour exécuter un module Python STARHE.
-// En mode bundle (WorkerBin défini) : starhe_worker --module <name> <args...>
-// En mode venv :                       python -m starhe_plugin.<name> <args...>
-// Env et Dir sont pré-configurés (PYTHONPATH, PYTHONUTF8, cwd).
+// pythonCmd builds the command to run a STARHE Python module.
+// In bundle mode (WorkerBin set): starhe_worker --module <name> <args...>
+// In venv mode:                   python -m starhe_plugin.<name> <args...>
+// Env and Dir are pre-configured (PYTHONPATH, PYTHONUTF8, cwd).
 func pythonCmd(ctx context.Context, module string, args ...string) *exec.Cmd {
 	var cmd *exec.Cmd
 	if cfg.WorkerBin != "" {
@@ -94,7 +101,7 @@ func pythonCmd(ctx context.Context, module string, args ...string) *exec.Cmd {
 	cmd.Dir = cfg.PythonModPath
 	cmd.Env = append(os.Environ(),
 		"PYTHONPATH="+cfg.PythonModPath,
-		"PYTHONUTF8=1", // force UTF-8 sous Windows
+		"PYTHONUTF8=1", // force UTF-8 on Windows
 	)
 	return cmd
 }

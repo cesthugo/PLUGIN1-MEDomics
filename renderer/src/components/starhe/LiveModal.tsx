@@ -1,12 +1,12 @@
-// components/LiveModal.tsx — Porte React de l'onglet "Analyse en direct"
+// components/LiveModal.tsx — React gate for the "Live analysis" tab
 //
-// Réplique LiveTab (live_tab.py) avec les 3 sources :
+// Replicates LiveTab (live_tab.py) with the 3 sources:
 //   - 📡  C-STORE DICOM  (port configurable)
-//   - 📂  Dossier (polling, .dcm)
+//   - 📂  Folder (polling, .dcm)
 //   - 🎥  HDMI (carte de capture)
 //
-// Toutes les opérations backend sont déléguées au serveur Go via SSE.
-// Le serveur Go lance live_pipeline.py dans un subprocess avec la source choisie.
+// All backend operations are delegated to the Go server via SSE.
+// The Go server launches live_pipeline.py in a subprocess with the chosen source.
 
 import React, { useCallback, useRef, useState } from 'react';
 import { getApiBase } from '../../utilities/starhe/api';
@@ -70,7 +70,7 @@ function SH({ title }: { title: string }) {
   );
 }
 
-// ── Composant principal ───────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export interface LiveModalProps {
   onClose: () => void;
@@ -91,11 +91,11 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
 
   const abortRef = useRef<AbortController | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Refs pour le découplage affichage/inférence (« caméra de surveillance »)
+  // Refs for the display/inference decoupling ("surveillance camera")
   const lastFrameB64Ref = useRef<string | null>(null);
   const lastDetsRef     = useRef<Detection[]>([]);
 
-  // ── Dessin du frame live ────────────────────────────────────────────────────
+  // ── Live frame drawing ────────────────────────────────────────────────────────
 
   const drawLiveFrame = useCallback((b64: string, dets: Detection[]) => {
     const canvas = canvasRef.current;
@@ -121,7 +121,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
     img.src = `data:image/jpeg;base64,${b64}`;
   }, []);
 
-  // ── Démarrage de l'analyse live ────────────────────────────────────────────
+  // ── Live analysis start ────────────────────────────────────────────────────
 
   const startLive = useCallback(async () => {
     if (state.running) return;
@@ -168,7 +168,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
           try {
             const payload = JSON.parse(raw);
             if (payload.data?.frame_b64) {
-              // Frame preview : afficher immédiatement avec les bbox existantes
+              // Frame preview: display immediately with the existing bboxes
               frameCount++;
               const now = Date.now();
               const fps = now - lastFpsTs > 0 ? Math.round(1000 / (now - lastFpsTs)) : 0;
@@ -181,7 +181,7 @@ export function LiveModal({ onClose, addLog }: LiveModalProps) {
               }));
             }
             if (!payload.data?.frame_b64 && payload.data?.detections !== undefined) {
-              // Résultats d'inférence reçus en asynchrone : overlay sur la frame courante
+              // Inference results received asynchronously: overlay on the current frame
               const dets: Detection[] = payload.data.detections;
               lastDetsRef.current = dets;
               if (lastFrameB64Ref.current) {

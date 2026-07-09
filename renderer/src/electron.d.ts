@@ -1,12 +1,12 @@
 /**
- * electron.d.ts — Déclarations de types pour l'API Electron injectée
- *                 dans le renderer via contextBridge (preload.ts).
+ * electron.d.ts — Type declarations for the Electron API injected
+ *                 into the renderer via contextBridge (preload.ts).
  *
- * Ces types sont disponibles globalement dans tout le code TypeScript
- * du renderer (src/) sans import explicite.
+ * These types are globally available throughout the renderer's
+ * TypeScript code (src/) without an explicit import.
  */
 
-// Déclaration pour les imports d'images (PNG, JPG, SVG, WEBP)
+// Declaration for image imports (PNG, JPG, SVG, WEBP)
 declare module '*.png' { const src: string; export default src; }
 declare module '*.jpg' { const src: string; export default src; }
 declare module '*.jpeg' { const src: string; export default src; }
@@ -15,19 +15,19 @@ declare module '*.webp' { const src: string; export default src; }
 
 interface Window {
   /**
-   * API exposée par electron/preload.ts via contextBridge.
-   * Disponible uniquement dans le contexte Electron.
+   * API exposed by electron/preload.ts via contextBridge.
+   * Available only in the Electron context.
    */
   electronAPI?: {
-    /** Ouvre un dialogue natif de sélection de fichiers DICOM. */
+    /** Opens a native DICOM file selection dialog. */
     openDicomFiles: () => Promise<string[]>;
-    /** Base URL du serveur Go local (ex: 'http://localhost:8080'). */
+    /** Base URL of the local Go server (e.g. 'http://localhost:8080'). */
     apiBase: string;
   };
 
   /**
-   * Alternative legacy : injection manuelle de la base URL (MEDomics).
-   * Utilisé quand le plugin est intégré dans MEDomics sans Electron preload.
+   * Legacy alternative: manual injection of the base URL (MEDomics).
+   * Used when the plugin is integrated into MEDomics without the Electron preload.
    */
   __STARHE_API_BASE__?: string;
 }

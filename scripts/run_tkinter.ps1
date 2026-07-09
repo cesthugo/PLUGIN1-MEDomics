@@ -1,7 +1,7 @@
-﻿# run_tkinter.ps1 - Lanceur autonome du prototype STARHE Tkinter (Windows)
-# Script autonome : detecte Python 3.13, cree le venv si absent,
-# installe les dependances et prepUS, puis lance l interface.
-# Aucune configuration manuelle requise apres avoir installe Python 3.13.
+﻿# run_tkinter.ps1 - Standalone launcher for the STARHE Tkinter prototype (Windows)
+# Standalone script: detects Python 3.13, creates the venv if missing,
+# installs the dependencies and prepUS, then launches the interface.
+# No manual configuration required after installing Python 3.13.
 
 $ROOT          = Split-Path -Parent $PSScriptRoot
 $VENV_DIR     = "$ROOT\pythonCode\modules\starhe_plugin\.venv"
@@ -10,9 +10,9 @@ $MODULES      = "$ROOT\pythonCode\modules"
 $PREPUS       = "$ROOT\third_party\prepUS"
 $REQUIREMENTS = "$ROOT\pythonCode\modules\starhe_plugin\requirements.txt"
 
-# -- 1. Trouver Python 3.13 sur le systeme ------------------------------------
-# On stocke l executable et ses arguments separement pour eviter les problemes
-# de decoupage de tableau et de splatting dans PowerShell.
+# -- 1. Find Python 3.13 on the system ----------------------------------------
+# We store the executable and its arguments separately to avoid the problems
+# of array splitting and splatting in PowerShell.
 $PYTHON_SYS_EXE  = $null
 $PYTHON_SYS_ARGS = @()
 
@@ -52,7 +52,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# -- 3. Creer le venv si absent -----------------------------------------------
+# -- 3. Create the venv if missing --------------------------------------------
 if (-not (Test-Path $PYTHON)) {
     Write-Host "Venv introuvable - creation avec $sysLabel..."
     & $PYTHON_SYS_EXE @($PYTHON_SYS_ARGS) -m venv "$VENV_DIR"
@@ -70,7 +70,7 @@ if (-not (Test-Path $PYTHON)) {
     Write-Host "Venv cree et dependances installees."
 }
 
-# -- 3b. S assurer que pip est disponible dans le venv -----------------------
+# -- 3b. Ensure pip is available in the venv ---------------------------------
 & $PYTHON -m pip --version 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "pip absent du venv - bootstrap via ensurepip..."
@@ -89,7 +89,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "pip et dependances installes avec succes."
 }
 
-# -- 3c. Installer les dependances si absentes --------------------------------
+# -- 3c. Install the dependencies if missing ----------------------------------
 & $PYTHON -c "import numpy" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Dependances absentes - installation depuis requirements.txt..."
@@ -101,7 +101,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "Dependances installees avec succes."
 }
 
-# -- 4. Installer prepUS si absent --------------------------------------------
+# -- 4. Install prepUS if missing ---------------------------------------------
 & $PYTHON -c "import prepUS" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "prepUS absent du venv - installation depuis third_party/prepUS..."
@@ -114,7 +114,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "prepUS installe avec succes."
 }
 
-# -- 5. Telecharger les poids IA si absents -----------------------------------
+# -- 5. Download the AI weights if missing ------------------------------------
 $MODELS_DIR = "$ROOT\pythonCode\modules\starhe_plugin\models"
 $RISK_PTH   = "$MODELS_DIR\best_acc_mean_cls_f1_epoch_14.pth"
 $DET_PTH    = "$MODELS_DIR\best_coco_bbox_mAP_50_iter_2100.pth"
@@ -127,7 +127,7 @@ if (-not (Test-Path $RISK_PTH) -or -not (Test-Path $DET_PTH)) {
     }
 }
 
-# -- 6. Lancer l interface ----------------------------------------------------
+# -- 6. Launch the interface --------------------------------------------------
 $pythonVer = & $PYTHON --version 2>&1
 Write-Host "Lancement STARHE Tkinter ($pythonVer)..."
 Set-Location $MODULES

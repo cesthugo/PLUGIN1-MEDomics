@@ -1,4 +1,4 @@
-// handlers.go — Handlers HTTP du serveur STARHE
+// handlers.go — HTTP handlers of the STARHE server
 package main
 
 import (
@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ import (
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-// analyzeRequest représente le corps de la requête POST /starhe/analyze.
+// analyzeRequest represents the body of the POST /starhe/analyze request.
 type analyzeRequest struct {
 	DicomPath          string `json:"dicom_path"`
 	AnonMode           string `json:"anon_mode"`
@@ -35,21 +36,21 @@ type analyzeRequest struct {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-// writeJSON sérialise v en JSON et l'envoie avec le code HTTP donné.
+// writeJSON serializes v to JSON and sends it with the given HTTP status code.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }
 
-// writeSSE envoie un événement SSE (format : "data: <payload>\n\n").
+// writeSSE sends an SSE event (format: "data: <payload>\n\n").
 func writeSSE(w http.ResponseWriter, f http.Flusher, payload string) {
 	fmt.Fprintf(w, "data: %s\n\n", payload)
 	f.Flush()
 }
 
-// computeAnalysisMode calcule la clé de cache analysis_mode depuis la requête.
-// Doit correspondre exactement à la valeur calculée par pipeline.py.
+// computeAnalysisMode computes the analysis_mode cache key from the request.
+// Must match exactly the value computed by pipeline.py.
 func computeAnalysisMode(req analyzeRequest) string {
 	r := "0"
 	if req.RunRisk {
@@ -66,8 +67,8 @@ func computeAnalysisMode(req analyzeRequest) string {
 	return fmt.Sprintf("risk=%s,detect=%s,backscan=%s,anon=%s", r, d, b, req.AnonMode)
 }
 
-// findCachedResult cherche un résultat en cache dans MongoDB.
-// Retourne nil, nil si aucun document trouvé.
+// findCachedResult looks up a cached result in MongoDB.
+// Returns nil, nil if no document was found.
 func findCachedResult(ctx context.Context, filePath, analysisMode string) (bson.M, error) {
 	if mongoClient == nil {
 		return nil, nil
@@ -88,9 +89,9 @@ func findCachedResult(ctx context.Context, filePath, analysisMode string) (bson.
 	return doc, nil
 }
 
-// streamCachedResult rejoue un résultat mis en cache comme événements SSE.
+// streamCachedResult replays a cached result as SSE events.
 func streamCachedResult(w http.ResponseWriter, f http.Flusher, doc bson.M) {
-	// Événement progress pour informer le client
+	// Progress event to inform the client
 	progress, _ := json.Marshal(map[string]any{
 		"level":   "progress",
 		"message": "Résultats chargés depuis le cache MongoDB",
@@ -98,7 +99,7 @@ func streamCachedResult(w http.ResponseWriter, f http.Flusher, doc bson.M) {
 	})
 	writeSSE(w, f, string(progress))
 
-	// Reconstruit le payload résultat identique à celui émis par pipeline.py
+	// Rebuild the result payload identical to the one emitted by pipeline.py
 	resultData := map[string]any{}
 	if oid, ok := doc["_id"].(primitive.ObjectID); ok {
 		resultData["doc_id"] = oid.Hex()
@@ -125,22 +126,22 @@ func streamCachedResult(w http.ResponseWriter, f http.Flusher, doc bson.M) {
 	writeSSE(w, f, "[DONE]")
 }
 
-// collection retourne la collection MongoDB des résultats STARHE.
+// collection returns the MongoDB collection of STARHE results.
 func collection() *mongo.Collection {
 	return mongoClient.Database(cfg.MongoDatabase).Collection(cfg.MongoCollection)
 }
 
 // ── POST /starhe/analyze ───────────────────────────────────────────────────
 //
-// Lance pipeline.py en subprocess et streame sa sortie au format SSE.
+// Launches pipeline.py as a subprocess and streams its output as SSE.
 //
-// Chaque événement SSE correspond à une ligne GO_PRINT émise par Python :
+// Each SSE event corresponds to a GO_PRINT line emitted by Python:
 //
 //	data: {"level":"progress","message":"Chargement DICOM…","data":{"step":1,"total":6,"percent":16}}
-//	data: {"level":"result","message":"Pipeline terminé","data":{...}}
+//	data: {"level":"result","message":"Pipeline completed","data":{...}}
 //	data: [DONE]
 func analyzeHandler(w http.ResponseWriter, r *http.Request) {
-	// Valeurs par défaut + décodage JSON
+	// Default values + JSON decoding
 	req := analyzeRequest{
 		AnonMode:           "hash",
 		RunRisk:            true,
@@ -154,7 +155,7 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validation de base
+	// Basic validation
 	if req.DicomPath == "" {
 		http.Error(w, `{"error":"dicom_path est requis"}`, http.StatusBadRequest)
 		return
@@ -170,7 +171,7 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		req.BackscanHeight = 512
 	}
 
-	// En-têtes SSE
+	// SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -181,7 +182,7 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Vérification du cache MongoDB avant de lancer Python
+	// Check the MongoDB cache before launching Python
 	analysisMode := computeAnalysisMode(req)
 	if cached, err := findCachedResult(r.Context(), req.DicomPath, analysisMode); err != nil {
 		log.Printf("avertissement cache MongoDB: %v", err)
@@ -191,7 +192,7 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Construction des arguments subprocess
+	// Build the subprocess arguments
 	args := []string{
 		req.DicomPath,
 		"--anon_mode", req.AnonMode,
@@ -223,12 +224,12 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Consomme stderr dans un goroutine pour éviter le blocage du buffer OS
+	// Consume stderr in a goroutine to avoid blocking the OS buffer
 	go func() { io.Copy(log.Writer(), stderr) }() //nolint:errcheck
 
-	// Lit stdout ligne par ligne et forward chaque GO_PRINT en SSE
-	// Le résultat final (go_result) peut dépasser 64 KB (beaucoup de détections) :
-	// on alloue un buffer de 10 MB pour éviter le deadlock pipe.
+	// Read stdout line by line and forward each GO_PRINT as SSE.
+	// The final result (go_result) can exceed 64 KB (many detections):
+	// allocate a 10 MB buffer to avoid a pipe deadlock.
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 	for scanner.Scan() {
@@ -236,42 +237,58 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(line, "GO_PRINT|") {
 			continue
 		}
-		// Format : "GO_PRINT|<level>|<json_payload>"
+		// Format: "GO_PRINT|<level>|<json_payload>"
 		parts := strings.SplitN(line, "|", 3)
 		if len(parts) == 3 {
 			writeSSE(w, flusher, parts[2])
 		}
 	}
 
-	if err := cmd.Wait(); err != nil && r.Context().Err() == nil {
-		// Erreur réelle (pas une déconnexion client)
-		log.Printf("pipeline Python terminé avec erreur: %v", err)
-	}
-
-	writeSSE(w, flusher, "[DONE]")
+	finishSSE(w, flusher, cmd.Wait(), r.Context().Err(), "pipeline Python")
 }
 
-// sseError envoie un événement SSE d'erreur puis [DONE].
+// sseError sends an SSE error event followed by [DONE].
 func sseError(w http.ResponseWriter, f http.Flusher, msg string) {
 	payload, _ := json.Marshal(map[string]string{"level": "error", "message": msg})
 	writeSSE(w, f, string(payload))
 	writeSSE(w, f, "[DONE]")
 }
 
+// finishSSE closes an SSE stream after cmd.Wait(): if the Python subprocess
+// exited with an error (and the client did not cancel the request), a
+// {"level":"error"} event is emitted BEFORE [DONE] so the frontend can
+// distinguish success from a crash — otherwise the UI would show ✓ "done"
+// with Risk: — even though the models never ran.
+func finishSSE(w http.ResponseWriter, f http.Flusher, waitErr error, ctxErr error, what string) {
+	if waitErr != nil && ctxErr == nil {
+		log.Printf("%s terminé avec erreur: %v", what, waitErr)
+		exitCode := -1
+		if ee, ok := waitErr.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		}
+		payload, _ := json.Marshal(map[string]string{
+			"level":   "error",
+			"message": fmt.Sprintf("pipeline exit code %d — consultez les logs serveur (%s)", exitCode, what),
+		})
+		writeSSE(w, f, string(payload))
+	}
+	writeSSE(w, f, "[DONE]")
+}
+
 // ── POST /starhe/live ──────────────────────────────────────────────────────
 //
-// Lance run_live.py en subprocess et streame sa sortie au format SSE.
-// Le subprocess tourne jusqu'à ce que le client se déconnecte (contexte
-// HTTP annulé → exec.CommandContext tue le processus).
+// Launches run_live.py as a subprocess and streams its output as SSE.
+// The subprocess runs until the client disconnects (HTTP context
+// cancelled → exec.CommandContext kills the process).
 //
-// Corps de requête JSON :
+// JSON request body:
 //
 //	{
 //	  "source":      "cstore" | "folder" | "hdmi",
 //	  "port":        11112,          // C-STORE SCP port (source=cstore)
-//	  "folder_path": "/path/...",    // dossier à surveiller (source=folder)
-//	  "device":      0,              // index cv2 (source=hdmi)
-//	  "no_risk":     false           // désactiver STARHE-RISK
+//	  "folder_path": "/path/...",    // folder to watch (source=folder)
+//	  "device":      0,              // cv2 index (source=hdmi)
+//	  "no_risk":     false           // disable STARHE-RISK
 //	}
 type liveRequest struct {
 	Source     string `json:"source"`
@@ -303,7 +320,7 @@ func liveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// En-têtes SSE
+	// SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -314,7 +331,7 @@ func liveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Construction des arguments subprocess
+	// Build the subprocess arguments
 	args := []string{
 		"--source", req.Source,
 	}
@@ -346,8 +363,8 @@ func liveHandler(w http.ResponseWriter, r *http.Request) {
 
 	go func() { io.Copy(log.Writer(), stderr) }() //nolint:errcheck
 
-	// Lit stdout ligne par ligne ; chaque GO_PRINT est forwardé en SSE.
-	// Les frames JPEG base64 peuvent dépasser 64 KB — buffer 10 MB.
+	// Read stdout line by line; each GO_PRINT is forwarded as SSE.
+	// Base64 JPEG frames can exceed 64 KB — 10 MB buffer.
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 	for scanner.Scan() {
@@ -361,16 +378,12 @@ func liveHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := cmd.Wait(); err != nil && r.Context().Err() == nil {
-		log.Printf("pipeline live terminé avec erreur: %v", err)
-	}
-
-	writeSSE(w, flusher, "[DONE]")
+	finishSSE(w, flusher, cmd.Wait(), r.Context().Err(), "pipeline live")
 }
 
 // ── GET /starhe/results ────────────────────────────────────────────────────
 //
-// Paramètre optionnel : ?limit=N (défaut 50, max 1000).
+// Optional parameter: ?limit=N (default 50, max 1000).
 func listResultsHandler(w http.ResponseWriter, r *http.Request) {
 	limit := int64(50)
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -399,7 +412,7 @@ func listResultsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convertit les ObjectID en strings lisibles par JSON
+	// Convert ObjectIDs to JSON-readable strings
 	for _, doc := range results {
 		if oid, ok := doc["_id"].(primitive.ObjectID); ok {
 			doc["_id"] = oid.Hex()

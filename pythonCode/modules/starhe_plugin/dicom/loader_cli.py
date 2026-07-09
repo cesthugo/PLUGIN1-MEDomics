@@ -1,13 +1,13 @@
 """
-dicom/loader_cli.py — CLI pour charger un DICOM et retourner les frames en JPEG base64
+dicom/loader_cli.py — CLI to load a DICOM and return the frames as base64 JPEG
 ========================================================================================
-Appelé par le serveur Go pour alimenter le frontend React.
+Called by the Go server to feed the React frontend.
 
-Usage :
+Usage:
     python -m starhe_plugin.dicom.loader_cli <dicom_path> [--quality 70] [--max-dim 640]
 
-Sortie stdout : JSON unique avec toutes les frames encodées en JPEG base64.
-Format de sortie :
+stdout output: single JSON with all frames encoded as base64 JPEG.
+Output format:
 {
   "file_name":          "example.dcm",
   "frame_count":        100,
@@ -34,7 +34,7 @@ import argparse
 import traceback
 from io import BytesIO
 
-# Ajoute le dossier modules au path pour les imports relatifs
+# Add the modules directory to the path for relative imports
 _MODULES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _MODULES_DIR not in sys.path:
     sys.path.insert(0, _MODULES_DIR)
@@ -76,20 +76,20 @@ _KEPT_ATTRS: list[tuple[str, str]] = [
 
 
 def _extract_pixel_spacing(ds) -> list[float] | None:
-    """Extrait l'espacement pixel depuis les tags DICOM (plusieurs fallbacks)."""
-    # Priorité 1 : PixelSpacing
+    """Extracts the pixel spacing from the DICOM tags (several fallbacks)."""
+    # Priority 1: PixelSpacing
     try:
         ps = ds.PixelSpacing
         return [float(ps[0]), float(ps[1])]
     except AttributeError:
         pass
-    # Priorité 2 : ImagerPixelSpacing
+    # Priority 2: ImagerPixelSpacing
     try:
         ps = ds.ImagerPixelSpacing
         return [float(ps[0]), float(ps[1])]
     except AttributeError:
         pass
-    # Priorité 3 : Régions US (PhysicalDeltaX/Y en cm/pixel)
+    # Priority 3: US regions (PhysicalDeltaX/Y in cm/pixel)
     try:
         region = ds.SequenceOfUltrasoundRegions[0]
         row_mm = abs(float(region.PhysicalDeltaY)) * 10.0
@@ -106,9 +106,9 @@ def load_and_encode(
     quality: int = 70,
     max_dim: int = 640,
 ) -> dict:
-    """Charge un DICOM, anonymise, extrait les frames, encode en JPEG base64.
+    """Loads a DICOM, anonymizes, extracts the frames, encodes as base64 JPEG.
 
-    Retourne un dict prêt à être sérialisé en JSON.
+    Returns a dict ready to be serialized to JSON.
     """
     import numpy as np
     from PIL import Image
@@ -119,7 +119,7 @@ def load_and_encode(
 
     ds = load_dicom(dicom_path)
 
-    # ── Capture des valeurs sensibles AVANT anonymisation ─────────────────────
+    # ── Capture the sensitive values BEFORE anonymization ─────────────────────
     original_sensitive: list[list[str]] = []
     for tag in DICOM_SENSITIVE_TAGS:
         name = _SENS_LABEL.get(tag, str(tag))
@@ -128,9 +128,9 @@ def load_and_encode(
 
     ds = anonymize(ds)
 
-    # ── Extraction et normalisation des frames ────────────────────────────────
-    # Max 120 frames pour l'affichage : évite de décoder des centaines de frames J2K
-    # (le pipeline AI utilise extract_frames sans cette limite pour l'analyse complète)
+    # ── Frame extraction and normalization ────────────────────────────────────
+    # Max 120 frames for display: avoids decoding hundreds of J2K frames
+    # (the AI pipeline uses extract_frames without this limit for the full analysis)
     MAX_DISPLAY_FRAMES = 120
     frames_raw = extract_frames(ds, display_max_frames=MAX_DISPLAY_FRAMES)
 
@@ -140,11 +140,11 @@ def load_and_encode(
     else:
         frames_uint8 = np.stack([frame_to_uint8(f) for f in frames_raw])
         frames_rgb   = frames_uint8
-    del frames_raw  # libère ~400 MB si frames RGB 1280×890
+    del frames_raw  # frees ~400 MB for 1280×890 RGB frames
 
     frames_rgb = remove_pixel_burnin(frames_rgb)
 
-    # ── Métadonnées conservées ────────────────────────────────────────────────
+    # ── Kept metadata ─────────────────────────────────────────────────────────
     kept_metadata: list[list[str]] = []
     for attr, label in _KEPT_ATTRS:
         val = getattr(ds, attr, None)
@@ -154,14 +154,14 @@ def load_and_encode(
     # ── Pixel spacing ─────────────────────────────────────────────────────────
     pixel_spacing = _extract_pixel_spacing(ds)
 
-    # ── FPS natif ─────────────────────────────────────────────────────────────
+    # ── Native FPS ────────────────────────────────────────────────────────────
     frame_time_ms = getattr(ds, "FrameTime", None)
     try:
         base_fps = 1000.0 / float(frame_time_ms) if frame_time_ms else 22.0
     except (ValueError, ZeroDivisionError):
         base_fps = 22.0
 
-    # ── Nom patient (pour groupement d'onglets) ───────────────────────────────
+    # ── Patient name (for tab grouping) ───────────────────────────────────────
     patient_name_raw = next(
         (v for n, v in original_sensitive if n == "PatientName" and v != "— absent"),
         "Unknown patient",
@@ -173,7 +173,7 @@ def load_and_encode(
         "",
     )
 
-    # ── Encodage JPEG base64 ──────────────────────────────────────────────────
+    # ── Base64 JPEG encoding ──────────────────────────────────────────────────
     frames_b64: list[str] = []
     for i, f in enumerate(frames_rgb):
         try:
@@ -184,7 +184,7 @@ def load_and_encode(
             else:
                 img = Image.fromarray(f.astype(np.uint8), mode="RGB")
 
-            # Réduction si trop grand
+            # Downscale if too large
             w, h = img.size
             if max(w, h) > max_dim:
                 scale = max_dim / max(w, h)
@@ -223,13 +223,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Load a DICOM file and output frames as JPEG base64 JSON."
     )
-    parser.add_argument("dicom_path",      help="Chemin vers le fichier DICOM")
-    parser.add_argument("--quality",  type=int, default=70,  help="Qualité JPEG (1-95)")
-    parser.add_argument("--max-dim",  type=int, default=640, help="Dimension max d'une frame")
+    parser.add_argument("dicom_path",      help="Path to the DICOM file")
+    parser.add_argument("--quality",  type=int, default=70,  help="JPEG quality (1-95)")
+    parser.add_argument("--max-dim",  type=int, default=640, help="Max dimension of a frame")
     args = parser.parse_args()
 
-    # Redirige tous les go_print() vers stderr so que stdout ne contient que le JSON final.
-    # Le serveur Go capture stderr séparément (cmd.Stderr) et retourne l'erreur si exit ≠ 0.
+    # Redirect all go_print() to stderr so that stdout only contains the final JSON.
+    # The Go server captures stderr separately (cmd.Stderr) and returns the error if exit ≠ 0.
     from starhe_plugin.utils.go_print import set_log_sink
     set_log_sink(lambda level, msg: sys.stderr.write(f"GO_PRINT|{level}|{msg}\n") or sys.stderr.flush())
 

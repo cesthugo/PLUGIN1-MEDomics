@@ -1,4 +1,4 @@
-// types.ts — Types partagés du plugin STARHE
+// types.ts — Shared types of the STARHE plugin
 
 // ── Log ───────────────────────────────────────────────────────────────────────
 export type LogLevel = 'info' | 'success' | 'warning' | 'error';
@@ -19,32 +19,32 @@ export interface DicomData {
   /** [row_mm_per_px, col_mm_per_px] | null */
   pixelSpacing: [number, number] | null;
   baseFps: number;
-  /** [[TagName, OriginalValue], …] avant anonymisation */
+  /** [[TagName, OriginalValue], …] before anonymization */
   originalSensitive: [string, string][];
-  /** [[Label, Value], …] métadonnées conservées */
+  /** [[Label, Value], …] kept metadata */
   keptMetadata: [string, string][];
   patientName: string;
   studyDate: string;
-  /** Frames encodées en JPEG base64 (toutes) */
+  /** Frames encoded as base64 JPEG (all of them) */
   framesB64: string[];
   /**
-   * Chemin du fichier sur le serveur Go.
-   * - Mode Electron : chemin absolu d'origine (ex: /data/patient.dcm)
-   * - Mode navigateur upload : chemin du fichier temporaire serveur (ex: /tmp/starhe_upload_XYZ.dcm)
-   * Ce champ est utilisé pour lancer l'analyse STARHE.
+   * File path on the Go server.
+   * - Electron mode: original absolute path (e.g. /data/patient.dcm)
+   * - Browser upload mode: server temporary file path (e.g. /tmp/starhe_upload_XYZ.dcm)
+   * This field is used to launch the STARHE analysis.
    */
   serverPath: string;
 }
 
-// ── Détection ────────────────────────────────────────────────────────────────
+// ── Detection ─────────────────────────────────────────────────────────────────
 export interface Detection {
-  /** [x0, y0, x1, y1] en coordonnées image originale */
+  /** [x0, y0, x1, y1] in original image coordinates */
   bbox: [number, number, number, number];
   label: string;
   score: number;
 }
 
-// ── Résultats IA ──────────────────────────────────────────────────────────────
+// ── AI results ────────────────────────────────────────────────────────────────
 export interface AnalysisResult {
   riskText: string;
   riskFg: string;
@@ -52,35 +52,35 @@ export interface AnalysisResult {
   detFg: string;
 }
 
-// ── Mesures ───────────────────────────────────────────────────────────────────
+// ── Measures ──────────────────────────────────────────────────────────────────
 export interface Measure {
-  /** Deux points en coordonnées image */
+  /** Two points in image coordinates */
   pts: [[number, number], [number, number]];  /**
-   * Décalage du label depuis le milieu du segment, en coordonnées image.
-   * `undefined` = position perp. automatique calculée à l’affichaçage.
+   * Offset of the label from the segment midpoint, in image coordinates.
+   * `undefined` = automatic perpendicular position computed at display time.
    */
   labelOffset?: [number, number];}
 
 // ── Mode d'interaction canvas ─────────────────────────────────────────────────
 export type ViewMode = 'normal' | 'pan' | 'measure' | 'series';
 
-// ── Onglet ────────────────────────────────────────────────────────────────────
+// ── Tab ───────────────────────────────────────────────────────────────────────
 export interface TabState {
-  id: number;              // identifiant unique (auto-incrémenté)
-  label: string;           // libellé affiché dans la barre d'onglets
+  id: number;              // unique identifier (auto-incremented)
+  label: string;           // label shown in the tab bar
   patientName: string;
   dicomPath: string;
-  /** true si cet onglet contient une vidéo MP4 (pas un DICOM) */
+  /** true if this tab contains an MP4 video (not a DICOM) */
   isMp4?: boolean;
-  data: DicomData | null;  // null si chargement en cours
+  data: DicomData | null;  // null while loading
 
   frameIdx: number;
-  /** mode→par-frame détections */
+  /** mode→per-frame detections */
   detectionsBy: Partial<Record<'original' | 'backscan', Detection[][]>>;
   resultsBy:    Partial<Record<'original' | 'backscan', AnalysisResult>>;
-  /** mesures par frame (en coords image) */
+  /** measures per frame (in image coords) */
   measuresByFrame: Record<number, Measure[]>;
-  selectedMeasure: number | null; // index dans measuresByFrame[frameIdx]
+  selectedMeasure: number | null; // index into measuresByFrame[frameIdx]
 
   zoom:       number;
   panX:       number;
@@ -95,7 +95,7 @@ export interface TabState {
 // ── Patient ───────────────────────────────────────────────────────────────────
 export interface Patient {
   name: string;
-  tabIds: number[]; // IDs des onglets (pas des indices)
+  tabIds: number[]; // tab IDs (not indices)
 }
 
 // ── SSE pipeline ──────────────────────────────────────────────────────────────
@@ -107,8 +107,8 @@ export interface SSEPayload {
     total?: number;
     percent?: number;
     risk?: {
-      score?: number; label?: string;          // camelCase (réservé)
-      risk_score?: number; risk_label?: string; // snake_case retourné par Python
+      score?: number; label?: string;          // camelCase (reserved)
+      risk_score?: number; risk_label?: string; // snake_case returned by Python
     };
     detections_per_frame?: Detection[][];
     n_frames_with_det?: number;

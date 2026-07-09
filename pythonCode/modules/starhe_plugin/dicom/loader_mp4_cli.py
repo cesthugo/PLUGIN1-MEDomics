@@ -1,13 +1,13 @@
 """
-dicom/loader_mp4_cli.py — CLI pour charger un fichier MP4 et retourner les frames en JPEG base64
+dicom/loader_mp4_cli.py — CLI to load an MP4 file and return the frames as base64 JPEG
 =================================================================================================
-Appelé par le serveur Go pour alimenter le frontend React (même format que loader_cli.py).
+Called by the Go server to feed the React frontend (same format as loader_cli.py).
 
-Usage :
+Usage:
     python -m starhe_plugin.dicom.loader_mp4_cli <mp4_path> [--quality 70] [--max-dim 640]
 
-Sortie stdout : JSON unique avec toutes les frames encodées en JPEG base64.
-Format de sortie identique à loader_cli.py :
+stdout output: single JSON with all frames encoded as base64 JPEG.
+Output format identical to loader_cli.py:
 {
   "file_name":          "video.mp4",
   "frame_count":        100,
@@ -44,7 +44,7 @@ def load_mp4_and_encode(
     quality: int = 70,
     max_dim: int = 640,
 ) -> dict:
-    """Charge un fichier MP4, extrait les frames, encode en JPEG base64."""
+    """Loads an MP4 file, extracts the frames, encodes as base64 JPEG."""
     import cv2
     import numpy as np
     from PIL import Image
@@ -71,7 +71,7 @@ def load_mp4_and_encode(
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(rgb)
 
-        # Réduction si nécessaire
+        # Downscale if needed
         if max(img.width, img.height) > max_dim:
             scale = max_dim / max(img.width, img.height)
             new_w = max(1, int(img.width  * scale))
@@ -114,11 +114,11 @@ def load_mp4_and_encode(
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="python -m starhe_plugin.dicom.loader_mp4_cli",
-        description="Charge un fichier MP4 et retourne les frames en JPEG base64 (stdout JSON).",
+        description="Loads an MP4 file and returns the frames as base64 JPEG (stdout JSON).",
     )
-    parser.add_argument("mp4_path",             help="Chemin du fichier MP4")
-    parser.add_argument("--quality",  type=int, default=70,  help="Qualité JPEG (1-95, défaut: 70)")
-    parser.add_argument("--max-dim",  type=int, default=640, help="Dimension max (défaut: 640)")
+    parser.add_argument("mp4_path",             help="Path to the MP4 file")
+    parser.add_argument("--quality",  type=int, default=70,  help="JPEG quality (1-95, default: 70)")
+    parser.add_argument("--max-dim",  type=int, default=640, help="Max dimension (default: 640)")
     args = parser.parse_args()
 
     try:

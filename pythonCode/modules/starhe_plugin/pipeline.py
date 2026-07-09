@@ -1,26 +1,26 @@
 """
-pipeline.py — Orchestrateur du flux de traitement STARHE
+pipeline.py — Orchestrator of the STARHE processing flow
 =========================================================
-Enchaîne toutes les étapes :
-  1. Chargement DICOM
-  2. Extraction des frames
-  3. Anonymisation
-  4. Prétraitement prepUS (uniquement si DETECT actif)
-  5. Inférence STARHE-RISK  (sur frames DICOM brutes — distribution d'entraînement)
-  6. Inférence STARHE-DETECT (sur frames croppées prepUS)
-  7. Sauvegarde MongoDB
+Chains all the steps:
+  1. DICOM loading
+  2. Frame extraction
+  3. Anonymization
+  4. prepUS preprocessing (only if DETECT is active)
+  5. STARHE-RISK inference  (on raw DICOM frames — training distribution)
+  6. STARHE-DETECT inference (on prepUS-cropped frames)
+  7. MongoDB save
 
-Point d'entrée appelé par le blueprint Go.
+Entry point called by the Go blueprint.
 
-Notes sur le preprocessing
---------------------------
-STARHE-RISK (C3D) : entraîné sur les video.mp4 de prepUS = éventail rogné,
-niveaux de gris, codec mp4v. → reçoit crop_only_frames (T, H_crop, W_crop, 3)
-avec R=G=B=gris.
+Preprocessing notes
+-------------------
+STARHE-RISK (C3D): trained on prepUS video.mp4 files = cropped fan,
+grayscale, mp4v codec. → receives crop_only_frames (T, H_crop, W_crop, 3)
+with R=G=B=gray.
 
-STARHE-DETECT (RTMDet) : entraîné sur les cropped_videos de prepUS (éventail
-rogné, UI retirée). → reçoit crop_only_frames (T, H_crop, W_crop, 3).
-Remappage : simple offset (xmin/ymin) pour revenir dans l'espace DICOM.
+STARHE-DETECT (RTMDet): trained on prepUS cropped_videos (cropped fan,
+UI removed). → receives crop_only_frames (T, H_crop, W_crop, 3).
+Remapping: simple offset (xmin/ymin) to go back to DICOM space.
 """
 
 import threading
@@ -49,29 +49,29 @@ def run_pipeline(dicom_path: str,
                  backscan_height: int = 512,
                  analysis_mode: str | None = None) -> dict:
     """
-    Exécute le pipeline complet STARHE sur un fichier DICOM.
+    Runs the full STARHE pipeline on a DICOM file.
 
-    Paramètres :
-      dicom_path           : chemin absolu du fichier .dcm
+    Parameters:
+      dicom_path           : absolute path of the .dcm file
       anon_mode            : "hash" | "remove" | "none"
-      run_risk             : si False, saute STARHE-RISK (plus rapide, detection seule)
-      run_detection        : si False, saute STARHE-DETECT (plus rapide ; désactive aussi prepUS)
-      back_scan_conversion : active la conversion scan inverse prepUS (uniquement pour DETECT)
-      backscan_width/height: dimensions de sortie du backscan (défaut 512×512)
+      run_risk             : if False, skips STARHE-RISK (faster, detection only)
+      run_detection        : if False, skips STARHE-DETECT (faster; also disables prepUS)
+      back_scan_conversion : enables the prepUS back-scan conversion (DETECT only)
+      backscan_width/height: backscan output dimensions (default 512×512)
 
-    Retourne un dict de résultats qui est aussi émis via go_result().
+    Returns a result dict which is also emitted via go_result().
     """
     TOTAL_STEPS = 6
     step = 0
 
-    # ── 1. Chargement ─────────────────────────────────────────────────────────
+    # ── 1. Loading ────────────────────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Chargement DICOM…")
     ds = load_dicom(dicom_path)
 
-    # Extraire le FPS réel depuis les tags DICOM (priorité descendante) :
-    #   1. RecommendedDisplayFrameRate (0008,2144) — entier, source la plus fiable
-    #      (correspond aux fps des MP4 de référence pour 46/49 patients du dataset).
-    #   2. CineRate (0018,0040) — fps direct.
+    # Extract the actual FPS from the DICOM tags (descending priority):
+    #   1. RecommendedDisplayFrameRate (0008,2144) — integer, most reliable source
+    #      (matches the reference MP4 fps for 46/49 patients of the dataset).
+    #   2. CineRate (0018,0040) — direct fps.
     #   3. FrameTime (0018,1063) — ms/frame → fps = 1000/FrameTime.
     _rdp = float(getattr(ds, "RecommendedDisplayFrameRate", 0.0))
     _cr  = float(getattr(ds, "CineRate", 0.0))
@@ -89,40 +89,40 @@ def run_pipeline(dicom_path: str,
         )
     go_print("info", f"FPS DICOM : {dicom_fps:.2f} fps ({_fps_src})")
 
-    # ── 2. Anonymisation ──────────────────────────────────────────────────────
+    # ── 2. Anonymization ──────────────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Anonymisation des métadonnées…")
     if anon_mode != "none":
         ds = anonymize(ds, mode=anon_mode)
 
-    # ── 3. Extraction des frames ──────────────────────────────────────────────
+    # ── 3. Frame extraction ───────────────────────────────────────────────────
     go_progress(step := step + 1, TOTAL_STEPS, "Extraction des frames…")
 
     frames_rgb: np.ndarray | None = None
 
-    # Chemin préféré : weasis-dcm2png (Modality LUT + VOI LUT comme à
-    # l'entraînement). Fallback automatique vers pydicom si JAR/JVM absent
-    # ou si la transfer syntax n'est pas supportée par weasis (ex. JPEG 2000).
+    # Preferred path: weasis-dcm2png (Modality LUT + VOI LUT as during
+    # training). Automatic fallback to pydicom if the JAR/JVM is missing
+    # or the transfer syntax is not supported by weasis (e.g. JPEG 2000).
     if USE_WEASIS_EXPORT and weasis_available():
         try:
             frames_rgb, weasis_fps = frames_via_weasis(dicom_path)
             if weasis_fps > 0:
-                dicom_fps = weasis_fps   # privilégier la valeur lue par weasis
+                dicom_fps = weasis_fps   # prefer the value read by weasis
         except Exception as exc:
             go_print("warning",
                      f"weasis-dcm2png a échoué ({exc}) — fallback pydicom")
             frames_rgb = None
 
     if frames_rgb is None:
-        frames_raw  = extract_frames(ds)   # (T, H, W) ou (T, H, W, 3)
+        frames_raw  = extract_frames(ds)   # (T, H, W) or (T, H, W, 3)
         frames_norm = np.stack([frame_to_uint8(f) for f in frames_raw])
         if frames_norm.ndim == 3:
             frames_rgb = np.stack([frames_norm] * 3, axis=-1)   # (T, H, W, 3)
         else:
             frames_rgb = frames_norm   # (T, H, W, 3)
 
-    # ── Préchauffage DETECT en arrière-plan ───────────────────────────────────
-    # Le subprocess RTMDet charge le modèle (~3-5 s). On le démarre dès maintenant
-    # pour qu'il soit prêt quand on en a besoin, pendant que prepUS + RISK tournent.
+    # ── DETECT warm-up in the background ──────────────────────────────────────
+    # The RTMDet subprocess loads the model (~3-5 s). Start it right now so it
+    # is ready when needed, while prepUS + RISK are running.
     _detect_model_box: list = []
     _detect_exc_box:   list = []
 
@@ -137,7 +137,7 @@ def run_pipeline(dicom_path: str,
         detect_thread = threading.Thread(target=_warm_detect, daemon=True)
         detect_thread.start()
 
-    # ── 4. Prétraitement prepUS (crop cône US — pour RISK et DETECT) ─────────
+    # ── 4. prepUS preprocessing (US cone crop — for RISK and DETECT) ─────────
     crop_only_frames = info = None
     if run_detection or run_risk:
         _prepus_fn = preprocess_with_prepus_inmem if PREPUS_BYPASS_MP4 else preprocess_with_prepus
@@ -153,10 +153,10 @@ def run_pipeline(dicom_path: str,
     else:
         go_progress(step := step + 1, TOTAL_STEPS, "prepUS ignoré.")
 
-    # RISK et DETECT : frames crop cône US (niveaux de gris → pseudo-RGB 3 canaux).
-    # Identique aux video.mp4 d'entraînement décodés par Decord (R=G=B=gris).
+    # RISK and DETECT: US cone crop frames (grayscale → pseudo-RGB 3 channels).
+    # Identical to the training video.mp4 files decoded by Decord (R=G=B=gray).
     if crop_only_frames is not None:
-        _c = crop_only_frames  # (T, H_crop, W_crop) uint8 gris
+        _c = crop_only_frames  # (T, H_crop, W_crop) uint8 gray
         frames_processed_risk = np.stack([_c, _c, _c], axis=-1)  # (T, H_crop, W_crop, 3)
     else:
         frames_processed_risk = frames_rgb
@@ -178,12 +178,12 @@ def run_pipeline(dicom_path: str,
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-RISK ignoré (run_risk=False).")
 
-    # ── 6. STARHE-DETECT (échantillonnage temporel + propagation) ────────────
-    # Identique à l'implémentation de référence (prototype_tkinter.py) :
-    #   - inférence sur les frames samplées (stride=DETECT_EVERY_N)
-    #   - propagation directe des détections aux frames intermédiaires
-    #     [i, i+1, ..., i+stride-1] (pas de deuxième passe d'inférence)
-    # predict_batch utilise déjà DETECT_SCORE_THRESHOLD en interne.
+    # ── 6. STARHE-DETECT (temporal subsampling + propagation) ────────────────
+    # Identical to the reference implementation (prototype_tkinter.py):
+    #   - inference on the sampled frames (stride=DETECT_EVERY_N)
+    #   - direct propagation of detections to the intermediate frames
+    #     [i, i+1, ..., i+stride-1] (no second inference pass)
+    # predict_batch already uses DETECT_SCORE_THRESHOLD internally.
     n_frames_total = len(frames_processed)
     detections_per_frame: list[list[dict]] = [[] for _ in range(n_frames_total)]
 
@@ -194,7 +194,7 @@ def run_pipeline(dicom_path: str,
         go_progress(step := step + 1, TOTAL_STEPS,
                     f"Inférence STARHE-DETECT ({n_analysed}/{n_frames_total} frames, stride={stride})…")
 
-        # Attendre que le subprocess soit prêt (il a démarré pendant prepUS + RISK)
+        # Wait for the subprocess to be ready (it started during prepUS + RISK)
         detect_thread.join()
         if _detect_exc_box:
             raise _detect_exc_box[0]
@@ -211,8 +211,8 @@ def run_pipeline(dicom_path: str,
                 batch_dets   = detect_model.predict_batch(batch_frames)
 
                 for idx, frame_dets in zip(batch_idx, batch_dets):
-                    # Propagation temporelle identique à Tkinter :
-                    # copier les détections sur toutes les frames [idx, idx+stride).
+                    # Temporal propagation identical to Tkinter:
+                    # copy the detections onto all frames [idx, idx+stride).
                     for j in range(idx, min(idx + stride, n_frames_total)):
                         detections_per_frame[j] = frame_dets
 
@@ -230,8 +230,8 @@ def run_pipeline(dicom_path: str,
         step += 1
         go_progress(step, TOTAL_STEPS, "STARHE-DETECT ignoré (run_detection=False).")
 
-    # ── 7. Remappage crop → espace DICOM original ──────────────────────────────
-    # RTMDet prédit des bboxes dans l'espace crop_only → simple offset (xmin, ymin).
+    # ── 7. Remap crop → original DICOM space ──────────────────────────────────
+    # RTMDet predicts bboxes in crop_only space → simple offset (xmin, ymin).
     detections_per_frame = map_detections_to_dicom_coords(
         detections_per_frame,
         info,
@@ -239,8 +239,8 @@ def run_pipeline(dicom_path: str,
     if any(d for d in detections_per_frame):
         go_print("info", "Détections remappées vers l'espace original.")
 
-    # ── 8. Sauvegarde MongoDB ─────────────────────────────────────────────────
-    # Calcule analysis_mode depuis les options si non fourni explicitement
+    # ── 8. MongoDB save ───────────────────────────────────────────────────────
+    # Compute analysis_mode from the options if not provided explicitly
     if analysis_mode is None:
         r = "1" if run_risk else "0"
         d = "1" if run_detection else "0"

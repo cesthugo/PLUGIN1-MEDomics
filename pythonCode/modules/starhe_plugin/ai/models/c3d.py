@@ -1,20 +1,20 @@
 """
-ai/models/c3d.py — C3D en PyTorch pur
+ai/models/c3d.py — C3D in pure PyTorch
 ======================================
-Architecture identique à mmaction2 C3D (ConvModule) + I3DHead.
-Les noms de sous-modules reproduisent exactement ceux du framework
-mmaction2 afin que les checkpoints .pth soient chargés directement
-sans aucune remise en correspondance des clés.
+Architecture identical to mmaction2 C3D (ConvModule) + I3DHead.
+The submodule names reproduce exactly those of the mmaction2
+framework so that the .pth checkpoints can be loaded directly
+without any key remapping.
 
-Correspondance des clés state_dict mmaction2 → ce module :
-  backbone.conv1a.conv.weight   ← _CvM.conv  (ConvModule → sous-attr .conv)
+mmaction2 state_dict key mapping → this module:
+  backbone.conv1a.conv.weight   ← _CvM.conv  (ConvModule → .conv sub-attribute)
   backbone.fc6.weight
   backbone.fc7.weight
   cls_head.fc_cls.weight
   cls_head.fc_cls.bias
-  (data_preprocessor.* ignorés — non présents dans ce modèle)
+  (data_preprocessor.* ignored — not present in this model)
 
-Référence :
+Reference:
   Tran et al., "Learning Spatiotemporal Features with 3D Convolutional
   Networks", ICCV 2015.
 """
@@ -26,14 +26,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# ── _CvM : reproduction minimale de mmcv.cnn.ConvModule (Conv3d + ReLU) ───────
+# ── _CvM: minimal reproduction of mmcv.cnn.ConvModule (Conv3d + ReLU) ─────────
 
 class _CvM(nn.Module):
     """
-    Reproduit la structure d'un mmcv.ConvModule (Conv3d, sans BN, avec ReLU).
-    Les noms des attributs correspondent aux clés du checkpoint :
-      .conv      → Conv3d (clé : backbone.convXx.conv.weight)
-      .activate  → ReLU   (pas de paramètres enregistrés)
+    Reproduces the structure of an mmcv.ConvModule (Conv3d, no BN, with ReLU).
+    The attribute names match the checkpoint keys:
+      .conv      → Conv3d (key: backbone.convXx.conv.weight)
+      .activate  → ReLU   (no registered parameters)
     """
 
     def __init__(self, in_c: int, out_c: int,
@@ -51,15 +51,15 @@ class _CvM(nn.Module):
         return self.activate(self.conv(x))
 
 
-# ── C3DBackbone : identique à mmaction2/models/backbones/c3d.py ───────────────
+# ── C3DBackbone: identical to mmaction2/models/backbones/c3d.py ───────────────
 
 class C3DBackbone(nn.Module):
     """
-    Backbone C3D avec les mêmes noms de sous-modules que mmaction2 :
-      conv1a … conv5b  (wrapped dans _CvM → clé .conv)
+    C3D backbone with the same submodule names as mmaction2:
+      conv1a … conv5b  (wrapped in _CvM → .conv key)
       pool1  … pool5
       fc6, fc7, relu, dropout
-    Sortie : tenseur (N, 4096) après fc6/fc7.
+    Output: (N, 4096) tensor after fc6/fc7.
     """
 
     def __init__(self, dropout_ratio: float = 0.5, out_dim: int = 8192):
@@ -92,7 +92,7 @@ class C3DBackbone(nn.Module):
         self.dropout = nn.Dropout(p=dropout_ratio)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Entrée : (N, 3, T, H, W)
+        # Input: (N, 3, T, H, W)
         x = self.conv1a(x);                 x = self.pool1(x)
         x = self.conv2a(x);                 x = self.pool2(x)
         x = self.conv3a(x); x = self.conv3b(x); x = self.pool3(x)
@@ -106,12 +106,12 @@ class C3DBackbone(nn.Module):
         return x
 
 
-# ── I3DHead : identique à mmaction2/models/heads/i3d_head.py ─────────────────
+# ── I3DHead: identical to mmaction2/models/heads/i3d_head.py ─────────────────
 
 class I3DHead(nn.Module):
     """
-    Tête I3D avec spatial_type=None (pas d'avg_pool).
-    Clés dans le checkpoint : cls_head.fc_cls.weight / .bias
+    I3D head with spatial_type=None (no avg_pool).
+    Checkpoint keys: cls_head.fc_cls.weight / .bias
     """
 
     def __init__(self, in_channels: int = 4096,
@@ -126,13 +126,13 @@ class I3DHead(nn.Module):
         return self.fc_cls(x)
 
 
-# ── C3DRecognizer : modèle complet = backbone + cls_head ─────────────────────
+# ── C3DRecognizer: full model = backbone + cls_head ──────────────────────────
 
 class C3DRecognizer(nn.Module):
     """
-    Modèle C3D complet (backbone + cls_head).
-    Structure et nommage identiques à mmaction2 Recognizer3D(C3D + I3DHead),
-    ce qui permet de charger directement les checkpoints mmaction2.
+    Full C3D model (backbone + cls_head).
+    Structure and naming identical to mmaction2 Recognizer3D(C3D + I3DHead),
+    which allows loading mmaction2 checkpoints directly.
     """
 
     def __init__(self, num_classes: int = 2,
@@ -151,11 +151,11 @@ class C3DRecognizer(nn.Module):
     def from_checkpoint(cls, path: str,
                         device: str = 'cpu',
                         **kwargs) -> 'C3DRecognizer':
-        """Charge le modèle depuis un checkpoint mmaction2."""
+        """Loads the model from an mmaction2 checkpoint."""
         model = cls(**kwargs)
         ckpt  = torch.load(path, map_location=device, weights_only=False)
         state = ckpt.get('state_dict', ckpt)
-        # Ignorer les clés data_preprocessor (non présentes dans notre module)
+        # Ignore the data_preprocessor keys (not present in our module)
         state = {k: v for k, v in state.items()
                  if not k.startswith('data_preprocessor')}
         missing, unexpected = model.load_state_dict(state, strict=False)
@@ -164,26 +164,26 @@ class C3DRecognizer(nn.Module):
         return model
 
 
-# ── Prétraitement : équivalent du test_pipeline mmaction2 ─────────────────────
+# ── Preprocessing: equivalent of the mmaction2 test_pipeline ──────────────────
 
-# ActionDataPreprocessor : mean=[104,117,128], std=[1,1,1] appliqués aux
-# frames RGB float32 (sans division par 255 — les valeurs restent en 0-255).
+# ActionDataPreprocessor: mean=[104,117,128], std=[1,1,1] applied to
+# float32 RGB frames (no division by 255 — values stay in 0-255).
 _MEAN = np.array([104.0, 117.0, 128.0], dtype=np.float32)
 
-CLIP_LEN    = 16   # frames par clip
-RESIZE_SIZE = 128  # côté court cible (px)
-CROP_SIZE   = 112  # crop central (px)
-NUM_CLIPS   = 10   # clips de test → moyenne des probas (average_clips='prob')
+CLIP_LEN    = 16   # frames per clip
+RESIZE_SIZE = 128  # target short side (px)
+CROP_SIZE   = 112  # center crop (px)
+NUM_CLIPS   = 10   # test clips → probability averaging (average_clips='prob')
 
 
 def _sample_clips(total: int) -> np.ndarray:
-    """Reproduit exactement mmaction2 SampleFrames 3D (clip_len=16, num_clips=10, test_mode=True).
+    """Reproduces exactly mmaction2 SampleFrames 3D (clip_len=16, num_clips=10, test_mode=True).
 
-    Formule réelle de mmaction2 1.2.0 _get_test_clips (3D recognizer) :
+    Actual formula of mmaction2 1.2.0 _get_test_clips (3D recognizer):
       max_offset    = max(total - clip_len, 0)
       offset_between = max_offset / (num_clips - 1)
       clip_offsets  = round(arange(num_clips) * offset_between)
-    Les indices hors-borne sont ramenés par modulo (out_of_bound_opt='loop').
+    Out-of-bound indices are wrapped by modulo (out_of_bound_opt='loop').
     """
     if total <= 0:
         return np.zeros((NUM_CLIPS, CLIP_LEN), dtype=int)
@@ -197,13 +197,13 @@ def _sample_clips(total: int) -> np.ndarray:
 
 
 def _resize_shortest(frame: np.ndarray, use_double: bool = False) -> np.ndarray:
-    """Redimensionne pour que le côté court soit RESIZE_SIZE px.
+    """Resizes so that the short side is RESIZE_SIZE px.
 
-    Identique à mmcv Resize(scale=(-1, 128)) : cv2.resize sur uint8 avec
-    INTER_LINEAR, conforme au pipeline d'entraînement mmaction2.
-    Le paramètre use_double est ignoré pour le resize (conservé pour
-    compatibilité de signature) ; la conversion float a lieu dans
-    preprocess_clips lors de la soustraction de la moyenne.
+    Identical to mmcv Resize(scale=(-1, 128)): cv2.resize on uint8 with
+    INTER_LINEAR, matching the mmaction2 training pipeline.
+    The use_double parameter is ignored for the resize (kept for
+    signature compatibility); the float conversion happens in
+    preprocess_clips during the mean subtraction.
     """
     h, w = frame.shape[:2]
     if h <= w:
@@ -215,24 +215,24 @@ def _resize_shortest(frame: np.ndarray, use_double: bool = False) -> np.ndarray:
 
 def preprocess_clips(frames: np.ndarray, use_double: bool = False) -> torch.Tensor:
     """
-    Prépare les tenseurs d'entrée pour C3DRecognizer.
+    Prepares the input tensors for C3DRecognizer.
 
     Args:
         frames     : (T, H, W, 3) uint8 RGB
-        use_double : si True, tout le pipeline (resize, mean-sub, stack) est
-                     en float64 — élimine les différences BLAS MKL↔Accelerate.
+        use_double : if True, the whole pipeline (resize, mean-sub, stack) is
+                     in float64 — eliminates the MKL↔Accelerate BLAS differences.
 
     Returns:
-        Tensor (NUM_CLIPS, 3, CLIP_LEN, CROP_SIZE, CROP_SIZE) float32 ou float64
+        Tensor (NUM_CLIPS, 3, CLIP_LEN, CROP_SIZE, CROP_SIZE) float32 or float64
     """
     np_dtype = np.float64 if use_double else np.float32
     mean     = _MEAN.astype(np_dtype)
     T        = len(frames)
     clip_idx = _sample_clips(T)         # (NUM_CLIPS, CLIP_LEN)
 
-    # Cache des frames redimensionnées : on évite de re-calculer le même
-    # _resize_shortest pour les indices qui apparaissent dans plusieurs clips
-    # (fréquent quand la vidéo est courte et que les clips se chevauchent).
+    # Cache of resized frames: avoids recomputing the same
+    # _resize_shortest for indices that appear in several clips
+    # (frequent when the video is short and the clips overlap).
     _resize_cache: dict[int, np.ndarray] = {}
 
     def _get_resized(idx: int) -> np.ndarray:

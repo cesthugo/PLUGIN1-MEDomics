@@ -1,13 +1,13 @@
-// main.go — Point d'entrée du serveur Go STARHE
+// main.go — Entry point of the STARHE Go server
 //
-// Expose 6 endpoints REST :
+// Exposes 6 REST endpoints:
 //
-//	POST   /starhe/analyze        → Lance pipeline.py (SSE streaming)
-//	GET    /starhe/results        → Liste les résultats MongoDB
-//	GET    /starhe/results/{id}   → Récupère un résultat par ID
-//	DELETE /starhe/results/{id}   → Supprime un résultat
-//	POST   /starhe/dicom/load     → Charge un DICOM et retourne les frames en JPEG base64
-//	DELETE /starhe/cache          → Supprime le cache MongoDB d'un fichier (?path=…)
+//	POST   /starhe/analyze        → Launches pipeline.py (SSE streaming)
+//	GET    /starhe/results        → Lists MongoDB results
+//	GET    /starhe/results/{id}   → Fetches a result by ID
+//	DELETE /starhe/results/{id}   → Deletes a result
+//	POST   /starhe/dicom/load     → Loads a DICOM and returns the frames as base64 JPEG
+//	DELETE /starhe/cache          → Deletes a file's MongoDB cache (?path=…)
 //	GET    /health                → Healthcheck
 package main
 
@@ -21,10 +21,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// mongoClient est le client MongoDB partagé (connection pool).
+// mongoClient is the shared MongoDB client (connection pool).
 var mongoClient *mongo.Client
 
 func main() {
+	runStartupCheck()
 	initMongo()
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -50,9 +51,9 @@ func main() {
 	log.Fatal(http.ListenAndServe(addr, withCORS(mux)))
 }
 
-// initMongo initialise le pool de connexions MongoDB au démarrage.
-// Si la base est inaccessible, le serveur démarre quand même mais les
-// endpoints CRUD retourneront 503.
+// initMongo initializes the MongoDB connection pool at startup.
+// If the database is unreachable, the server still starts but the
+// CRUD endpoints will return 503.
 func initMongo() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -69,7 +70,7 @@ func initMongo() {
 	}
 }
 
-// withCORS ajoute les en-têtes CORS et gère les requêtes OPTIONS.
+// withCORS adds the CORS headers and handles OPTIONS requests.
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -81,9 +82,4 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"ok"}`)) //nolint:errcheck
 }

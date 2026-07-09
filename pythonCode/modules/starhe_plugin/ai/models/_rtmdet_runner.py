@@ -1,10 +1,10 @@
 """
-ai/models/_rtmdet_runner.py — Script standalone RTMDet
+ai/models/_rtmdet_runner.py — Standalone RTMDet script
 =======================================================
-Script appelé EN SUBPROCESS par starhe_detect.py.
-NE PAS importer directement — utiliser via subprocess uniquement.
+Script called AS A SUBPROCESS by starhe_detect.py.
+DO NOT import directly — use via subprocess only.
 
-Usage :
+Usage:
     python _rtmdet_runner.py \\
         --config  <path/rtmdet_starhe.py>   \\
         --ckpt    <path/best_xxx.pth>        \\
@@ -12,7 +12,7 @@ Usage :
         --out     <path/results.json>        \\
         [--score-thr 0.001]
 
-Sortie JSON (liste de détections) :
+JSON output (list of detections):
     [{"bbox": [x0,y0,x1,y1], "score": 0.87, "label": "tumor"}, ...]
 """
 
@@ -23,7 +23,7 @@ import types
 import argparse
 from pathlib import Path
 
-# ─── 1. Stub mmcv._ext (avant tout import mmcv/mmdet) ────────────────────────
+# ─── 1. Stub mmcv._ext (before any mmcv/mmdet import) ────────────────────────
 if "mmcv._ext" not in sys.modules:
     class _CExtStub(types.ModuleType):
         def __getattr__(self, name):
@@ -32,7 +32,7 @@ if "mmcv._ext" not in sys.modules:
             return _unavailable
     sys.modules["mmcv._ext"] = _CExtStub("mmcv._ext")
 
-# ─── 2. Stub tqdm si absent ───────────────────────────────────────────────────
+# ─── 2. Stub tqdm if missing ──────────────────────────────────────────────────
 try:
     import tqdm  # noqa: F401
 except ImportError:
@@ -68,23 +68,23 @@ _inspect.getmodule = _safe_getmodule
 # ─── 4. Patch NMSop.forward → torchvision.ops.nms ───────────────────────────
 import torch
 
-# ── Reproductibilité cross-plateforme ─────────────────────────────────────────
-# Sur les GPU NVIDIA Ampere+ (RTX 30xx/40xx), PyTorch active TF32 par défaut :
-# TF32 n'utilisent que 10 bits de mantisse (≈ float16) pour les matmuls, vs
-# 23 bits pour float32.  Cela provoque des différences de ~0.5-2 % par score
-# par rapport à CPU/MPS et peut faire basculer des détections borderline.
-# → On désactive TF32 et on active le mode déterministe cuDNN pour que les
-#   résultats sur CUDA restent cohérents avec CPU/MPS.
+# ── Cross-platform reproducibility ────────────────────────────────────────────
+# On NVIDIA Ampere+ GPUs (RTX 30xx/40xx), PyTorch enables TF32 by default:
+# TF32 only uses 10 mantissa bits (≈ float16) for matmuls, vs
+# 23 bits for float32.  This causes ~0.5-2% per-score differences
+# compared to CPU/MPS and can flip borderline detections.
+# → Disable TF32 and enable cuDNN deterministic mode so CUDA results
+#   stay consistent with CPU/MPS.
 if torch.cuda.is_available():
-    torch.backends.cuda.matmul.allow_tf32 = False   # désactive TF32 matmul
-    torch.backends.cudnn.allow_tf32      = False    # désactive TF32 cuDNN
-    torch.backends.cudnn.deterministic   = True     # algos déterministes
-    torch.backends.cudnn.benchmark       = False    # pas de sélection auto
-# Algorithmes déterministes globaux (protège scatter/atomics sur MPS et CUDA)
+    torch.backends.cuda.matmul.allow_tf32 = False   # disable TF32 matmul
+    torch.backends.cudnn.allow_tf32      = False    # disable TF32 cuDNN
+    torch.backends.cudnn.deterministic   = True     # deterministic algorithms
+    torch.backends.cudnn.benchmark       = False    # no auto-selection
+# Global deterministic algorithms (protects scatter/atomics on MPS and CUDA)
 torch.use_deterministic_algorithms(True, warn_only=True)
 
 import torchvision.ops as tv_ops
-import mmcv.ops.nms  # noqa: F401  — déclenche load_ext avec stub _ext
+import mmcv.ops.nms  # noqa: F401  — triggers load_ext with the _ext stub
 from mmcv.ops.nms import NMSop
 
 
@@ -117,13 +117,13 @@ import cv2
 import numpy as np
 from mmengine.config import Config
 from mmengine.registry import DefaultScope
-import mmdet.models  # noqa: F401  — enregistre les classes dans le registre
+import mmdet.models  # noqa: F401  — registers the classes into the registry
 from mmdet.registry import MODELS
 
-# ─── 6. Patch mmengine InstanceData pour MPS ─────────────────────────────────
-# mmengine.InstanceData.__getitem__ ne supporte que torch.LongTensor (CPU).
-# Sur MPS, les tensors sont sur mps:0 → assertion fail + cross-device indexing.
-# On patche pour copier les champs non-CPU vers CPU avant l'indexation.
+# ─── 6. Patch mmengine InstanceData for MPS ──────────────────────────────────
+# mmengine.InstanceData.__getitem__ only supports torch.LongTensor (CPU).
+# On MPS, tensors live on mps:0 → assertion fail + cross-device indexing.
+# Patch it to copy non-CPU fields to CPU before indexing.
 from mmengine.structures.instance_data import InstanceData as _InstData
 _orig_inst_getitem = _InstData.__getitem__
 
@@ -147,9 +147,9 @@ def _mps_safe_getitem(self, item):
 
 _InstData.__getitem__ = _mps_safe_getitem
 
-# ─── Constantes prétraitement ─────────────────────────────────────────────────
+# ─── Preprocessing constants ──────────────────────────────────────────────────
 _INPUT_SIZE = 640
-# Précalcul des variants float32 / float64 pour _preprocess (évite .to() à chaque appel)
+# Precompute the float32 / float64 variants for _preprocess (avoids .to() on every call)
 _MEAN_F32 = torch.tensor([103.53, 116.28, 123.675]).view(3, 1, 1)          # float32
 _STD_F32  = torch.tensor([ 57.375,  57.12,  58.395]).view(3, 1, 1)          # float32
 _MEAN_F64 = _MEAN_F32.double()                                               # float64
@@ -170,18 +170,18 @@ def _replace_syncbn(d):
 def _preprocess(frame: np.ndarray, use_double: bool = False):
     orig_H, orig_W = frame.shape[:2]
     scale = min(_INPUT_SIZE / orig_H, _INPUT_SIZE / orig_W)
-    # Arrondi round-half-up (`int(x*scale + 0.5)`), identique à
-    # mmcv.image.geometric._scale_size — PAS Python round() (banker's
-    # rounding), qui peut différer de ±1 px sur les tailles à .5 exact.
+    # Round-half-up rounding (`int(x*scale + 0.5)`), identical to
+    # mmcv.image.geometric._scale_size — NOT Python round() (banker's
+    # rounding), which can differ by ±1 px on sizes at exactly .5.
     new_W = int(orig_W * scale + 0.5)
     new_H = int(orig_H * scale + 0.5)
     np_dtype = np.float64 if use_double else np.float32
     mean      = _MEAN_F64 if use_double else _MEAN_F32
     std       = _STD_F64  if use_double else _STD_F32
-    # cv2.resize bilinéaire sur uint8 : reproduit exactement le backend
-    # mmcv.imresize (Resize transform officiel, backend='cv2',
-    # interpolation='bilinear') utilisé à l'entraînement et par
-    # inference_detector — bit-identique à la référence STARHE-DETECT.
+    # Bilinear cv2.resize on uint8: reproduces exactly the mmcv.imresize
+    # backend (official Resize transform, backend='cv2',
+    # interpolation='bilinear') used during training and by
+    # inference_detector — bit-identical to the STARHE-DETECT reference.
     resized = cv2.resize(frame, (new_W, new_H), interpolation=cv2.INTER_LINEAR)
     canvas = np.full((_INPUT_SIZE, _INPUT_SIZE, 3), 114, dtype=np.uint8)
     canvas[:new_H, :new_W] = resized
@@ -191,12 +191,12 @@ def _preprocess(frame: np.ndarray, use_double: bool = False):
     tensor = (tensor - mean) / std
     tensor = tensor.unsqueeze(0)
     meta = {
-        # img_shape = taille PADDÉE (640, 640), pas (new_H, new_W) : le
-        # transform officiel mmcv.transforms.Pad écrase results['img_shape']
-        # avec padded_img.shape[:2] APRÈS Resize (Pad._pad_img, dernière
-        # ligne). C'est cette valeur (640, 640) qui atterrit dans le meta
-        # PackDetInputs et sert de max_shape au bbox_coder.decode() côté
-        # référence — vérifié en lisant le code source mmcv installé.
+        # img_shape = PADDED size (640, 640), not (new_H, new_W): the
+        # official mmcv.transforms.Pad transform overwrites results['img_shape']
+        # with padded_img.shape[:2] AFTER Resize (Pad._pad_img, last
+        # line). It is this value (640, 640) that ends up in the
+        # PackDetInputs meta and serves as max_shape for bbox_coder.decode()
+        # on the reference side — verified by reading the installed mmcv source.
         "img_shape":         (_INPUT_SIZE, _INPUT_SIZE),
         "ori_shape":         (orig_H, orig_W),
         "scale_factor":      (float(new_W / orig_W), float(new_H / orig_H)),
@@ -217,7 +217,7 @@ def _load_ckpt(model, ckpt_path, device):
 def _infer_one_frame(model, frame: np.ndarray, score_thr: float, device: str,
                      use_double: bool = False) -> list:
     """Inference on a single BGR uint8 numpy frame."""
-    tensor, meta = _preprocess(frame, use_double=use_double)  # dtype déjà correct
+    tensor, meta = _preprocess(frame, use_double=use_double)  # dtype already correct
     tensor = tensor.to(device)
     with torch.no_grad():
         feats      = model.backbone(tensor)
@@ -229,13 +229,13 @@ def _infer_one_frame(model, frame: np.ndarray, score_thr: float, device: str,
     instances = results[0]
     bboxes = instances.bboxes.cpu().numpy()
     scores = instances.scores.cpu().numpy()
-    # Arrondi à 6 décimales avant la comparaison au seuil :
-    # MKL (Windows x86) et Accelerate (macOS ARM) produisent des résultats float64
-    # qui diffèrent de ~1e-11 par couche convolutive.  Après un backbone de 50+
-    # couches, l'erreur cumulée peut atteindre ~1e-9 — suffisant pour faire passer
-    # un score de 0.6999999991 (Mac) à 0.7000000002 (Win) et changer le résultat.
-    # Tolérance 5e-7 >> 1e-9 → résultats identiques cross-plateforme.
-    # Le score stocké dans la détection garde la précision d'origine (non arrondi).
+    # Round to 6 decimals before the threshold comparison:
+    # MKL (Windows x86) and Accelerate (macOS ARM) produce float64 results
+    # that differ by ~1e-11 per convolutional layer.  After a 50+ layer
+    # backbone, the accumulated error can reach ~1e-9 — enough to move
+    # a score from 0.6999999991 (Mac) to 0.7000000002 (Win) and change the result.
+    # Tolerance 5e-7 >> 1e-9 → identical results cross-platform.
+    # The score stored in the detection keeps the original precision (not rounded).
     return [
         {"bbox": [float(x) for x in bb], "score": float(sc), "label": "tumor"}
         for bb, sc in zip(bboxes, scores)
@@ -261,7 +261,7 @@ def _infer_batch_frames(model, frames: list, score_thr: float, device: str,
     for i, frame in enumerate(frames):
         if frame is None:
             continue
-        tensor, meta = _preprocess(frame, use_double=use_double)  # dtype déjà correct
+        tensor, meta = _preprocess(frame, use_double=use_double)  # dtype already correct
         tensors.append(tensor)
         metas.append(meta)
         valid_idx.append(i)
@@ -321,32 +321,32 @@ def _build_model(config_path: str, ckpt_path: str, device: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="RTMDet inference — mode image ou serveur")
+    parser = argparse.ArgumentParser(description="RTMDet inference — image or server mode")
     parser.add_argument("--config",    required=True)
     parser.add_argument("--ckpt",      required=True)
     parser.add_argument("--score-thr", type=float, default=0.001)
-    # Mode image unique (legacy)
-    parser.add_argument("--image",     default=None, help="Chemin image (mode one-shot)")
-    parser.add_argument("--out",       default=None, help="Fichier JSON de sortie (mode one-shot)")
-    # Mode serveur persistant
+    # Single-image mode (legacy)
+    parser.add_argument("--image",     default=None, help="Image path (one-shot mode)")
+    parser.add_argument("--out",       default=None, help="Output JSON file (one-shot mode)")
+    # Persistent server mode
     parser.add_argument("--mode",      default="image", choices=["image", "server"],
-                        help="'server' : stdin/stdout JSON, 'image' : one-shot (défaut)")
+                        help="'server': stdin/stdout JSON, 'image': one-shot (default)")
     # Device override (INFERENCE_DEVICE in config.py)
     parser.add_argument("--device",    default=None,
-                        help="Force le device : 'cpu', 'cuda', 'mps'. "
-                             "Par défaut : auto-détection.")
-    # Reproductibilité cross-plateforme : CPU + float64
+                        help="Force the device: 'cpu', 'cuda', 'mps'. "
+                             "Default: auto-detection.")
+    # Cross-platform reproducibility: CPU + float64
     parser.add_argument("--deterministic", action="store_true",
-                        help="Force CPU + float64 pour des résultats identiques "
-                             "entre Windows (MKL) et macOS (Accelerate).")
+                        help="Force CPU + float64 for identical results "
+                             "between Windows (MKL) and macOS (Accelerate).")
     args = parser.parse_args()
 
-    # ── Sélection du device ──────────────────────────────────────────────────
+    # ── Device selection ──────────────────────────────────────────────────────
     if args.deterministic:
-        # DETERMINISTIC_INFERENCE : force CPU indépendamment du hardware disponible.
-        # Raison : MPS (Mac Apple Silicon GPU) vs CPU (Windows) donne des résultats
-        # float32 complètement différents (écart ~0.01 sur les scores borderline).
-        # Sur CPU, float64 réduit l'erreur BLAS MKL↔Accelerate de ~1e-4 à ~1e-13.
+        # DETERMINISTIC_INFERENCE: force CPU regardless of the available hardware.
+        # Reason: MPS (Mac Apple Silicon GPU) vs CPU (Windows) gives completely
+        # different float32 results (~0.01 gap on borderline scores).
+        # On CPU, float64 reduces the MKL↔Accelerate BLAS error from ~1e-4 to ~1e-13.
         device = "cpu"
     elif args.device and args.device != "auto":
         device = args.device
@@ -357,10 +357,10 @@ def main():
     else:
         device = "cpu"
 
-    # Reproductibilité cross-plateforme sur CPU :
-    # PyTorch utilise MKL (Windows) ou Accelerate/OpenBLAS (macOS) selon la plateforme.
-    # Avec plusieurs threads, l'ordre d'accumulation flottante varie selon le thread count.
-    # 1 thread → ordre déterministe sur chaque plateforme, différence résiduelle ~1e-5 par op.
+    # Cross-platform reproducibility on CPU:
+    # PyTorch uses MKL (Windows) or Accelerate/OpenBLAS (macOS) depending on the platform.
+    # With multiple threads, the floating-point accumulation order varies with the thread count.
+    # 1 thread → deterministic order on each platform, residual difference ~1e-5 per op.
     if device == "cpu":
         torch.set_num_threads(1)
         torch.set_num_interop_threads(1)
@@ -375,12 +375,12 @@ def main():
     use_double = args.deterministic
 
     if args.mode == "server":
-        # ── Mode serveur ────────────────────────────────────────────────────
-        # Protocole :
-        #   stdin  → une ligne JSON par requête : {"image": "<path>", "score_thr": 0.70}
-        #            ou la chaîne littérale "__EXIT__" pour fermer proprement
-        #   stdout → une ligne JSON par réponse : [{"bbox":…, "score":…, "label":…}, …]
-        # flush obligatoire après chaque écriture pour débloquer le parent
+        # ── Server mode ─────────────────────────────────────────────────────
+        # Protocol:
+        #   stdin  → one JSON line per request: {"image": "<path>", "score_thr": 0.70}
+        #            or the literal string "__EXIT__" for a clean shutdown
+        #   stdout → one JSON line per response: [{"bbox":…, "score":…, "label":…}, …]
+        # flush required after each write to unblock the parent
         hw_info = {"device": device}
         if device == "cuda":
             try:
@@ -390,8 +390,8 @@ def main():
             except Exception:
                 pass
         elif device in ("mps", "cpu"):
-            # Mesure la RAM libre APRÈS chargement du modèle dans ce subprocess.
-            # Beaucoup plus précis que de mesurer dans le processus parent.
+            # Measure the free RAM AFTER loading the model in this subprocess.
+            # Much more accurate than measuring in the parent process.
             try:
                 import psutil
                 hw_info["ram_free_mb"] = round(
@@ -433,7 +433,7 @@ def main():
                 print(json.dumps({"error": str(exc)}), flush=True)
 
     else:
-        # ── Mode one-shot (legacy) ───────────────────────────────────────────
+        # ── One-shot mode (legacy) ───────────────────────────────────────────
         if not args.image or not args.out:
             sys.exit("--image et --out requis en mode 'image'")
         dets = _infer_one_frame(model,

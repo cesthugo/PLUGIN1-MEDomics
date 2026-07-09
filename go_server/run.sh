@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
-# go_server/run.sh — Watchdog : lance go_server et le redémarre automatiquement
-# après un crash, avec backoff exponentiel.
+# go_server/run.sh — Watchdog: launches go_server and restarts it automatically
+# after a crash, with exponential backoff.
 #
-# Usage :
-#   ./go_server/run.sh          # depuis la racine du projet
-#   cd go_server && ./run.sh    # depuis le dossier go_server
+# Usage:
+#   ./go_server/run.sh          # from the project root
+#   cd go_server && ./run.sh    # from the go_server directory
 #
-# Arrêt propre : Ctrl+C (SIGINT) ou kill <pid_du_script>
+# Clean shutdown: Ctrl+C (SIGINT) or kill <script_pid>
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$SCRIPT_DIR/go_server"
 
-# ── Compilation si nécessaire ─────────────────────────────────────────────────
+# ── Compile if needed ─────────────────────────────────────────────────────────
 
 if [[ ! -f "$BIN" ]]; then
   echo "[watchdog] Binaire introuvable — compilation en cours…"
   (cd "$SCRIPT_DIR" && go build -o go_server .)
 fi
 
-# ── Backoff exponentiel ───────────────────────────────────────────────────────
+# ── Exponential backoff ───────────────────────────────────────────────────────
 
-DELAYS=(1 2 5 10 30)   # délais en secondes
+DELAYS=(1 2 5 10 30)   # delays in seconds
 attempt=0
 running=true
 
 trap 'echo "[watchdog] Arrêt demandé."; running=false; kill "$SERVER_PID" 2>/dev/null || true; exit 0' INT TERM
 
-# ── Boucle de redémarrage ─────────────────────────────────────────────────────
+# ── Restart loop ──────────────────────────────────────────────────────────────
 
 while $running; do
   echo "[watchdog] Démarrage du serveur Go (tentative $((attempt + 1)))…"
@@ -38,14 +38,14 @@ while $running; do
 
   START_TIME=$SECONDS
 
-  # Attend la fin du processus
+  # Wait for the process to finish
   wait "$SERVER_PID" 2>/dev/null
   EXIT_CODE=$?
 
-  # Arrêt via signal trap (running=false) → ne pas boucler
+  # Shutdown via signal trap (running=false) → do not loop
   $running || break
 
-  # Calcul de la durée de vie
+  # Compute the uptime
   UPTIME=$(( SECONDS - START_TIME ))
 
   if [[ $EXIT_CODE -eq 0 ]]; then
@@ -55,7 +55,7 @@ while $running; do
 
   echo "[watchdog] Serveur Go arrêté (code=$EXIT_CODE, durée=${UPTIME}s)."
 
-  # Si le serveur a tenu plus de 30 s, on remet le compteur à zéro
+  # If the server stayed up more than 30 s, reset the counter
   if [[ $UPTIME -ge 30 ]]; then
     attempt=0
   fi

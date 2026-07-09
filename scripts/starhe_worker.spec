@@ -1,23 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
-# starhe_worker.spec — PyInstaller config pour bundler le worker Python STARHE
+# starhe_worker.spec — PyInstaller config to bundle the STARHE Python worker
 #
 # Build :
 #   cd pythonCode/modules
 #   pyinstaller ../../scripts/starhe_worker.spec --noconfirm \
 #               --distpath ../../renderer/build-resources
-# Sortie : renderer/build-resources/starhe_worker/
+# Output: renderer/build-resources/starhe_worker/
 #
 # Mode --onedir (et non --onefile) :
-#   - Démarrage ~5× plus rapide (pas de décompression à chaque appel)
+#   - ~5× faster startup (no decompression on each call)
 #   - Bundle inspectable (debug plus facile)
-#   - Modèles .pth peuvent être ajoutés à côté sans rebuild
+#   - .pth models can be added alongside without a rebuild
 #
-# Stratégie hiddenimports :
-#   mmdet / mmcv-lite / mmengine font beaucoup d'imports dynamiques via Registry.
-#   On force explicitement les modules dont on a besoin au runtime.
-#   `collect_submodules` est évité pour mmdet/mmcv : ces packages échouent à
-#   l'import au moment de l'analyse PyInstaller (mmcv-lite n'a pas `mmcv._ext`,
-#   qui n'est requis qu'à l'exécution pour certaines ops GPU non utilisées ici).
+# hiddenimports strategy:
+#   mmdet / mmcv-lite / mmengine do many dynamic imports via the Registry.
+#   We explicitly force the modules we need at runtime.
+#   `collect_submodules` is avoided for mmdet/mmcv: these packages fail to
+#   the import during PyInstaller analysis (mmcv-lite has no `mmcv._ext`,
+#   which is only needed at runtime for certain GPU ops not used here).
 
 import os
 import sys
@@ -25,18 +25,18 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 block_cipher = None
 
-# Chemin racine = pythonCode/modules/ (le spec est dans scripts/, on remonte de 1)
+# Root path = pythonCode/modules/ (the spec is in scripts/, go up one level)
 SRC_ROOT = os.path.abspath(os.path.join(SPECPATH, '..', 'pythonCode', 'modules'))
 ENTRY = os.path.join(SRC_ROOT, 'starhe_plugin', 'starhe_worker.py')
 
-# Injection dans sys.path AVANT collect_submodules : sinon importlib ne
-# trouve pas starhe_plugin (qui n'est pas installé comme package dans le venv).
+# Injection into sys.path BEFORE collect_submodules: otherwise importlib
+# cannot find starhe_plugin (which is not installed as a package in the venv).
 if SRC_ROOT not in sys.path:
     sys.path.insert(0, SRC_ROOT)
 
-# ── Imports cachés (chargés dynamiquement par mm* / pylibjpeg / etc.) ─────────
-# Note : pas de collect_submodules('mmdet.*') / mmcv.ops car ils plantent à
-# l'analyse avec mmcv-lite. On liste manuellement ce dont on a besoin.
+# ── Hidden imports (loaded dynamically by mm* / pylibjpeg / etc.) ─────────────
+# Note: no collect_submodules('mmdet.*') / mmcv.ops because they crash during
+# analysis with mmcv-lite. We manually list what we need.
 hiddenimports = [
     # mmengine
     'mmengine', 'mmengine.config', 'mmengine.registry', 'mmengine.runner',
@@ -44,7 +44,7 @@ hiddenimports = [
     # mmcv-lite (subset Python pur uniquement)
     'mmcv', 'mmcv.cnn', 'mmcv.cnn.bricks', 'mmcv.transforms', 'mmcv.image',
     'mmcv.utils', 'mmcv.video',
-    # mmdet (chargé via Registry au runtime)
+    # mmdet (loaded via the Registry at runtime)
     'mmdet', 'mmdet.models', 'mmdet.models.detectors', 'mmdet.models.backbones',
     'mmdet.models.necks', 'mmdet.models.dense_heads', 'mmdet.models.roi_heads',
     'mmdet.models.task_modules', 'mmdet.models.losses', 'mmdet.models.layers',
@@ -56,9 +56,9 @@ hiddenimports = [
     'pydicom.encoders.pylibjpeg',
     'pydicom.encoders.native',
     'pylibjpeg', 'pylibjpeg_openjpeg', 'pylibjpeg_libjpeg',
-    # prepUS (vendorisé)
+    # prepUS (vendored)
     'sonocrop', 'prepUS', 'prepUS.backscan', 'prepUS.cli', 'prepUS.utils',
-    # Sous-modules starhe_plugin chargés dynamiquement
+    # starhe_plugin submodules loaded dynamically
     'starhe_plugin.ai.models.c3d',
     'starhe_plugin.ai.models.rtmdet',
     'starhe_plugin.ai.models.dino',
@@ -66,24 +66,24 @@ hiddenimports = [
     'starhe_plugin.ai.models._rtmdet_runner',
 ]
 
-# Sous-modules dynamiques sûrs (non bloquants à l'analyse)
+# Safe dynamic submodules (non-blocking during analysis)
 hiddenimports += collect_submodules('pylibjpeg_openjpeg')
 hiddenimports += collect_submodules('pylibjpeg_libjpeg')
-# Tous les sous-modules de starhe_plugin (chargés via runpy.run_module par le dispatcher)
+# All starhe_plugin submodules (loaded via runpy.run_module by the dispatcher)
 hiddenimports += collect_submodules('starhe_plugin')
 hiddenimports += collect_submodules('prepUS')
 
-# ── Données embarquées (configs YAML, registres, etc.) ────────────────────────
+# ── Embedded data (YAML configs, registries, etc.) ────────────────────────────
 datas = []
 datas += collect_data_files('mmdet', includes=['**/*.yml', '**/*.json'])
 datas += collect_data_files('mmengine', includes=['**/*.yml', '**/*.json'])
 datas += collect_data_files('mmcv', includes=['**/*.yml', '**/*.json'])
-# Configs mmdet du plugin (rtmdet_starhe.py — chargé dynamiquement par mmengine.Config.fromfile)
+# The plugin's mmdet configs (rtmdet_starhe.py — loaded dynamically by mmengine.Config.fromfile)
 datas += [
     (os.path.join(SRC_ROOT, 'starhe_plugin/models/rtmdet_starhe.py'), 'starhe_plugin/models/'),
 ]
 
-# ── Exclusions (allègent le bundle de ~150 MB) ────────────────────────────────
+# ── Exclusions (lighten the bundle by ~150 MB) ────────────────────────────────
 excludes = [
     'tkinter',
     'matplotlib',
@@ -125,7 +125,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,  # désactivé : UPX casse parfois libtorch sur macOS
+    upx=False,  # disabled: UPX sometimes breaks libtorch on macOS
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,

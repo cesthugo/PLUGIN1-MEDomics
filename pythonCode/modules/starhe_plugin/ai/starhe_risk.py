@@ -1,19 +1,19 @@
 """
-ai/starhe_risk.py — Wrapper STARHE-RISK (C3D)
+ai/starhe_risk.py — STARHE-RISK wrapper (C3D)
 =============================================
-Deux backends sélectionnables via C3D_BACKEND dans config.py :
+Two backends selectable via C3D_BACKEND in config.py:
 
-  "mmaction2" (défaut) : subprocess persistant _c3d_runner.py qui charge
-      le backbone C3D et la tête I3DHead de mmaction2 directement (sans
-      registre mmengine, compatible Python 3.13 + mmcv-lite).
-      Requiert : mmaction2==1.2.0 installé avec --no-deps dans le venv.
+  "mmaction2" (default): persistent _c3d_runner.py subprocess that loads
+      mmaction2's C3D backbone and I3DHead head directly (without the
+      mmengine registry, compatible with Python 3.13 + mmcv-lite).
+      Requires: mmaction2==1.2.0 installed with --no-deps in the venv.
 
-  "pytorch" : implémentation pure PyTorch (C3DRecognizer dans c3d.py),
-      validée bit-identique à mmaction2 sur les mêmes tenseurs d'entrée.
-      Aucune dépendance mmaction2.
+  "pytorch": pure PyTorch implementation (C3DRecognizer in c3d.py),
+      validated bit-identical to mmaction2 on the same input tensors.
+      No mmaction2 dependency.
 
-Entrée  : frames numpy (T, H, W, 3) uint8 RGB
-Sortie  : {"risk_score": float, "risk_label": str, "scores": list}
+Input  : numpy frames (T, H, W, 3) uint8 RGB
+Output : {"risk_score": float, "risk_label": str, "scores": list}
 """
 
 import base64
@@ -38,10 +38,10 @@ from starhe_plugin.utils.go_print import go_print
 _C3D_RUNNER = Path(__file__).parent / "models" / "_c3d_runner.py"
 
 
-# ─── Backend mmaction2 (subprocess persistant) ───────────────────────────────
+# ─── mmaction2 backend (persistent subprocess) ───────────────────────────────
 
 class _MMAction2Backend:
-    """Lance _c3d_runner.py en subprocess et expose predict(frames)."""
+    """Launches _c3d_runner.py as a subprocess and exposes predict(frames)."""
 
     def __init__(self, device: str):
         self._proc: subprocess.Popen | None = None
@@ -77,7 +77,7 @@ class _MMAction2Backend:
         go_print("info", "STARHE-RISK (mmaction2 C3D) prêt.")
 
     def predict(self, frames: np.ndarray) -> tuple[float, float]:
-        """Envoie les frames au subprocess et retourne (score_low, score_high)."""
+        """Sends the frames to the subprocess and returns (score_low, score_high)."""
         assert self._proc is not None, "subprocess C3D non démarré"
         payload = {
             "frames_b64": base64.b64encode(frames.tobytes()).decode(),
@@ -99,10 +99,10 @@ class _MMAction2Backend:
             self._proc = None
 
 
-# ─── Backend PyTorch pur ─────────────────────────────────────────────────────
+# ─── Pure PyTorch backend ────────────────────────────────────────────────────
 
 class _PyTorchBackend:
-    """Charge C3DRecognizer (PyTorch pur) et expose predict(frames)."""
+    """Loads C3DRecognizer (pure PyTorch) and exposes predict(frames)."""
 
     def __init__(self, device: str, use_double: bool):
         from starhe_plugin.ai.models.c3d import C3DRecognizer, preprocess_clips
@@ -140,22 +140,22 @@ class _PyTorchBackend:
         pass
 
 
-# ─── Interface publique ───────────────────────────────────────────────────────
+# ─── Public interface ─────────────────────────────────────────────────────────
 
 class STARHERiskModel:
     """
-    Interface pour STARHE-RISK (C3D).
+    Interface for STARHE-RISK (C3D).
 
-    Sélectionne le backend selon C3D_BACKEND (config.py) :
-      "mmaction2" → subprocess _c3d_runner.py (mmaction2 officiel)
-      "pytorch"   → pure PyTorch (C3DRecognizer local, bit-identique)
+    Selects the backend according to C3D_BACKEND (config.py):
+      "mmaction2" → _c3d_runner.py subprocess (official mmaction2)
+      "pytorch"   → pure PyTorch (local C3DRecognizer, bit-identical)
 
-    Usage :
+    Usage:
         model = STARHERiskModel()
-        result = model.predict(frames)  # frames : (T, H, W, 3) uint8 RGB
-        model.close()                   # libère le subprocess si mmaction2
+        result = model.predict(frames)  # frames: (T, H, W, 3) uint8 RGB
+        model.close()                   # releases the subprocess if mmaction2
 
-    Ou avec context manager :
+    Or with a context manager:
         with STARHERiskModel() as model:
             result = model.predict(frames)
     """
@@ -163,7 +163,7 @@ class STARHERiskModel:
     LABELS = {0: "Risque faible", 1: "Risque élevé"}
 
     def __init__(self, device: str | None = None):
-        # Résolution du device
+        # Device resolution
         if device:
             _device = device
         elif DETERMINISTIC_INFERENCE:
@@ -195,9 +195,9 @@ class STARHERiskModel:
 
     def predict(self, frames: np.ndarray) -> dict:
         """
-        frames : (T, H, W, 3) uint8 RGB
+        frames: (T, H, W, 3) uint8 RGB
 
-        Retourne :
+        Returns:
             {"risk_score": float [0-1], "risk_label": str, "scores": [float, float]}
         """
         score_low, score_high = self._backend.predict(frames)
