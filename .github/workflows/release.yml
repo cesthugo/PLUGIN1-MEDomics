@@ -21,8 +21,25 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
+  # Create the draft release ONCE (before the matrix) so the 4 build jobs don't
+  # each race to `gh release create` and produce duplicate empty drafts.
+  prepare_release:
+    name: Prepare draft release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create draft release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+                 --draft --title "STARHE $tag" --generate-notes
+
   build:
     name: Build (${{ matrix.platform }})
+    needs: prepare_release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
@@ -220,12 +237,9 @@ jobs:
         run: |
           set -eux
           tag="${GITHUB_REF_NAME}"
-          # Create the draft release once — idempotent across the 4 matrix jobs
-          # (the 2nd..4th job just hit "already exists" and continue).
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
-            --draft --title "STARHE $tag" --generate-notes \
-            || echo "release already exists — appending assets"
-          # --clobber makes re-runs overwrite same-named assets instead of failing.
+          # The draft release was already created by the prepare_release job, so
+          # every matrix job just appends its installer(s). --clobber makes re-runs
+          # overwrite same-named assets instead of failing.
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber dist-artifacts/*
 
   # ── Final job: compute SHA256SUMS from the published release assets ──────────
