@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.7.0-beta.2` — Last updated: July 10, 2026*
+*Version `0.7.0-beta.3` — Last updated: July 10, 2026*
 
 ---
 
@@ -907,12 +907,11 @@ def _infer(backbone, cls_head, frames: np.ndarray, device: str) -> tuple[float, 
 
 ### Reproducibility
 
-> **Current default: `DETERMINISTIC_INFERENCE = False`.** As of the July 2026
-> reproducibility campaign the flag is **off** so the pipeline runs in its native
-> mode (device from `INFERENCE_DEVICE = "auto"`, float32). This is intentional: the
-> CPU/float64 forcing below maximizes *cross-OS* reproducibility but moves *away*
-> from Jérémy's native training environment (Linux + GPU, float32). Set it back to
-> `True` when cross-platform bit-identity matters more than matching Jérémy.
+> **Current default: `DETERMINISTIC_INFERENCE = True`.** The flag is **on** so both
+> models (RISK and DETECT) run on CPU in float64, which makes scores **bit-identical
+> across platforms** (macOS / Linux / Windows) for the same input file. Set it to
+> `False` only to run in native mode (device from `INFERENCE_DEVICE = "auto"`,
+> float32) — faster, but scores then vary by ~0.002 per inference across OS/hardware.
 
 When `DETERMINISTIC_INFERENCE = True`, the subprocess forces:
 
@@ -1603,7 +1602,7 @@ to be closest to his setup.
 
 | Flag | Value | Why |
 |---|---|---|
-| `DETERMINISTIC_INFERENCE` | `False` | Native device (`INFERENCE_DEVICE="auto"` → GPU if present) + float32, as Jérémy trained. CPU/float64 forcing is the *cross-OS* mode. |
+| `DETERMINISTIC_INFERENCE` | `True` | CPU + float64 → scores bit-identical cross-OS. Set `False` for native device (`INFERENCE_DEVICE="auto"`) + float32 (faster, ~0.002 variance across OS/hardware). |
 | `PREPUS_BYPASS_MP4` | `False` | Mode A (mp4v roundtrip) — the exact crop path the models saw at training. Mode B produces cleaner, off-distribution crops. |
 | `USE_WEASIS_EXPORT` | `True` | Reproduces Jérémy's LUT decoding chain (kept — it moves *toward* him). |
 
@@ -2294,7 +2293,7 @@ Reproducibility parameters (currently set to reproduce Jérémy on Linux — see
 
 | Parameter | Value | Effect |
 |---|---|---|
-| `DETERMINISTIC_INFERENCE` | `False` | `False` = native device/float32 (matches Jérémy). `True` = CPU/float64, bit-identical cross-OS. |
+| `DETERMINISTIC_INFERENCE` | `True` | `True` = CPU/float64, bit-identical cross-OS. `False` = native device/float32 (faster). |
 | `PREPUS_BYPASS_MP4` | `False` | `False` = Mode A mp4v roundtrip (training path). `True` = pure-numpy, cross-OS bit-identical but off-distribution. |
 | `USE_WEASIS_EXPORT` | `True` | DICOM decoded via Weasis (Modality + VOI LUT), pydicom fallback. Reproduces Jérémy's LUT chain. |
 | `INFERENCE_DEVICE` | `"auto"` | `auto` → CUDA/MPS/CPU. Used when `DETERMINISTIC_INFERENCE=False`. |

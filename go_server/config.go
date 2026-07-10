@@ -92,12 +92,14 @@ func envOr(key, fallback string) string {
 func pythonCmd(ctx context.Context, module string, args ...string) *exec.Cmd {
 	var cmd *exec.Cmd
 	if cfg.WorkerBin != "" {
-		// Bundle mode: the PyInstaller worker is self-contained. Do NOT chdir into
-		// pythonCode/modules — that source tree is absent from the packaged app
-		// (only starhe_worker/ is bundled), so chdir there would fail with ENOENT.
+		// Bundle mode: the PyInstaller worker is self-contained (resolves its own
+		// paths via sys._MEIPASS). Do NOT set a working directory at all — the
+		// source tree (pythonCode/modules) is absent from the bundle, and on
+		// Windows chdir'ing into the worker's own dir intermittently fails with
+		// "The system cannot find the file specified". Inheriting the parent cwd
+		// works on every platform.
 		full := append([]string{"--module", module}, args...)
 		cmd = exec.CommandContext(ctx, cfg.WorkerBin, full...)
-		cmd.Dir = filepath.Dir(cfg.WorkerBin)
 		cmd.Env = append(os.Environ(), "PYTHONUTF8=1")
 	} else {
 		// Dev/venv mode: run the module from the source tree.
