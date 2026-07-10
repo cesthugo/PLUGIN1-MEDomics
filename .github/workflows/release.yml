@@ -101,6 +101,19 @@ jobs:
           go build -trimpath -ldflags "-s -w" -o ${{ matrix.go_bin }} .
           ls -la ${{ matrix.go_bin }}
 
+      # electron-builder's extraResources bundles the Go binary from
+      # renderer/build-resources/go-server/. Stage the freshly-built binary there
+      # so the package always ships the current code (not a stale committed one).
+      - name: Stage Go binary into build-resources
+        shell: bash
+        run: |
+          set -eux
+          dest="renderer/build-resources/go-server/go-server-${{ matrix.platform }}"
+          [ "${{ matrix.go_bin }}" = "go_server.exe" ] && dest="${dest}.exe"
+          mkdir -p "$(dirname "$dest")"
+          cp "go_server/${{ matrix.go_bin }}" "$dest"
+          ls -la "$dest"
+
       # ── Step 2: install Python deps + PyInstaller ────────────────────────────
       # On Linux, force torch CPU-only (~200 MB) instead of the default CUDA+CPU
       # wheel (~2.5 GB), which drastically reduces the PyInstaller time.

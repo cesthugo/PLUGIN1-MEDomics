@@ -92,17 +92,23 @@ func envOr(key, fallback string) string {
 func pythonCmd(ctx context.Context, module string, args ...string) *exec.Cmd {
 	var cmd *exec.Cmd
 	if cfg.WorkerBin != "" {
+		// Bundle mode: the PyInstaller worker is self-contained. Do NOT chdir into
+		// pythonCode/modules — that source tree is absent from the packaged app
+		// (only starhe_worker/ is bundled), so chdir there would fail with ENOENT.
 		full := append([]string{"--module", module}, args...)
 		cmd = exec.CommandContext(ctx, cfg.WorkerBin, full...)
+		cmd.Dir = filepath.Dir(cfg.WorkerBin)
+		cmd.Env = append(os.Environ(), "PYTHONUTF8=1")
 	} else {
+		// Dev/venv mode: run the module from the source tree.
 		full := append([]string{"-m", "starhe_plugin." + module}, args...)
 		cmd = exec.CommandContext(ctx, cfg.PythonExe, full...)
+		cmd.Dir = cfg.PythonModPath
+		cmd.Env = append(os.Environ(),
+			"PYTHONPATH="+cfg.PythonModPath,
+			"PYTHONUTF8=1", // force UTF-8 on Windows
+		)
 	}
-	cmd.Dir = cfg.PythonModPath
-	cmd.Env = append(os.Environ(),
-		"PYTHONPATH="+cfg.PythonModPath,
-		"PYTHONUTF8=1", // force UTF-8 on Windows
-	)
 	return cmd
 }
 

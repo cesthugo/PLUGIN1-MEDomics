@@ -72,6 +72,11 @@ hiddenimports += collect_submodules('pylibjpeg_libjpeg')
 # All starhe_plugin submodules (loaded via runpy.run_module by the dispatcher)
 hiddenimports += collect_submodules('starhe_plugin')
 hiddenimports += collect_submodules('prepUS')
+# torch imports sympy (+ its mpmath dep) dynamically at runtime (torch.fx / dynamo).
+# PyInstaller's static analysis misses it, so force-collect it — otherwise C3D
+# inference crashes with "No module named 'sympy'".
+hiddenimports += collect_submodules('sympy')
+hiddenimports += collect_submodules('mpmath')
 
 # ── Embedded data (YAML configs, registries, etc.) ────────────────────────────
 datas = []
@@ -83,19 +88,18 @@ datas += [
     (os.path.join(SRC_ROOT, 'starhe_plugin/models/rtmdet_starhe.py'), 'starhe_plugin/models/'),
 ]
 
-# ── Exclusions (lighten the bundle by ~150 MB) ────────────────────────────────
+# ── Exclusions (lighten the bundle) ───────────────────────────────────────────
+# Only exclude packages that inference NEVER imports. Do NOT exclude matplotlib
+# (mmdet imports it at package init), sympy (torch runtime dep), pandas or sklearn
+# (pulled by mm* import chains) — excluding any of them crashes RTMDet/C3D at
+# runtime with "No module named '<x>'".
 excludes = [
     'tkinter',
-    'matplotlib',
     'IPython',
     'jupyter',
+    'notebook',
     'pytest',
     'sphinx',
-    'tornado',
-    'notebook',
-    'pandas',
-    'sklearn',
-    'sympy',
     'tensorboard',
 ]
 

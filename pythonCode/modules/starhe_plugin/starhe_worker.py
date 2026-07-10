@@ -20,8 +20,20 @@ runs exactly as with `python -m`.
 
 No module code is duplicated.
 """
+import os
 import runpy
 import sys
+
+# In the frozen bundle, starhe_risk.py / starhe_detect.py spawn their model
+# runners with [sys.executable, "<...>/_rtmdet_runner.py", <args>]. But
+# sys.executable is THIS worker (not a python interpreter) and the runner .py
+# source is not on disk (it lives in the PYZ). So detect the runner by filename
+# and dispatch to its module — leaving the model spawn code untouched.
+_RUNNERS = {
+    "_rtmdet_runner.py": "starhe_plugin.ai.models._rtmdet_runner",
+    "_c3d_runner.py":    "starhe_plugin.ai.models._c3d_runner",
+    "_dino_runner.py":   "starhe_plugin.ai.models._dino_runner",
+}
 
 _ALLOWED = {
     "pipeline":              "starhe_plugin.pipeline",
@@ -43,6 +55,14 @@ def _usage_and_exit(code: int = 2) -> None:
 
 def main() -> None:
     argv = sys.argv[1:]
+
+    # Frozen-mode model runner: spawned as [worker, "<...>/_rtmdet_runner.py", args].
+    if argv and os.path.basename(argv[0]) in _RUNNERS:
+        module = _RUNNERS[os.path.basename(argv[0])]
+        sys.argv = argv  # [runner.py, <args>] — runner's argparse ignores argv[0]
+        runpy.run_module(module, run_name="__main__", alter_sys=True)
+        return
+
     if len(argv) < 2 or argv[0] != "--module":
         _usage_and_exit()
 
