@@ -1286,6 +1286,16 @@ Two backends are available, controlled by the `PREPUS_BYPASS_MP4` flag in `confi
 
 Mode B is algorithmically strictly equivalent to `removeLayoutFile(..., back_scan_conversion=True)` but eliminates the cross-OS non-portability of the mp4v encoder (see C3D validation section above).
 
+**Mode C — direct video (`preprocess_with_prepus_from_video`, added July 2026):**
+
+1. Run `prepUS.cli.removeLayoutFile(video_path, out_dir, back_scan_conversion=True, ...)` **directly on an existing video file** — no numpy → mpeg4 re-encode step
+2. Read `out_dir/video.mp4` → numpy `(T, H_crop, W_crop)` and `info.json` → ROI dict
+3. Falls back to the geometric `crop.py` path if `find_linear_fov` fails
+
+Unlike Mode A, this path takes a **file path** rather than numpy frames, so prepUS decodes the source video exactly like the original pipeline instead of a freshly re-encoded intermediate. Validated against the reference prepUS run on the same input: **bit-exact crop (MAE = 0.000) on all 49 test files**, versus 12/49 crop matches for Mode A (whose mpeg4 re-encode shifts the unique-pixel static map, the auto-threshold, and therefore the crop bbox). Use this when the step-1 MP4 (see [DICOM → MP4 Conversion](#dicom--mp4-conversion-first-pipeline-step)) is available on disk and must feed prepUS untouched.
+
+> **Diagnostic note (July 2026)**: a step-by-step comparison to Jérémy's reference batch (`scripts/test_etape2_prepus.py`, `test_etape2b_variantes.py`, `test_pipeline_complet.py`, `test_c3d_ref_crops.py`, `test_encodage_impact.py`) established that: (1) DICOM→MP4 and the prepUS algorithm are faithful; (2) Mode A's mpeg4 re-encode shifts the crop but barely changes the final C3D score; (3) video **encoding** contributes only a secondary jitter (~0.05); (4) the residual ~0.11 score gap vs Jérémy persists even when feeding the C3D his **exact** reference crops, and is independent of device (CPU ≡ MPS). By elimination the dominant remaining factor is the **frame decoder** — the plugin reads MP4s with `cv2`, whereas mmaction2/Jérémy decode with **decord**.
+
 > **Warning**: prepUS must be installed with `--no-deps` to avoid conflicts with the venv's OpenCV version. The `run_tkinter.ps1` script handles this automatically.
 
 ---
@@ -1365,7 +1375,7 @@ If the JAR or Java is missing, the script also switches to the pydicom path (sam
 
 ## DICOM → MP4 Conversion: First Pipeline Step
 
-> This section documents the preprocessing step that converts raw DICOM cine-clips into AV1-encoded MP4 files. These MP4s are the direct input to `prepUS.removeLayoutFile`, which produces the `video.mp4` fan-cropped files on which both STARHE-RISK (C3D) and STARHE-DETECT (RTMDet) were trained. Batch reproduction and validation are handled by `scripts/dicom_batch_to_mp4.py`.
+> This section documents the preprocessing step that converts raw DICOM cine-clips into H.264-encoded MP4 files. These MP4s are the direct input to `prepUS.removeLayoutFile`, which produces the `video.mp4` fan-cropped files on which both STARHE-RISK (C3D) and STARHE-DETECT (RTMDet) were trained. Batch reproduction and validation are handled by `scripts/dicom_batch_to_mp4.py`.
 
 ### Conversion Chain
 
@@ -1381,8 +1391,8 @@ DICOM (.dcm) / AVI (.avi)
                                 └─ _extract_j2k_raw_scan()  (raw J2K byte scan via PIL)
        → one PNG per frame (no LUT applied)
   │
-  ffmpeg -c:v libsvtav1 -crf 30 -preset 8 -pix_fmt yuv420p → .mp4
-  (exception: 06-0018-D-M uses libx264 to match its reference format)
+  ffmpeg -c:v libx264 -crf 18 -preset slow -pix_fmt yuv420p → .mp4
+  (H.264 is required for the step-1 videos; override with --codec libsvtav1 for experiments)
 ```
 
 ### FPS Resolution
@@ -1428,25 +1438,27 @@ def target_dimensions(rows: int, cols: int) -> tuple[int, int]:
 
 The `≤ 1.0` condition: since `tw_lo` is the largest even ≤ `tw_raw`, the offset `(tw_raw - tw_lo)` is in `[0, 2)`. If ≤ 1.0, round down to `tw_lo`; otherwise round up to `tw_lo + 2`. ffmpeg requires even dimensions for `yuv420p`; odd widths cause a fatal encode error.
 
-### AV1 Encoding Parameters
+### H.264 Encoding Parameters
+
+The step-1 videos are **H.264-encoded** (`libx264`), matching the codec of the training reference videos. This is the default codec in `scripts/dicom_batch_to_mp4.py`; pass `--codec libsvtav1` only for encoding experiments.
 
 ```bash
 ffmpeg \
   -framerate <fps_from_dicom> \
   -i frame_%05d.png \
-  -c:v libsvtav1 -crf 30 -preset 8 \
+  -c:v libx264 -crf 18 -preset slow \
   -pix_fmt yuv420p \
   output.mp4
 ```
 
 | Parameter | Value | Reason |
 |---|---|---|
-| `-c:v libsvtav1` | AV1 (SVT-AV1) | Better quality/size ratio than h264 at the same CRF; fully deterministic output |
-| `-crf 30` | Quality factor | Good quality for grayscale ultrasound content |
-| `-preset 8` | Speed vs quality | Fast encoding; preset 1 = best quality + slowest |
+| `-c:v libx264` | H.264 | Matches the codec of the reference step-1 videos |
+| `-crf 18` | Quality factor | Visually lossless for grayscale ultrasound content |
+| `-preset slow` | Speed vs quality | Favor compression quality over encoding speed |
 | `-pix_fmt yuv420p` | Pixel format | Required for broad player/decoder compatibility; grayscale content encodes as luma-channel only |
 
-**Exception**: `06-0018-D-M` uses `libx264` (h264) to match its reference encoding format.
+> **CLI**: `python scripts/dicom_batch_to_mp4.py --input <dicom_dir> --output <mp4_dir> [--codec libx264|libsvtav1]`.
 
 ### JPEG 2000 Lossless Fallback
 

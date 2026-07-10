@@ -6,12 +6,13 @@ Converts all DICOM files from an input directory to MP4 videos, reproducing
 the reference `datasetAVANTPREPROCESS` dataset (first step of the STARHE pipeline).
 
 Pipeline per file:
-    DICOM → PNG frames (Weasis JAR, LUT applied) → scale → MP4 (AV1 / libsvtav1)
+    DICOM → PNG frames (Weasis JAR, LUT applied) → scale → MP4 (H.264 / libx264)
 
 FPS rule:     RecommendedDisplayFrameRate tag (covers 46/49 files exactly).
 Scale rule:   DICOM rows > 750 → 720p | 480 < rows ≤ 750 → 480p | rows ≤ 480 → 360p
               Width computed proportionally; kept even for codec compatibility.
-Codec:        libsvtav1 (AV1). Exception: 06-0018-D-M uses h264 + original resolution.
+Codec:        libx264 (H.264) by default — required for the step-1 videos.
+              Override with --codec libsvtav1 for AV1 experiments.
 AVI input:    05-0080-D-P.avi handled via ffmpeg directly (no DICOM parse).
 Labels:       Loaded from annotation CSV (Risk (reference): High → HRHCCp, Low → LRnHCC).
 
@@ -192,7 +193,10 @@ def _best_av1_codec() -> str:
         pass
     return "libx264"
 
-_DEFAULT_CODEC = _best_av1_codec()
+# Step-1 output codec. The pipeline REQUIRES H.264 (libx264) for the
+# unprocessed step-1 videos — the training reference videos are H.264, not AV1.
+# Overridable via --codec on the CLI (e.g. libsvtav1) for experiments.
+_DEFAULT_CODEC = "libx264"
 
 
 def pngs_to_mp4_av1(png_dir: str, fps: float, out_mp4: str,
@@ -227,20 +231,23 @@ def pngs_to_mp4_av1(png_dir: str, fps: float, out_mp4: str,
 
 def avi_to_mp4_av1(avi_path: str, fps: float, out_mp4: str,
                     width: int, height: int,
-                    max_frames: int | None = None) -> None:
-    """Convert an AVI directly to AV1 MP4 via ffmpeg (no DICOM step).
+                    max_frames: int | None = None,
+                    codec: str = _DEFAULT_CODEC) -> None:
+    """Convert an AVI directly to MP4 via ffmpeg (no DICOM step).
     max_frames: if set, encode at most this many frames (-vframes N).
     """
     vf = f"scale={width}:{height}:flags=lanczos"
+    if codec == "libsvtav1":
+        codec_args = ["-c:v", "libsvtav1", "-crf", "30", "-preset", "8", "-pix_fmt", "yuv420p"]
+    else:  # h264
+        codec_args = ["-c:v", "libx264", "-crf", "18", "-preset", "slow", "-pix_fmt", "yuv420p"]
     frames_arg = ["-vframes", str(max_frames)] if max_frames is not None else []
     cmd = [
         "ffmpeg", "-y",
         "-i", avi_path,
         "-vf", vf,
         "-r", str(fps),
-        "-c:v", _DEFAULT_CODEC, "-crf", "30", "-preset", "8",
-        "-pix_fmt", "yuv420p",
-    ] + frames_arg + [out_mp4]
+    ] + codec_args + frames_arg + [out_mp4]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
         raise RuntimeError(f"ffmpeg exit={r.returncode}: {r.stderr[-400:]}")
@@ -319,7 +326,8 @@ def find_reference(ref_dir: str, pid_short: str) -> str | None:
 def convert_one(input_path: str, out_mp4: str, java: str | None,
                 dry_run: bool = False,
                 target_fps: float | None = None,
-                target_frames: int | None = None) -> dict:
+                target_frames: int | None = None,
+                codec_override: str | None = None) -> dict:
     """
     Converts a single DICOM (or AVI) to MP4.
 
@@ -382,6 +390,8 @@ def convert_one(input_path: str, out_mp4: str, java: str | None,
     else:
         tw, th = target_dimensions(rows, cols)
         codec = _DEFAULT_CODEC
+    if codec_override:
+        codec = codec_override
 
     result.update({"fps": fps, "width": tw, "height": th,
                    "frames_dicom": n_frames, "codec": codec})
@@ -474,6 +484,9 @@ def main() -> None:
     parser.add_argument("--patient", "-p",
         default=None,
         help="Process only this patient ID (e.g. 01-0006)")
+    parser.add_argument("--codec",
+        default="libx264", choices=["libx264", "libsvtav1"],
+        help="Step-1 output codec (default: libx264 / H.264 — pipeline requirement)")
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -570,7 +583,8 @@ def main() -> None:
             continue
 
         res = convert_one(input_path, out_path, java, dry_run=False,
-                          target_fps=target_fps, target_frames=target_frames)
+                          target_fps=target_fps, target_frames=target_frames,
+                          codec_override=args.codec)
         res["out_name"] = out_name
 
         status_icon = "✓" if res["status"] == "ok" else "✗"
