@@ -50,6 +50,27 @@ if (-not $PYTHON_SYS_EXE) {
 $sysLabel = "$PYTHON_SYS_EXE $($PYTHON_SYS_ARGS -join ' ')".Trim()
 Write-Host "[OK] Python systeme : $sysLabel"
 
+# -- 1.5. Check Windows long path support -------------------------------------
+# Some dependencies (e.g. torch) ship files nested deep enough that the full
+# install path can exceed 260 chars, especially when the repo itself lives
+# under a long path. Without this, pip fails mid-install with WinError 206.
+$longPathsKey = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -ErrorAction SilentlyContinue
+if (-not $longPathsKey -or $longPathsKey.LongPathsEnabled -ne 1) {
+    Write-Error "Le support des chemins longs Windows n'est pas active (LongPathsEnabled)."
+    Write-Host ""
+    Write-Host "Certaines dependances (torch) installent des fichiers dont le chemin"
+    Write-Host "peut depasser 260 caracteres, ce qui fait echouer pip avec WinError 206."
+    Write-Host ""
+    Write-Host "Corrige ceci une seule fois, dans un PowerShell lance en Administrateur :"
+    Write-Host '  New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force'
+    Write-Host ""
+    Write-Host "Puis relance 'make setup'."
+    exit 1
+}
+
+# Ne necessite pas de droits admin, evite le meme type d'erreur cote git.
+git config --global core.longpaths true 2>&1 | Out-Null
+
 # -- 2. Create the venv if missing --------------------------------------------
 if (-not (Test-Path $PYTHON)) {
     Write-Host "[..] Creation du venv dans $VENV_DIR ..."
