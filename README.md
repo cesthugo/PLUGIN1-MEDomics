@@ -925,6 +925,21 @@ torch.use_deterministic_algorithms(True, warn_only=True)
 
 Without this, float32 accumulation differences between MKL (Linux/Windows) and Accelerate (macOS ARM) cause ~0.002 score variance per inference. With `DETERMINISTIC_INFERENCE=True`, scores are **bit-identical across all platforms** for the same input file. Cost: ~2–3× slower on CPU.
 
+Both AI runners honor this: `_c3d_runner.py` (STARHE-RISK) and `_rtmdet_runner.py` (STARHE-DETECT) each cast the model **and** the input tensor to `float64` and pin `torch.set_num_threads(1)` / `set_num_interop_threads(1)` when launched with `--deterministic`.
+
+### Cross-Platform Reproducibility (macOS / Linux / Windows)
+
+Goal: identical STARHE results on every OS for the same DICOM. Status per stage:
+
+| Stage | Cross-OS identical? | Mechanism |
+|---|---|---|
+| **DICOM decode** | ⚠️ **not yet** | Weasis native libs ship for **macOS only** (`.dylib`); Linux/Windows silently fall back to **pydicom** (no LUT) → different pixels. See caveat below. |
+| **prepUS crop** | ✅ | `PREPUS_BYPASS_MP4 = True` → pure-numpy path, no `cv2.VideoWriter(mp4v)` roundtrip; crop bbox is integer → deterministic. |
+| **STARHE-RISK (C3D)** | ✅ | `DETERMINISTIC_INFERENCE = True` → CPU + float64 + single thread (both mmaction2 and pytorch backends). |
+| **STARHE-DETECT (RTMDet)** | ✅ | `DETERMINISTIC_INFERENCE = True` → CPU + float64 + single thread + TF32 off; score rounded to 6 decimals before the confidence threshold to avoid ~1e-9 boundary flips. |
+
+> **⚠️ DICOM decode caveat.** To make decode identical across OS, **one** of the following is required (not yet done): (a) build & bundle the Weasis OpenCV native libs for Linux (`.so`) and Windows (`.dll`) so every platform uses the same Java LUT decode (training-faithful, recommended), **or** (b) force pydicom everywhere (`USE_WEASIS_EXPORT = False`) — consistent across OS but drops the Modality/VOI LUT and changes the pixel distribution. Until then, a Mac and a Linux/Windows host can decode the same DICOM differently.
+
 ### Backend Selection
 
 `C3D_BACKEND` in `config.py` (default: `"mmaction2"`) selects the inference backend:
@@ -1257,12 +1272,11 @@ Returns a 2-tuple `(crop_frames, info_dict)`:
 
 Two backends are available, controlled by the `PREPUS_BYPASS_MP4` flag in `config.py`.
 
-> **Current default: `PREPUS_BYPASS_MP4 = False`** (Mode A). As of the July 2026
-> reproducibility campaign, prepUS runs through the mp4v roundtrip because that is
-> the exact path the STARHE models saw at training time (Jérémy's crops carry mp4v
-> compression artifacts). Mode B (pure numpy) is cross-OS bit-identical but produces
-> *cleaner* crops that are slightly off the training distribution — set it back to
-> `True` when cross-platform portability matters more than matching Jérémy.
+> **Current default: `PREPUS_BYPASS_MP4 = True`** (Mode B). prepUS runs the pure-numpy
+> path so the crop is **bit-identical across macOS / Linux / Windows** (no `cv2.VideoWriter`
+> mp4v roundtrip, whose bitstream depends on the OpenCV-linked FFmpeg build). Set it to
+> `False` (Mode A) only to reproduce the exact mp4v-roundtrip crops seen at training time
+> on a single host — that path is not portable across OSes.
 
 **Mode A — MP4 roundtrip** (`preprocess_with_prepus`, legacy, **current default**):
 
@@ -1603,7 +1617,7 @@ to be closest to his setup.
 | Flag | Value | Why |
 |---|---|---|
 | `DETERMINISTIC_INFERENCE` | `True` | CPU + float64 → scores bit-identical cross-OS. Set `False` for native device (`INFERENCE_DEVICE="auto"`) + float32 (faster, ~0.002 variance across OS/hardware). |
-| `PREPUS_BYPASS_MP4` | `False` | Mode A (mp4v roundtrip) — the exact crop path the models saw at training. Mode B produces cleaner, off-distribution crops. |
+| `PREPUS_BYPASS_MP4` | `True` | Mode B (pure numpy) — cross-OS bit-identical crop. Set `False` for Mode A (mp4v roundtrip, single-host training path). |
 | `USE_WEASIS_EXPORT` | `True` | Reproduces Jérémy's LUT decoding chain (kept — it moves *toward* him). |
 
 Flip the first two back to `True` to restore cross-platform bit-identity (at the
@@ -2294,7 +2308,7 @@ Reproducibility parameters (currently set to reproduce Jérémy on Linux — see
 | Parameter | Value | Effect |
 |---|---|---|
 | `DETERMINISTIC_INFERENCE` | `True` | `True` = CPU/float64, bit-identical cross-OS. `False` = native device/float32 (faster). |
-| `PREPUS_BYPASS_MP4` | `False` | `False` = Mode A mp4v roundtrip (training path). `True` = pure-numpy, cross-OS bit-identical but off-distribution. |
+| `PREPUS_BYPASS_MP4` | `True` | `True` = pure-numpy, cross-OS bit-identical. `False` = Mode A mp4v roundtrip (single-host training path). |
 | `USE_WEASIS_EXPORT` | `True` | DICOM decoded via Weasis (Modality + VOI LUT), pydicom fallback. Reproduces Jérémy's LUT chain. |
 | `INFERENCE_DEVICE` | `"auto"` | `auto` → CUDA/MPS/CPU. Used when `DETERMINISTIC_INFERENCE=False`. |
 | `RISK_THRESHOLD` | `0.50` | Class-1 probability cutoff for "High risk". |

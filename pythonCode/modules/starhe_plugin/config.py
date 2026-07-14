@@ -108,7 +108,7 @@ INFERENCE_DEVICE = "auto"
 # ⚠️  Set to False to reproduce Jérémy's native environment (Linux + GPU,
 #     float32): forcing CPU/float64 MOVES AWAY from his distribution. Switch back
 #     to True for bit-exact reproducibility across OSes.
-DETERMINISTIC_INFERENCE: bool = False
+DETERMINISTIC_INFERENCE: bool = True
 
 # ── MP4 roundtrip bypass in prepUS ───────────────────────────────────────────
 # `cv2.VideoWriter(mp4v)` produces a bitstream that depends on the FFmpeg binary
@@ -124,7 +124,7 @@ DETERMINISTIC_INFERENCE: bool = False
 #
 # ⚠️  Set to False to reproduce Jérémy: the mp4v roundtrip is what the models
 #     saw during training. Switch back to True for cross-OS portability.
-PREPUS_BYPASS_MP4: bool = False
+PREPUS_BYPASS_MP4: bool = True
 
 # ── DICOM decoding via weasis-dcm2png ────────────────────────────────────────
 # `pydicom.pixel_array` applies neither the DICOM's Modality LUT nor its VOI LUT,

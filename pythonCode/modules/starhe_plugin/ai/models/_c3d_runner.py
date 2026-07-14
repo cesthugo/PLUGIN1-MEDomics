@@ -125,9 +125,13 @@ def _load_model(ckpt_path: str, device: str):
 # ── Inference ─────────────────────────────────────────────────────────────────
 
 @torch.no_grad()
-def _infer(backbone, cls_head, frames: np.ndarray, device: str) -> tuple[float, float]:
-    tensor = _preprocess(frames).to(device)               # (10, 3, 16, 112, 112)
-    feats  = backbone(tensor)                              # (10, 4096)
+def _infer(backbone, cls_head, frames: np.ndarray, device: str,
+           use_double: bool = False) -> tuple[float, float]:
+    tensor = _preprocess(frames)                          # (10, 3, 16, 112, 112) float32
+    if use_double:
+        tensor = tensor.double()                          # float64 → cross-OS bit-identical
+    tensor = tensor.to(device)
+    feats  = backbone(tensor)                             # (10, 4096)
     logits = cls_head.fc_cls(cls_head.dropout(feats))     # (10, 2)
     probs  = F.softmax(logits, dim=1).mean(0)             # (2,)
     return float(probs[0].item()), float(probs[1].item())
@@ -135,7 +139,7 @@ def _infer(backbone, cls_head, frames: np.ndarray, device: str) -> tuple[float, 
 
 # ── Server mode ───────────────────────────────────────────────────────────────
 
-def _run_server(backbone, cls_head, device: str) -> None:
+def _run_server(backbone, cls_head, device: str, use_double: bool = False) -> None:
     print("[c3d_server] READY", flush=True)
     for line in sys.stdin:
         line = line.strip()
@@ -148,7 +152,7 @@ def _run_server(backbone, cls_head, device: str) -> None:
         frames = np.frombuffer(
             base64.b64decode(req["frames_b64"]), dtype=np.uint8
         ).reshape(shape)
-        score_low, score_high = _infer(backbone, cls_head, frames, device)
+        score_low, score_high = _infer(backbone, cls_head, frames, device, use_double)
         print(json.dumps({"score_low": score_low, "score_high": score_high}), flush=True)
 
 
@@ -163,9 +167,19 @@ def main() -> None:
     args = parser.parse_args()
 
     device = args.device
+    use_double = False
     if args.deterministic:
+        # Cross-platform reproducibility: force CPU + float64 + single thread.
+        # float32 BLAS differs by ~1e-4 between MKL (Windows/Linux) and Accelerate
+        # (macOS ARM); float64 drops that to ~1e-13 → bit-identical scores. Single
+        # thread fixes the float accumulation order (which varies with thread count).
         device = "cpu"
         torch.set_num_threads(1)
+        try:
+            torch.set_num_interop_threads(1)
+        except (RuntimeError, AttributeError):
+            pass  # already set / not supported
+        use_double = True
 
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -176,7 +190,10 @@ def main() -> None:
     torch.use_deterministic_algorithms(True, warn_only=True)
 
     backbone, cls_head = _load_model(args.ckpt, device)
-    _run_server(backbone, cls_head, device)
+    if use_double:
+        backbone = backbone.double()
+        cls_head = cls_head.double()
+    _run_server(backbone, cls_head, device, use_double)
 
 
 if __name__ == "__main__":
