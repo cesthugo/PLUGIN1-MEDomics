@@ -4,6 +4,7 @@
 #
 # Available commands:
 #   make setup            — installs the Python venv, the dependencies and prepUS
+#   make download-models  — downloads the STARHE AI weights (RISK + DETECT)
 #   make tkinter          — launches the Tkinter prototype interface
 #   make react            — builds and starts the Go server + the React/Vite UI
 #   make electron         — launches the Electron application in development mode
@@ -19,14 +20,16 @@ ifeq ($(OS),Windows_NT)
     SHELL_SETUP   = powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
     SHELL_TKINTER = powershell -ExecutionPolicy Bypass -File scripts/run_tkinter.ps1
     SHELL_REACT   = powershell -ExecutionPolicy Bypass -File scripts/start_react.ps1
+    PYTHON        = python
 else
     SHELL_SETUP   = ./scripts/setup.sh
     SHELL_TKINTER = ./scripts/run_tkinter.sh
     SHELL_REACT   = ./scripts/start_react.sh
+    PYTHON        = python3
 endif
 
 # ── Targets ───────────────────────────────────────────────────────────────────
-.PHONY: help setup tkinter react electron build pack cross-compile build-worker
+.PHONY: help setup download-models tkinter react electron build pack cross-compile build-worker
 
 help:
 	@echo ""
@@ -34,6 +37,7 @@ help:
 	@echo "========================"
 	@echo ""
 	@echo "  make setup            Installs the Python venv, dependencies and prepUS"
+	@echo "  make download-models  Downloads the STARHE AI weights (RISK + DETECT) into models/"
 	@echo "  make tkinter          Launches the Tkinter prototype interface"
 	@echo "  make react            Starts the Go server + React UI (development)"
 	@echo "  make electron         Launches the Electron app in development mode (Vite + Electron)"
@@ -45,6 +49,9 @@ help:
 
 setup:
 	$(SHELL_SETUP)
+
+download-models:
+	$(PYTHON) scripts/download_models.py $(if $(FORCE),--force,)
 
 tkinter:
 	$(SHELL_TKINTER)
