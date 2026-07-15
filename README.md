@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.7.0-beta.3` — Last updated: July 10, 2026*
+*Version `0.7.0-beta.4` — Last updated: July 15, 2026*
 
 ---
 
@@ -40,25 +40,15 @@ Two AI models are used:
 
 > **DICOM compressed formats**: JPEG Baseline, JPEG Lossless, and JPEG 2000 (lossless/lossy) are all supported via `pylibjpeg` (installed automatically with `requirements.txt`). No additional system library is needed.
 
-> **AI model weights**: the `.pth` checkpoint files (~200 MB each) are **not included** in the repository. They are downloaded automatically by `scripts/run_tkinter.sh` / `scripts/run_tkinter.ps1` from the dedicated **public** repo [GitHub Release STARHE_MODELS](https://github.com/cesthugo/starhe-models/releases/tag/STARHE_MODELS) — no GitHub token required. To download them manually: `python scripts/download_models.py`.
+> **AI model weights (confidential — provided locally)**: the `.pth` checkpoint files
+> (~312 MB C3D + ~439 MB RTMDet) are **not included** in the repository and are **not
+> hosted or downloaded anywhere** — for confidentiality they never leave a private channel.
+> In the packaged app, the first time you launch a STARHE analysis, a native dialog asks you
+> to select the two `.pth` files **from your own computer**; they are copied into the app's
+> local weights folder (`userData/models/`) and reused afterwards. Files are matched to the
+> right model by name, or by size if renamed.
 >
-> **Private repo — GitHub token required**: since this repository is private, downloading the weights requires a GitHub Personal Access Token.
->
-> 1. Create a token at https://github.com/settings/tokens → *Generate new token (classic)* → scope **`repo`** → copy the generated token (`ghp_...`).
-> 2. Set the token in your terminal **without sharing it** (never paste a token in a chat or a versioned file):
->    ```bash
->    # macOS / Linux — add to ~/.zshrc or ~/.zprofile to make it permanent
->    export GITHUB_TOKEN=ghp_your_token
->    ```
->    ```powershell
->    # Windows PowerShell — add to $PROFILE to make it permanent
->    $env:GITHUB_TOKEN = "ghp_your_token"
->    ```
-> 3. Run the download:
->    ```bash
->    python download_models.py
->    ```
->    Or let `scripts/run_tkinter.sh` / `scripts/run_tkinter.ps1` handle it automatically on first launch.
+> In dev mode the weights are expected in `pythonCode/modules/starhe_plugin/models/`.
 
 > **MongoDB port 54017**: MEDomics deliberately uses a non-standard port to avoid conflicts with system MongoDB instances. This port is hardcoded in `config.py` AND in `go_server/config.go`.
 

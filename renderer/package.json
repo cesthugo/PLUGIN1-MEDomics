@@ -1,6 +1,6 @@
 {
   "name": "starhe-plugin",
-  "version": "0.7.0-beta.3",
+  "version": "0.7.0-beta.4",
   "description": "STARHE — Plugin MEDomics (détection et évaluation du risque sur DICOM échographique hépatique)",
   "author": {
     "name": "MEDomics-UdeS",
@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit",
     "dev:electron": "concurrently --kill-others -n vite,electron -c cyan,yellow \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build:renderer": "tsc --noEmit && vite build",
-    "build:electron-main": "node -e \"const fs=require('fs');fs.mkdirSync('electron-dist',{recursive:true});fs.writeFileSync('electron-dist/package.json',JSON.stringify({type:'commonjs'}));fs.copyFileSync('electron/splash.html','electron-dist/splash.html');fs.copyFileSync('electron/download-models.html','electron-dist/download-models.html')\" && tsc -p tsconfig.electron.json",
+    "build:electron-main": "node -e \"const fs=require('fs');fs.mkdirSync('electron-dist',{recursive:true});fs.writeFileSync('electron-dist/package.json',JSON.stringify({type:'commonjs'}));fs.copyFileSync('electron/splash.html','electron-dist/splash.html')\" && tsc -p tsconfig.electron.json",
     "build:electron": "npm run build:renderer && npm run build:electron-main",
     "electron:pack": "npm run build:electron && electron-builder"
   },

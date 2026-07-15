@@ -17,7 +17,7 @@ import { app, BrowserWindow, ipcMain, dialog, net } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs   from 'fs';
-import { ensureModelsDownloaded, getWeightsDir, modelsReady } from './download-models';
+import { getWeightsDir, modelsReady, missingModels, installWeights } from './weights';
 
 const isDev = !app.isPackaged;
 
@@ -242,20 +242,10 @@ async function showGoUnavailableDialog(err: Error): Promise<void> {
 async function bootSequence(): Promise<void> {
   if (!splashWin) createSplash();
 
-  // Phase 4: download the `.pth` models if missing (packaged mode only).
-  // In dev, we assume they are already in pythonCode/.../models/.
-  if (!isDev && !modelsReady()) {
-    splashWin?.close();
-    try {
-      await ensureModelsDownloaded();
-    } catch (err) {
-      // User clicked "Quit" in the download window
-      appQuitting = true;
-      app.quit();
-      return;
-    }
-    if (!splashWin) createSplash();
-  }
+  // The `.pth` weights are NOT downloaded — for confidentiality the user loads
+  // them from their own computer (React "load model weights" step before an
+  // analysis; see the `models:*` IPC handlers below). The app boots normally
+  // whether or not the weights are present.
 
   startGoServer();
   try {
@@ -286,6 +276,32 @@ ipcMain.handle('open-dicom-files', async () => {
     properties: ['openFile', 'multiSelections'],
   });
   return canceled ? [] : filePaths;
+});
+
+// ── IPC: local model weights (loaded from the user's computer) ─────────────────
+
+/** Returns whether the required `.pth` weights are present locally. */
+ipcMain.handle('models:status', () => ({
+  ready: modelsReady(),
+  missing: missingModels(),
+}));
+
+/** Opens a native dialog to pick the `.pth` weights, then installs them into the
+ *  weights dir. Returns the resulting status. */
+ipcMain.handle('models:load', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title:       'Sélectionner les poids des modèles STARHE (.pth)',
+    buttonLabel: 'Charger',
+    filters: [
+      { name: 'Poids PyTorch', extensions: ['pth'] },
+      { name: 'Tous les fichiers', extensions: ['*'] },
+    ],
+    properties: ['openFile', 'multiSelections'],
+  });
+  if (canceled || filePaths.length === 0) {
+    return { ready: modelsReady(), installed: [], missing: missingModels(), error: 'Annulé' };
+  }
+  return installWeights(filePaths);
 });
 
 // ── Cycle de vie de l'application ─────────────────────────────────────────────

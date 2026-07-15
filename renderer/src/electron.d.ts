@@ -21,6 +21,10 @@ interface Window {
   electronAPI?: {
     /** Opens a native DICOM file selection dialog. */
     openDicomFiles: () => Promise<string[]>;
+    /** Whether the STARHE `.pth` weights are present locally. */
+    weightsStatus?: () => Promise<{ ready: boolean; missing: string[] }>;
+    /** Opens a dialog to pick the `.pth` weights and installs them locally. */
+    loadWeights?: () => Promise<{ ready: boolean; installed: string[]; missing: string[]; error?: string }>;
     /** Base URL of the local Go server (e.g. 'http://localhost:8080'). */
     apiBase: string;
   };

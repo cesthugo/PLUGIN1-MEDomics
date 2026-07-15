@@ -22,6 +22,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openDicomFiles: (): Promise<string[]> =>
     ipcRenderer.invoke('open-dicom-files'),
 
+  /** Whether the STARHE `.pth` weights are present locally. */
+  weightsStatus: (): Promise<{ ready: boolean; missing: string[] }> =>
+    ipcRenderer.invoke('models:status'),
+
+  /** Opens a dialog to pick the `.pth` weights and installs them locally. */
+  loadWeights: (): Promise<{ ready: boolean; installed: string[]; missing: string[]; error?: string }> =>
+    ipcRenderer.invoke('models:load'),
+
   /**
    * Base URL of the local Go server.
    * Used by api.ts to build the endpoints (API_BASE).

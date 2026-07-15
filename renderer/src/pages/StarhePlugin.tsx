@@ -501,9 +501,25 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
 
   // ── Analysis ───────────────────────────────────────────────────────────────
 
-  const onRunPipeline = useCallback(() => {
+  const onRunPipeline = useCallback(async () => {
     if (!activeTab?.data) return;
     if (analysisStatus === 'running') return;
+
+    // Confidential weights: the user supplies the .pth from their own computer.
+    // Before an analysis, make sure they are loaded locally; if not, prompt.
+    if (isElectron && window.electronAPI?.weightsStatus) {
+      let st = await window.electronAPI.weightsStatus();
+      if (!st.ready) {
+        addLog(`Poids des modèles requis (${st.missing.join(', ')}) — sélectionnez les fichiers .pth sur votre ordinateur…`, 'warning');
+        const res = await window.electronAPI.loadWeights?.();
+        if (!res || !res.ready) {
+          addLog(`Analyse annulée : poids non chargés${res?.error ? ` (${res.error})` : ''}.`, 'error');
+          return;
+        }
+        addLog(`Poids chargés : ${res.installed.join(', ')}.`, 'success');
+      }
+    }
+
     const mode = displaySettings.analysisMode;
     setAnalysisTargetTabId(activeTab.id);  // figer la cible avant le lancement
     startAnalysis(
@@ -519,7 +535,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             runDetection: mode !== 'risk_only',
           }
     );
-  }, [activeTab, analysisStatus, startAnalysis, displaySettings.analysisMode]);
+  }, [activeTab, analysisStatus, startAnalysis, displaySettings.analysisMode, isElectron, addLog]);
 
   const onResetAnalysis = useCallback(async () => {
     if (!activeTab?.dicomPath) return;
