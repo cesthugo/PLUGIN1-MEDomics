@@ -505,22 +505,29 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     if (!activeTab?.data) return;
     if (analysisStatus === 'running') return;
 
-    // Confidential weights: the user supplies the .pth from their own computer.
-    // Before an analysis, make sure they are loaded locally; if not, prompt.
-    if (isElectron && window.electronAPI?.weightsStatus) {
-      let st = await window.electronAPI.weightsStatus();
-      if (!st.ready) {
-        addLog(`Poids des modèles requis (${st.missing.join(', ')}) — sélectionnez les fichiers .pth sur votre ordinateur…`, 'warning');
-        const res = await window.electronAPI.loadWeights?.();
-        if (!res || !res.ready) {
-          addLog(`Analyse annulée : poids non chargés${res?.error ? ` (${res.error})` : ''}.`, 'error');
+    const mode = displaySettings.analysisMode;
+
+    // Confidential weights: the user supplies each AI model's .pth from their own
+    // computer. Before running, ensure every model this analysis needs has its
+    // weight loaded locally; if not, prompt to load that specific model's file.
+    if (isElectron && window.electronAPI?.weightsStatus && window.electronAPI?.loadWeights) {
+      const needed = new Set<string>();
+      if (mode !== 'detect_only') needed.add('risk');
+      if (mode !== 'risk_only')   needed.add('detect');
+      const status = await window.electronAPI.weightsStatus();
+      for (const m of status) {
+        if (!needed.has(m.id) || m.present) continue;
+        addLog(`Poids requis pour ${m.name} — sélectionnez le fichier .pth sur votre ordinateur…`, 'warning');
+        const res = await window.electronAPI.loadWeights(m.id);
+        if (!res.ok) {
+          addLog(`Analyse annulée : poids de ${m.name} non chargé${res.error ? ` (${res.error})` : ''}.`, 'error');
           return;
         }
-        addLog(`Poids chargés : ${res.installed.join(', ')}.`, 'success');
+        if (res.warning) addLog(res.warning, 'warning');
+        addLog(`Poids chargé pour ${m.name}.`, 'success');
       }
     }
 
-    const mode = displaySettings.analysisMode;
     setAnalysisTargetTabId(activeTab.id);  // figer la cible avant le lancement
     startAnalysis(
       activeTab.isMp4

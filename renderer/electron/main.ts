@@ -17,7 +17,7 @@ import { app, BrowserWindow, ipcMain, dialog, net } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs   from 'fs';
-import { getWeightsDir, modelsReady, missingModels, installWeights } from './weights';
+import { getWeightsDir, modelsStatus, findModel, installModelWeight } from './weights';
 
 const isDev = !app.isPackaged;
 
@@ -278,30 +278,30 @@ ipcMain.handle('open-dicom-files', async () => {
   return canceled ? [] : filePaths;
 });
 
-// ── IPC: local model weights (loaded from the user's computer) ─────────────────
+// ── IPC: local AI model weights (loaded from the user's computer) ──────────────
 
-/** Returns whether the required `.pth` weights are present locally. */
-ipcMain.handle('models:status', () => ({
-  ready: modelsReady(),
-  missing: missingModels(),
-}));
+/** Per-model presence status for the whole model registry. */
+ipcMain.handle('models:status', () => modelsStatus());
 
-/** Opens a native dialog to pick the `.pth` weights, then installs them into the
- *  weights dir. Returns the resulting status. */
-ipcMain.handle('models:load', async () => {
+/** Opens a native dialog to pick the `.pth` weight for ONE specific AI model
+ *  (by id), then installs it under the model's canonical name. */
+ipcMain.handle('models:load', async (_evt, modelId: string) => {
+  const spec = findModel(modelId);
+  if (!spec) return { ok: false, id: modelId, error: `Modèle inconnu : ${modelId}` };
+
   const { canceled, filePaths } = await dialog.showOpenDialog({
-    title:       'Sélectionner les poids des modèles STARHE (.pth)',
+    title:       `Sélectionner le poids pour ${spec.name} (.pth)`,
     buttonLabel: 'Charger',
     filters: [
       { name: 'Poids PyTorch', extensions: ['pth'] },
       { name: 'Tous les fichiers', extensions: ['*'] },
     ],
-    properties: ['openFile', 'multiSelections'],
+    properties: ['openFile'],
   });
   if (canceled || filePaths.length === 0) {
-    return { ready: modelsReady(), installed: [], missing: missingModels(), error: 'Annulé' };
+    return { ok: false, id: modelId, error: 'Annulé' };
   }
-  return installWeights(filePaths);
+  return installModelWeight(modelId, filePaths[0]);
 });
 
 // ── Cycle de vie de l'application ─────────────────────────────────────────────

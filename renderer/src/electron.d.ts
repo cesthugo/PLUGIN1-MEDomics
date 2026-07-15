@@ -21,10 +21,10 @@ interface Window {
   electronAPI?: {
     /** Opens a native DICOM file selection dialog. */
     openDicomFiles: () => Promise<string[]>;
-    /** Whether the STARHE `.pth` weights are present locally. */
-    weightsStatus?: () => Promise<{ ready: boolean; missing: string[] }>;
-    /** Opens a dialog to pick the `.pth` weights and installs them locally. */
-    loadWeights?: () => Promise<{ ready: boolean; installed: string[]; missing: string[]; error?: string }>;
+    /** Per-model presence status of the AI weights (one entry per model). */
+    weightsStatus?: () => Promise<Array<{ id: string; name: string; file: string; present: boolean }>>;
+    /** Opens a dialog to pick the `.pth` weight for ONE model (by id) and installs it. */
+    loadWeights?: (modelId: string) => Promise<{ ok: boolean; id: string; error?: string; warning?: string }>;
     /** Base URL of the local Go server (e.g. 'http://localhost:8080'). */
     apiBase: string;
   };
