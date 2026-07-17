@@ -145,6 +145,13 @@ jobs:
               --index-url https://download.pytorch.org/whl/cpu
           fi
           python -m pip install -r pythonCode/modules/starhe_plugin/requirements.txt
+          # Vendored prepUS + mmaction2 (C3D backend) — installed SEPARATELY, like
+          # scripts/setup.sh (they are not in requirements.txt). Without them the
+          # bundled worker crashes at runtime: prepUS preprocessing (step 4) and
+          # C3D inference (mmaction2 backend) fail with ModuleNotFoundError.
+          python -m pip install ./third_party/prepUS --no-deps
+          python -m pip install mmaction2==1.2.0 --no-deps
+          python scripts/patch_mmaction.py
 
       # ── Step 3: bundle the Python worker ─────────────────────────────────────
       - name: Cache PyInstaller worker bundle
@@ -152,7 +159,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: pythonCode/modules/dist
-          key: pyinstaller-${{ matrix.platform }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('pythonCode/modules/starhe_plugin/requirements.txt', 'scripts/starhe_worker.spec', 'pythonCode/modules/starhe_plugin/**/*.py') }}
+          # cache epoch v2: bump to invalidate stale bundles that predate the
+          # prepUS + mmaction2 install fix.
+          key: pyinstaller-v2-${{ matrix.platform }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('pythonCode/modules/starhe_plugin/requirements.txt', 'scripts/starhe_worker.spec', 'scripts/patch_mmaction.py', 'pythonCode/modules/starhe_plugin/**/*.py') }}
 
       - name: Build PyInstaller worker
         if: steps.cache-pyinstaller.outputs.cache-hit != 'true'
