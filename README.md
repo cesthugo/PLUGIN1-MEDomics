@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.7.0-beta.4` — Last updated: July 15, 2026*
+*Version `0.7.0-beta.5` — Last updated: July 16, 2026*
 
 ---
 

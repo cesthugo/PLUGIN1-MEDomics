@@ -163,6 +163,22 @@ jobs:
           pyinstaller ../../scripts/starhe_worker.spec --noconfirm
           ls dist/starhe_worker | head -20
 
+      # electron-builder's extraResources bundles the worker from
+      # renderer/build-resources/starhe_worker/. PyInstaller wrote it to
+      # pythonCode/modules/dist/ — stage it there (runs on cache-hit too, since
+      # the cache restores dist/). Without this the installer ships with NO
+      # worker and DICOM loading fails ("starhe_worker not found").
+      - name: Stage PyInstaller worker into build-resources
+        shell: bash
+        run: |
+          set -eux
+          src=pythonCode/modules/dist/starhe_worker
+          dst=renderer/build-resources/starhe_worker
+          rm -rf "$dst"
+          mkdir -p "$(dirname "$dst")"
+          cp -R "$src" "$dst"
+          ls "$dst" | head -5
+
       # ── Step 4: download the Temurin JRE for the platform ────────────────────
       - name: Fetch JRE (Unix)
         if: runner.os != 'Windows'
@@ -182,7 +198,7 @@ jobs:
       # `third_party/weasis-dcm2png/dist/` is gitignored (global `dist/` rule)
       # but referenced by `extraResources`. Rebuild it from `target/`
       # (committed Maven artifacts) before each electron-builder build.
-      - name: Prepare weasis-dcm2png/dist
+      - name: Prepare weasis-dcm2png (dist + build-resources)
         shell: bash
         run: |
           set -eux
@@ -194,6 +210,13 @@ jobs:
             cp -R "$src/native/." "$dst/native/"
           fi
           ls -la "$dst" "$dst/native"
+          # Stage into build-resources where electron-builder's extraResources
+          # looks (from: build-resources/weasis-dcm2png). Otherwise the installer
+          # ships without weasis and silently falls back to pydicom.
+          br=renderer/build-resources/weasis-dcm2png
+          rm -rf "$br"
+          cp -R "$dst" "$br"
+          ls -la "$br"
 
       - name: Build renderer + Electron main
         working-directory: renderer
