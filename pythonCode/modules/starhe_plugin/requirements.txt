@@ -19,7 +19,10 @@ opencv-python-headless==4.13.0.92
 # ── AI / Deep Learning ───────────────────────────────────────────────────────
 torch==2.11.0
 torchvision==0.26.0
-# einops is not imported directly — transitive dependency of mmdet (installed automatically)
+# einops IS required by mmdet/mmaction2 models (registry-loaded), but is NOT an
+# automatic dependency of mmdet — install it explicitly, or the C3D/RTMDet
+# runners crash at import time ("No module named 'einops'").
+einops==0.8.2
 
 # ── ML frameworks (mmcv-lite = pure Python, no compiled C extensions) ─────────
 mmengine==0.10.7

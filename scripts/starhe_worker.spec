@@ -85,6 +85,11 @@ hiddenimports += collect_submodules('scipy')
 # inference crashes with "No module named 'sympy'".
 hiddenimports += collect_submodules('sympy')
 hiddenimports += collect_submodules('mpmath')
+# einops is imported dynamically by mmdet/mmaction2 registry-loaded models, so
+# PyInstaller's static analysis misses it. Force-collect it — otherwise the C3D
+# (mmaction2) runner crashes and RISK silently falls back to another backend
+# (different score).
+hiddenimports += collect_submodules('einops')
 
 # ── Embedded data (YAML configs, registries, etc.) ────────────────────────────
 datas = []
