@@ -72,6 +72,10 @@ hiddenimports += collect_submodules('pylibjpeg_libjpeg')
 # All starhe_plugin submodules (loaded via runpy.run_module by the dispatcher)
 hiddenimports += collect_submodules('starhe_plugin')
 hiddenimports += collect_submodules('prepUS')
+# prepUS.cli imports these at import time; collect their submodules so the bundle
+# can `from prepUS.cli import removeLayoutFile` at runtime.
+hiddenimports += collect_submodules('sonocrop')
+hiddenimports += collect_submodules('fire')
 # torch imports sympy (+ its mpmath dep) dynamically at runtime (torch.fx / dynamo).
 # PyInstaller's static analysis misses it, so force-collect it — otherwise C3D
 # inference crashes with "No module named 'sympy'".

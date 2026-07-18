@@ -39,20 +39,22 @@ _VENDOR_PREPUS = os.path.abspath(
 
 
 def _ensure_importable() -> None:
+    err: "Exception | None" = None
     try:
         from prepUS.cli import removeLayoutFile  # noqa: F401
         return
-    except ImportError:
-        pass
+    except Exception as e:  # ImportError, or a dep failing at import time
+        err = e
     if os.path.isdir(_VENDOR_PREPUS) and _VENDOR_PREPUS not in sys.path:
         sys.path.insert(0, _VENDOR_PREPUS)
         try:
             from prepUS.cli import removeLayoutFile  # noqa: F401
             return
-        except ImportError:
-            pass
+        except Exception as e:
+            err = e
     raise ImportError(
-        "Le package prepUS est introuvable.\n"
+        "Le package prepUS (ou une de ses dépendances) n'a pas pu être importé.\n"
+        f"  Erreur réelle : {type(err).__name__}: {err}\n"
         f"  Source vendorisée attendue dans : {_VENDOR_PREPUS}\n"
         "  Installation : pip install third_party/prepUS --no-deps\n"
     )
