@@ -76,6 +76,10 @@ hiddenimports += collect_submodules('prepUS')
 # can `from prepUS.cli import removeLayoutFile` at runtime.
 hiddenimports += collect_submodules('sonocrop')
 hiddenimports += collect_submodules('fire')
+# scipy.ndimage (used by prepUS) pulls scipy's vendored array_api_compat
+# submodules that PyInstaller's default hook misses on recent scipy
+# ("No module named 'scipy._external.array_api_compat.numpy.fft'"). Collect all.
+hiddenimports += collect_submodules('scipy')
 # torch imports sympy (+ its mpmath dep) dynamically at runtime (torch.fx / dynamo).
 # PyInstaller's static analysis misses it, so force-collect it — otherwise C3D
 # inference crashes with "No module named 'sympy'".
