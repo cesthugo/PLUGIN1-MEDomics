@@ -141,7 +141,7 @@ jobs:
           python -m pip install --upgrade pip wheel
           python -m pip install pyinstaller==6.20.0
           if [ "$RUNNER_OS" = "Linux" ]; then
-            python -m pip install torch torchvision \
+            python -m pip install torch==2.11.0 torchvision==0.26.0 \
               --index-url https://download.pytorch.org/whl/cpu
           fi
           python -m pip install -r pythonCode/modules/starhe_plugin/requirements.txt
