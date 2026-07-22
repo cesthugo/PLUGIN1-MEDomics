@@ -42,7 +42,7 @@
     "appId": "com.medomics.starhe-plugin",
     "productName": "STARHE",
     "artifactName": "STARHE-${version}-${os}-${arch}.${ext}",
-    "afterPack": "build-resources/afterPack.js",
+    "afterPack": "build-resources/afterPack.cjs",
     "directories": {
       "output": "release",
       "buildResources": "build-resources"
