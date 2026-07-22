@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.7.0-beta.5` — Last updated: July 16, 2026*
+*Version `0.7.0-beta.6` — Last updated: July 16, 2026*
 
 ---
 
@@ -1560,6 +1560,177 @@ What matters for the pipeline is **pixel-level similarity after decoding**. Meas
 | `05-0065-B-Y` (frame-count override 253→89) | 89 | 4.1 | 26.3 dB |
 
 41–42 dB PSNR (MAE < 1.0) corresponds to imperceptible quality difference — the reference and our output are visually identical for 45/48 files. The lower PSNR for `05-0065` reflects that the reference J2K decoder used a different decoding path for this specific file, producing slightly different pixel values before encoding.
+
+---
+
+## Containerised Pipeline (Docker) — Identical Results on Any OS
+
+The processing + inference chain ships as a **single Docker image** so that the
+same DICOM produces **byte-identical results on macOS, Linux and Windows**.
+Containerising is what finally removes the last source of divergence: the
+*native binaries* (ffmpeg, OpenCV, BLAS, libjpeg) that differ from one OS to
+another. Inside the image those binaries are frozen, so even codec output
+becomes deterministic.
+
+### What the image contains — and what it does not
+
+| Included | Excluded (on purpose) |
+|---|---|
+| Python 3.13 + fully pinned deps (`docker/requirements.txt`) | **Model weights (`.pth`)** — mounted at run time |
+| `ffmpeg` (intermediate encoding), OpenCV **headless** | Java / Weasis (no JVM; DICOM is decoded with pydicom) |
+| `starhe_plugin` package + vendored `prepUS` | Go server, React/Electron renderer |
+| CLI entry point `scripts/starhe_pipeline_cli.py` | mmaction2 (the CPU **pytorch** C3D backend is used instead) |
+
+Weights stay outside the image because the React UI already provides them; this
+keeps the image ~3× smaller and lets you swap checkpoints without rebuilding.
+
+### The chain inside the container
+
+```
+DICOM (.dcm)
+  → decode                      pydicom (pure Python, no JVM)
+  → intermediate MP4            ffmpeg  H.264 CRF 0  ← mathematically LOSSLESS
+  → prepUS                      UI removal + US-cone crop (reads that MP4)
+  → STARHE-RISK  (C3D)          CPU · float64 · 1 thread
+  → STARHE-DETECT (RTMDet)      CPU · float64 · 1 thread
+  → results.json + results.csv  (+ SHA-256 of every crop)
+```
+
+**Why H.264 CRF 0?** `-crf 0` puts libx264 in *lossless* mode: the frames prepUS
+decodes are exactly the frames we encoded. Even if two ffmpeg builds emit
+different bitstream bytes, the **decoded pixels are identical** — which is all
+the models see. (Verified in `test_encodage_impact_30.csv`: `h264_crf0` scores
+were strictly equal to `orig` and `ffv1_lossless`.)
+
+### Build
+
+The build context is the **repository root**:
+
+```bash
+docker build -f docker/Dockerfile -t starhe-pipeline:1.0 .
+```
+
+The image targets **`linux/amd64` only** — one architecture means one
+floating-point behaviour. On Apple Silicon it runs under emulation (correct but
+slower); that is the intended trade-off for reproducibility.
+
+> For a fully immutable build, pin the base image by digest in
+> `docker/Dockerfile` (`FROM python:3.13-slim@sha256:…`), resolved once with
+> `docker buildx imagetools inspect python:3.13-slim`.
+
+### Run
+
+Three volumes: input DICOMs, output directory, and the weights directory.
+
+```bash
+docker run --rm \
+  -v /path/to/dicoms:/data/in:ro \
+  -v /path/to/results:/data/out \
+  -v /path/to/weights:/weights:ro \
+  starhe-pipeline:1.0 \
+    --input /data/in --output /data/out --weights /weights
+```
+
+Useful flags: `--no-detect` / `--no-risk` (skip a model), `--pattern '*.dcm'`
+(filter a directory), and `--input /data/in/case.dcm` for a single file.
+
+Outputs written to `/data/out`:
+
+| File | Content |
+|---|---|
+| `results.json` | per-file risk score/label, `detections_per_frame`, ROI, crop shape, **`crop_sha256`** |
+| `results.csv` | flat summary (one row per DICOM) |
+
+### Environment overrides
+
+`config.py` reads these variables, so the container is configured without
+editing code. Defaults below are what the image sets.
+
+| Variable | Image value | Effect |
+|---|---|---|
+| `STARHE_DETERMINISTIC` | `1` | CPU + float64 + single thread for RISK **and** DETECT |
+| `STARHE_USE_WEASIS` | `0` | Skip the JVM path; decode with pydicom (deterministic, no native libs) |
+| `C3D_BACKEND` | `pytorch` | Pure-PyTorch C3D — no mmaction2, smaller image, bit-identical results |
+| `STARHE_WEIGHTS_DIR` | `/weights` | Where the `.pth` files are mounted |
+| `STARHE_DETECT_SCORE_THRESHOLD` | `0.70` (default) | Detection confidence threshold |
+| `STARHE_DETECT_EVERY_N` | `4` (default) | Run detection on 1 frame out of N |
+| `STARHE_RISK_THRESHOLD` | `0.50` (default) | High/low risk decision threshold |
+| `OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS` | `1` | Fixes the floating-point accumulation order |
+| `PYTHONHASHSEED` | `0` | Removes hash-ordering non-determinism |
+
+### Docker Compose
+
+`docker-compose.yml` wraps the three mounts so a run is a one-liner. Paths come
+from environment variables and default to `./data/{in,out}` and `./weights`:
+
+```bash
+export STARHE_IN=./data/in STARHE_OUT=./data/out STARHE_WEIGHTS=./weights
+
+docker compose run --rm starhe                 # full pipeline (RISK + DETECT)
+docker compose run --rm starhe --no-detect     # RISK only
+docker compose run --rm golden-hash            # reproducibility gate (below)
+```
+
+The compose file restates the determinism variables explicitly, so the contract
+is visible in one place and easy to flip (e.g. `STARHE_DETERMINISTIC=0`) for a
+fast, deliberately non-exact run.
+
+### Verifying reproducibility (golden hash)
+
+Every result carries `crop_sha256`, the SHA-256 of the exact array fed to the
+models. `scripts/check_golden_hash.py` turns that into a **CI gate**: it runs the
+pipeline on a reference input and compares three fields against a committed
+reference — `crop_sha256` (preprocessing), `risk.score` (inference, exact float
+equality) and `frames_with_detection` (detection).
+
+**1. Record the reference once**, on a trusted run:
+
+```bash
+docker compose run --rm --entrypoint python starhe \
+  /app/scripts/check_golden_hash.py \
+  --input /data/in --weights /weights \
+  --golden /golden/golden_hashes.json --work /data/out --update
+```
+
+Commit the produced `docker/golden/golden_hashes.json`.
+
+**2. Verify in CI** (or on another machine/OS) — exits non-zero on any drift:
+
+```bash
+docker compose run --rm golden-hash
+# [golden] ✓ reproducible — N file(s) match the reference
+```
+
+Because the image pins every binary, a machine running the **same image** must
+produce the same hashes. Identical `crop_sha256` proves the *preprocessing*
+matched; identical `risk.score` proves the *inference* matched. Add
+`--no-detect` for a faster gate covering preprocessing + RISK only.
+
+Example GitHub Actions step:
+
+```yaml
+- name: STARHE reproducibility gate
+  run: |
+    docker build -f docker/Dockerfile -t starhe-pipeline:1.0 .
+    docker run --rm \
+      -v ${{ github.workspace }}/tests/dicom:/data/in:ro \
+      -v ${{ github.workspace }}/docker/golden:/golden:ro \
+      -v ${{ runner.temp }}/out:/data/out \
+      -v ${{ secrets.WEIGHTS_PATH }}:/weights:ro \
+      --entrypoint python starhe-pipeline:1.0 \
+      /app/scripts/check_golden_hash.py \
+      --input /data/in --weights /weights \
+      --golden /golden/golden_hashes.json --work /data/out
+```
+
+### Performance notes
+
+* Models are loaded **once** per invocation and reused across the whole batch —
+  pass a directory rather than launching one container per DICOM.
+* `float64` inference is ~2–3× slower than float32; that is the cost of
+  bit-exactness. Set `STARHE_DETERMINISTIC=0` for fast, non-reproducible runs.
+* Layer order in the `Dockerfile` puts dependencies before application code, so
+  editing the pipeline rebuilds in seconds instead of re-installing torch.
 
 ---
 
