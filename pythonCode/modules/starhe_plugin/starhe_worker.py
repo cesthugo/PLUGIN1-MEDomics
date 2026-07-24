@@ -2,16 +2,14 @@
 starhe_worker.py — Single entry point of the PyInstaller bundle
 ==============================================================
 
-Dispatches to the 5 CLI modules of the STARHE plugin based on the `--module` argument.
-Allows bundling **a single** executable (~350 MB) instead of five.
+Dispatches to the 3 CLI modules of the STARHE plugin based on the `--module` argument.
+Allows bundling **a single** executable (~350 MB) instead of three.
 
 Usage (direct equivalent of the Go server's `python -m starhe_plugin.X` calls):
 
     starhe_worker --module pipeline /path/file.dcm --anon_mode hash ...
-    starhe_worker --module pipeline_mp4 /path/file.mp4 ...
     starhe_worker --module ai.run_live ...
     starhe_worker --module dicom.loader_cli /path/file.dcm
-    starhe_worker --module dicom.loader_mp4_cli /path/file.mp4
 
 The dispatcher consumes `--module X` then replays the remaining args in
 `sys.argv` and runs the module with `runpy.run_module(..., run_name='__main__')`
@@ -37,10 +35,8 @@ _RUNNERS = {
 
 _ALLOWED = {
     "pipeline":              "starhe_plugin.pipeline",
-    "pipeline_mp4":          "starhe_plugin.pipeline_mp4",
     "ai.run_live":           "starhe_plugin.ai.run_live",
     "dicom.loader_cli":      "starhe_plugin.dicom.loader_cli",
-    "dicom.loader_mp4_cli":  "starhe_plugin.dicom.loader_mp4_cli",
 }
 
 

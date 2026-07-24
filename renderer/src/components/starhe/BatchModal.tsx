@@ -9,7 +9,7 @@
 // At the end, a summary table shows risk score + number of lesions / file.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { loadDicom, loadDicomFile, loadMp4File, streamAnalysis } from '../../utilities/starhe/api';
+import { loadDicom, loadDicomFile, streamAnalysis } from '../../utilities/starhe/api';
 import type { AnalyzeRequest } from '../../utilities/starhe/api';
 import type { Detection } from '../../utilities/starhe/types';
 import {
@@ -44,8 +44,6 @@ interface BatchItem {
   numFrames?:  number;
   /** Crop ROI returned by the pipeline */
   roi?:        unknown;
-  /** true if this file is an MP4 (not a DICOM) */
-  isMp4?:      boolean;
 }
 
 let _id = 1;
@@ -138,8 +136,6 @@ export interface BatchResultToOpen {
   roi?:        unknown;
   /** Original browser File object — allows re-uploading if the temp file expired */
   file?:       File;
-  /** true if this result comes from an MP4 file (not DICOM) */
-  isMp4?:      boolean;
 }
 
 export interface BatchModalProps {
@@ -176,40 +172,21 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     const lname = f.name.toLowerCase();
     return lname.endsWith('.dcm') || lname.endsWith('.dicom') || !lname.includes('.');
   };
-  const isMp4File = (f: File) => f.name.toLowerCase().endsWith('.mp4');
-
   // ── Add files (browser upload) ─────────────────────────────────────────────
   const onFileDrop = useCallback((files: FileList | null) => {
     if (!files) return;
     const all = Array.from(files);
     const dicomFiles = all.filter(isDicomFile);
-    const mp4Files   = all.filter(isMp4File);
-    const newItems: BatchItem[] = [
-      ...dicomFiles.map(f => ({
-        id: uid(), name: f.name, serverPath: '', file: f, isMp4: false,
-        status: 'waiting' as ItemStatus, progress: 'En attente',
-      })),
-      ...mp4Files.map(f => ({
-        id: uid(), name: f.name, serverPath: '', file: f, isMp4: true,
-        status: 'waiting' as ItemStatus, progress: 'En attente',
-      })),
-    ];
+    const newItems: BatchItem[] = dicomFiles.map(f => ({
+      id: uid(), name: f.name, serverPath: '', file: f,
+      status: 'waiting' as ItemStatus, progress: 'En attente',
+    }));
     setItems(prev => [
       ...prev,
       ...newItems.filter(ni => !prev.some(ex => ex.name === ni.name)),
     ]);
     setDone(false);
   }, []);
-
-  // ── MP4 file selection ─────────────────────────────────────────────────────
-  const onPickMp4Files = useCallback(() => {
-    const inp = document.createElement('input');
-    inp.type = 'file';
-    inp.multiple = true;
-    inp.accept = '.mp4,video/mp4';
-    inp.onchange = () => onFileDrop(inp.files);
-    inp.click();
-  }, [onFileDrop]);
 
   // ── Add a whole folder (browser) ───────────────────────────────────────────
   const onPickFolder = useCallback(() => {
@@ -244,15 +221,10 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
     if (cancelledRef.current) return;
 
     // 1. File loading
-    update(item.id, { status: 'loading', progress: item.isMp4 ? 'Chargement MP4…' : 'Chargement DICOM…' });
+    update(item.id, { status: 'loading', progress: 'Chargement DICOM…' });
     let serverPath = item.serverPath;
     try {
-      if (item.isMp4) {
-        if (!item.file) throw new Error('fichier MP4 manquant (upload requis)');
-        const data = await loadMp4File(item.file);
-        serverPath = data.serverPath || item.name;
-        update(item.id, { serverPath });
-      } else if (item.file) {
+      if (item.file) {
         const data = await loadDicomFile(item.file);
         serverPath = data.serverPath || item.name;
         update(item.id, { serverPath });
@@ -269,20 +241,13 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
 
     // 2. SSE analysis
     update(item.id, { status: 'analyzing', progress: 'Starting analysis…' });
-    const req: AnalyzeRequest = item.isMp4
-      ? {
-          mp4Path:            serverPath,
-          runRisk:            batchModeSnap !== 'detect_only',
-          runDetection:       batchModeSnap !== 'risk_only',
-          backScanConversion: true,
-        }
-      : {
-          dicomPath:          serverPath,
-          anonMode:           'hash',
-          runRisk:            batchModeSnap !== 'detect_only',
-          runDetection:       batchModeSnap !== 'risk_only',
-          backScanConversion: true,
-        };
+    const req: AnalyzeRequest = {
+      dicomPath:          serverPath,
+      anonMode:           'hash',
+      runRisk:            batchModeSnap !== 'detect_only',
+      runDetection:       batchModeSnap !== 'risk_only',
+      backScanConversion: true,
+    };
 
     await new Promise<void>((resolve) => {
       let riskScore:  number | undefined;
@@ -624,9 +589,9 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
               inp.click();
             }}
           >
-            📂  Drag & drop DICOM or MP4 files here, or click to select
+            📂  Drag & drop DICOM files here, or click to select
             <div style={{ fontSize: 11, marginTop: 4, color: '#4a5568' }}>
-              Accepts: <code>.dcm</code> · <code>.dicom</code> · files without extension (e.g. A0000) · <code>.mp4</code>
+              Accepts: <code>.dcm</code> · <code>.dicom</code> · files without extension (e.g. A0000)
             </div>
           </div>
           <div style={{ marginBottom: 10, display: 'flex', gap: 6 }}>
@@ -640,17 +605,6 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
               }}
             >
               📁  Load DICOM folder
-            </button>
-            <button
-              onClick={onPickMp4Files}
-              style={{
-                flex: 1, background: '#0a0e18',
-                border: `1px dashed ${CARD_BORDER}`, borderRadius: 6,
-                padding: '7px 16px', color: SBAR_MUTED, fontSize: 12,
-                cursor: 'pointer', textAlign: 'center',
-              }}
-            >
-              📹  Load MP4 files
             </button>
           </div>
 
@@ -810,7 +764,7 @@ export function BatchModal({ onClose, analysisMode: defaultMode, onOpenInTab, on
                   detections: it.detections,
                   risk: it.riskScore !== undefined ? { score: it.riskScore, label: it.riskLabel ?? '' } : undefined,
                   numFrames: it.numFrames, roi: it.roi,
-                  file: it.file, isMp4: it.isMp4,
+                  file: it.file,
                 });
                 const openAll = () => {
                   const results = doneItems.map(toResult);

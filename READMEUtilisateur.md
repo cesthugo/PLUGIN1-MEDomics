@@ -22,7 +22,7 @@ The packaged application is available on the [GitHub Releases page](https://gith
 > **Windows — first launch**: click **More info** → **Run anyway** to bypass SmartScreen.  
 > **MongoDB required**: STARHE needs a MongoDB instance running on port `54017`. This is the only external dependency — it is not bundled in the app.
 
-On first launch, a window will automatically download the AI model weights (~750 MB). An internet connection is required for this step only.
+**AI model weights**: the two STARHE checkpoints (`.pth`, ~750 MB total) are **not bundled**. You provide them yourself from your computer through the in-app **Model weights** menu — see [§11.1 Loading the AI model weights](#111-loading-the-ai-model-weights). RISK and DETECT are two separate files, loaded independently.
 
 ---
 
@@ -255,6 +255,31 @@ Key `R` or Right-click → **Reset View**: resets in one action:
 ---
 
 ## 🧠 11. AI Analysis
+
+### 11.1 Loading the AI model weights
+
+The AI weights (`.pth`) are **not bundled** with the app for confidentiality — you provide them from your own computer. STARHE uses **two independent models**, each with its own weight file:
+
+| Model | Weight file |
+|---|---|
+| **STARHE-RISK** (C3D) | `best_acc_mean_cls_f1_epoch_14.pth` |
+| **STARHE-DETECT** (RTMDet) | `best_coco_bbox_mAP_50_iter_2100.pth` |
+
+**Opening the menu:**
+- It opens **automatically** the first time you launch an analysis while a required weight is missing.
+- You can reopen it anytime with the **⚖️ Model weights…** button in the sidebar, located **between “Run STARHE …” and “Reset analysis”**.
+
+**Loading a weight:**
+1. Each model shows a status badge — <span style="color:#4ade80">● Loaded</span> or <span style="color:#f87171">○ Not loaded</span>.
+2. Click **📁 Choose .pth file…** and pick the checkpoint on your machine.
+3. Click **Load**. A progress bar appears (the files are 300–440 MB).
+4. Once done, the badge turns green and that model is ready. Load the other model the same way if needed.
+
+The weights are stored on the server side, so you only need to load them **once**; they remain available for future analyses. Close the menu with the **✕** in the top-right corner.
+
+> If you pick a file whose size is far from the expected one, a warning is shown so you can double-check you selected the right checkpoint.
+
+### 11.2 Running an analysis
 
 1. Load a DICOM and run preprocessing (optional)
 2. Click **🧠 Launch STARHE Analysis**

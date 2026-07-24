@@ -42,9 +42,9 @@ func main() {
 	mux.HandleFunc("GET /starhe/results/{id}", getResultHandler)
 	mux.HandleFunc("DELETE /starhe/results/{id}", deleteResultHandler)
 	mux.HandleFunc("POST /starhe/dicom/load", dicomLoadHandler)
-	mux.HandleFunc("POST /starhe/mp4/load", mp4LoadHandler)
-	mux.HandleFunc("POST /starhe/mp4/analyze", mp4AnalyzeHandler)
 	mux.HandleFunc("DELETE /starhe/cache", deleteCacheHandler)
+	mux.HandleFunc("GET /starhe/weights/status", weightsStatusHandler)
+	mux.HandleFunc("POST /starhe/weights/upload", weightsUploadHandler)
 
 	addr := ":" + cfg.Port
 	log.Printf("STARHE Go server → http://localhost%s", addr)

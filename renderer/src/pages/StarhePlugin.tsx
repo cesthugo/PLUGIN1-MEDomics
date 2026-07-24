@@ -28,7 +28,8 @@ import {
   BLUE, BLUE_TEXT, SBAR_FG, SBAR_MUTED, BORDER, CANVAS_BG,
   PTAB_BG, PTAB_ACT_BG,
 } from '../utilities/starhe/colors';
-import { loadDicom, loadDicomFile, loadMp4File, deleteCache, makeTabLabel } from '../utilities/starhe/api';
+import { loadDicom, loadDicomFile, deleteCache, makeTabLabel, getWeightsStatus } from '../utilities/starhe/api';
+import { filterDicomFiles, mapWithConcurrency } from '../utilities/starhe/utils';
 import medomicsLogo from '../assets/medomics_logo.png';
 import { usePipelineSSE } from '../utilities/starhe/hooks/usePipelineSSE';
 import { usePlayback }    from '../utilities/starhe/hooks/usePlayback';
@@ -42,6 +43,7 @@ import { LiveModal }      from '../components/starhe/LiveModal';
 import { SettingsPanel }       from '../components/starhe/SettingsPanel';
 import { DetectionGallery }    from '../components/starhe/DetectionGallery';
 import { BatchModal }          from '../components/starhe/BatchModal';
+import { WeightsModal }         from '../components/starhe/WeightsModal';
 import type { BatchResultToOpen } from '../components/starhe/BatchModal';
 import { LayoutPickerModal }   from '../components/starhe/LayoutPickerModal';
 import type { LayoutMode }     from '../components/starhe/LayoutPickerModal';
@@ -204,6 +206,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
   // ── Live window ────────────────────────────────────────────────────────────
   const [showLive,  setShowLive]  = useState(false);
   const [showBatch, setShowBatch] = useState(false);
+  const [showWeights, setShowWeights] = useState(false);
 
   // ── Sidebar collapse (left: DICOM controls · right: detection gallery) ─
   const [leftSidebarOpen,  setLeftSidebarOpen]  = useState(true);
@@ -254,36 +257,6 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     });
     setActivePatientName(data.patientName);
     addLog(`DICOM loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
-  }, [addLog]);
-
-  // ── Inject an MP4 tab after a successful load ─────────────────────────────
-  const addMp4Tab = useCallback((
-    displayName: string,
-    serverPath:  string,
-    data:        import('../utilities/starhe/types').DicomData,
-  ) => {
-    const label = displayName.replace(/\.[^.]+$/, '').slice(0, 20);
-    const newTab: TabState = {
-      ...makeDefaultTab(),
-      label,
-      patientName: 'MP4 Video',
-      dicomPath: serverPath,
-      isMp4: true,
-      data,
-    };
-    setTabs(prev => [...prev, newTab]);
-    setActiveTabId(newTab.id);
-    setPatients(prev => {
-      const existIdx = prev.findIndex(p => p.name === 'MP4 Video');
-      if (existIdx >= 0) {
-        const updated = [...prev];
-        updated[existIdx] = { ...updated[existIdx], tabIds: [...updated[existIdx].tabIds, newTab.id] };
-        return updated;
-      }
-      return [...prev, { name: 'MP4 Video', tabIds: [newTab.id] }];
-    });
-    setActivePatientName('MP4 Video');
-    addLog(`MP4 loaded — ${data.frameCount} frame(s), ${data.rows}×${data.cols} px.`, 'success');
   }, [addLog]);
 
   // ── Open a batch result in a tab (shared helper) ─────────────────────────
@@ -359,104 +332,56 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
     }
   }, [addLog, addTab, loadingPaths]);
 
-  // DICOM loading — individual files AND a whole folder (a single button)
+  // "DICOM Folder" — picks a folder and loads every DICOM file inside.
+  // Individual files are handled by the separate button (onLoadDicomFiles).
   const onLoadDicom = useCallback(async () => {
-    if (isElectron && window.electronAPI?.openDicomFiles) {
-      // Electron mode: native system dialog → real absolute paths
-      const paths = await window.electronAPI.openDicomFiles();
-      for (const p of paths) {
+    if (isElectron && window.electronAPI?.openDicomFolder) {
+      // Electron: native folder dialog; the main process walks the tree and
+      // returns real absolute paths (detected by extension or DICM magic).
+      const paths = await window.electronAPI.openDicomFolder();
+      if (paths.length === 0) return;
+      addLog(`Folder: ${paths.length} DICOM file(s) detected.`, 'info');
+      // Load concurrently (bounded pool) so all files open together.
+      await mapWithConcurrency(paths, 4, async p => {
         const name = p.split(/[\\/]/).pop() ?? p;
         await doLoadPath(p, name);
-      }
-    } else {
-      // Browser mode: a single input that accepts files AND folder contents
-      const isDicom = (f: File) => {
-        const n = f.name.toLowerCase();
-        return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
-      };
-      const fileInput   = document.createElement('input');
-      fileInput.type     = 'file';
-      fileInput.multiple = true;
-      const folderInput  = document.createElement('input');
-      folderInput.type   = 'file';
-      (folderInput as any).webkitdirectory = true;
-      (folderInput as any).multiple = true;
-
-      // Launch the file picker first, then (on cancel) the folder picker
-      const loadFiles = async (input: HTMLInputElement) => {
-        const files = Array.from(input.files ?? []).filter(isDicom);
-        for (const file of files) await doLoadFile(file);
-      };
-
-      // Listen to the window focus to detect the first picker's cancellation
-      let resolved = false;
-      fileInput.onchange = async () => { resolved = true; await loadFiles(fileInput); };
-      folderInput.onchange = async () => { resolved = true; await loadFiles(folderInput); };
-
-      fileInput.click();
-
-      // If the first dialog is closed without a selection, offer the folder picker
-      window.addEventListener('focus', function handler() {
-        window.removeEventListener('focus', handler);
-        setTimeout(() => {
-          if (!resolved) folderInput.click();
-        }, 300);
-      }, { once: true });
+      });
+      return;
     }
-  }, [isElectron, doLoadPath, doLoadFile]);
+
+    // Browser: directory picker — `webkitdirectory` returns the folder tree.
+    const input = document.createElement('input');
+    input.type = 'file';
+    (input as any).webkitdirectory = true;
+    (input as any).multiple = true;
+    input.onchange = async () => {
+      const all = Array.from(input.files ?? []);
+      if (all.length === 0) return;
+      const dicoms = await filterDicomFiles(all);
+      if (dicoms.length === 0) {
+        addLog(`No DICOM file found in this folder (${all.length} file(s) scanned).`, 'warning');
+        return;
+      }
+      addLog(`Folder: ${dicoms.length}/${all.length} DICOM file(s) detected.`, 'info');
+      // Load concurrently (bounded pool) so all files open together.
+      await mapWithConcurrency(dicoms, 4, doLoadFile);
+    };
+    input.click();
+  }, [isElectron, doLoadPath, doLoadFile, addLog]);
 
   // Loading individual DICOM files (second button of the sidebar)
   const onLoadDicomFiles = useCallback(async () => {
-    const isDicom = (f: File) => {
-      const n = f.name.toLowerCase();
-      return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
-    };
     const input   = document.createElement('input');
     input.type     = 'file';
     input.multiple = true;
     input.onchange = async () => {
-      const files = Array.from(input.files ?? []).filter(isDicom);
+      // Explicitly picked files: load them as-is, without the folder scan's
+      // filtering — the user already chose exactly what to open.
+      const files = Array.from(input.files ?? []);
       for (const file of files) await doLoadFile(file);
     };
     input.click();
   }, [doLoadFile]);
-
-  // Chargement MP4 — navigateur uniquement
-  const doLoadMp4File = useCallback(async (file: File) => {
-    if (loadingPaths.has(file.name)) return;
-    setLoadingPaths(prev => new Set([...prev, file.name]));
-    addLog(`Loading MP4: ${file.name}`, 'info');
-    try {
-      const data = await loadMp4File(file);
-      addMp4Tab(file.name, data.serverPath || file.name, data);
-    } catch (err: unknown) {
-      const msg = err instanceof Error
-        ? (err.message || err.name || 'Unknown error')
-        : String(err);
-      const hint = msg === 'Failed to fetch' ? ' — serveur inaccessible (port 8082 ?)' : '';
-      addLog(`ERREUR chargement MP4 ${file.name} : ${msg}${hint}`, 'error');
-    } finally {
-      setLoadingPaths(prev => { const next = new Set(prev); next.delete(file.name); return next; });
-    }
-  }, [addLog, addMp4Tab, loadingPaths]);
-
-  const onLoadMp4 = useCallback(() => {
-    const input    = document.createElement('input');
-    input.type     = 'file';
-    input.accept   = '.mp4,video/mp4';
-    input.multiple = true;
-    input.onchange = async () => {
-      const files = Array.from(input.files ?? []);
-      for (const file of files) await doLoadMp4File(file);
-    };
-    input.click();
-  }, [doLoadMp4File]);
-
-  // Loading by manually typed absolute path (dev mode / advanced Electron)
-  const onLoadPath = useCallback((path: string) => {
-    const name = path.split(/[\\/]/).pop() ?? path;
-    doLoadPath(path, name);
-  }, [doLoadPath]);
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
@@ -507,41 +432,33 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
 
     const mode = displaySettings.analysisMode;
 
-    // Confidential weights: the user supplies each AI model's .pth from their own
-    // computer. Before running, ensure every model this analysis needs has its
-    // weight loaded locally; if not, prompt to load that specific model's file.
-    if (isElectron && window.electronAPI?.weightsStatus && window.electronAPI?.loadWeights) {
-      const needed = new Set<string>();
-      if (mode !== 'detect_only') needed.add('risk');
-      if (mode !== 'risk_only')   needed.add('detect');
-      const status = await window.electronAPI.weightsStatus();
-      for (const m of status) {
-        if (!needed.has(m.id) || m.present) continue;
-        addLog(`Poids requis pour ${m.name} — sélectionnez le fichier .pth sur votre ordinateur…`, 'warning');
-        const res = await window.electronAPI.loadWeights(m.id);
-        if (!res.ok) {
-          addLog(`Analyse annulée : poids de ${m.name} non chargé${res.error ? ` (${res.error})` : ''}.`, 'error');
-          return;
-        }
-        if (res.warning) addLog(res.warning, 'warning');
-        addLog(`Poids chargé pour ${m.name}.`, 'success');
+    // The .pth weights are provided by the user (not bundled). Before running,
+    // ensure every model this analysis needs has its weight present server-side;
+    // if any is missing, open the weights menu instead of launching an analysis
+    // doomed to fail. Works in both modes (browser and Electron) via the Go server.
+    const needed = new Set<string>();
+    if (mode !== 'detect_only') needed.add('risk');
+    if (mode !== 'risk_only')   needed.add('detect');
+    try {
+      const status = await getWeightsStatus();
+      const missing = status.filter(s => needed.has(s.id) && !s.present);
+      if (missing.length > 0) {
+        addLog(`Missing model weights: ${missing.map(m => m.name).join(', ')}. Load them to run the analysis.`, 'warning');
+        setShowWeights(true);
+        return;
       }
+    } catch (err) {
+      // Status endpoint unreachable — don't hard-block on a transient failure;
+      // let the analysis proceed and surface any real error via SSE.
+      addLog(`Could not verify model weights: ${err instanceof Error ? err.message : String(err)}`, 'warning');
     }
 
     setAnalysisTargetTabId(activeTab.id);  // figer la cible avant le lancement
-    startAnalysis(
-      activeTab.isMp4
-        ? {
-            mp4Path:      activeTab.dicomPath,
-            runRisk:      mode !== 'detect_only',
-            runDetection: mode !== 'risk_only',
-          }
-        : {
-            dicomPath:    activeTab.dicomPath,
-            runRisk:      mode !== 'detect_only',
-            runDetection: mode !== 'risk_only',
-          }
-    );
+    startAnalysis({
+      dicomPath:    activeTab.dicomPath,
+      runRisk:      mode !== 'detect_only',
+      runDetection: mode !== 'risk_only',
+    });
   }, [activeTab, analysisStatus, startAnalysis, displaySettings.analysisMode, isElectron, addLog]);
 
   const onResetAnalysis = useCallback(async () => {
@@ -904,8 +821,6 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             analysisMode={displaySettings.analysisMode}
             onLoadDicom={onLoadDicom}
             onLoadDicomFiles={onLoadDicomFiles}
-            onLoadMp4={onLoadMp4}
-            onLoadPath={onLoadPath}
             onPrevFrame={onPrevFrame}
             onNextFrame={onNextFrame}
             onTogglePlay={onTogglePlay}
@@ -915,6 +830,7 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             onLoopChange={onLoopChange}
             onResetVideo={onResetVideo}
             onRunPipeline={onRunPipeline}
+            onOpenWeights={() => setShowWeights(true)}
             onResetAnalysis={onResetAnalysis}
             onOpenLive={() => setShowLive(true)}
             onOpenBatch={() => setShowBatch(true)}
@@ -1199,6 +1115,11 @@ export function StarhePlugin({ mainBg, height = '100vh', width = '100%' }: Starh
             }
           }}
         />
+      )}
+
+      {/* Menu des poids de modèles (chargement local des .pth) */}
+      {showWeights && (
+        <WeightsModal onClose={() => setShowWeights(false)} />
       )}
 
       {/* Panneau réglages d'affichage */}

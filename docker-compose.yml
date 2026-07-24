@@ -1,0 +1,67 @@
+# ============================================================================
+# STARHE — deterministic processing + inference
+# ============================================================================
+# Wraps the three volume mounts (input / output / weights) so a run is a
+# one-liner. Weights are never baked into the image.
+#
+#   export STARHE_IN=./data/in STARHE_OUT=./data/out STARHE_WEIGHTS=./weights
+#   docker compose run --rm starhe            # full pipeline (RISK + DETECT)
+#   docker compose run --rm starhe --no-detect
+#   docker compose run --rm golden-hash       # reproducibility check
+#
+# Paths default to ./data/{in,out} and ./weights when the variables are unset.
+
+services:
+  # ── Main pipeline: DICOM → prepUS → RISK + DETECT → results.json/csv ──────
+  starhe:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: starhe-pipeline:1.0
+    platform: linux/amd64          # one architecture ⇒ one arithmetic
+    volumes:
+      - ${STARHE_IN:-./data/in}:/data/in:ro
+      - ${STARHE_OUT:-./data/out}:/data/out
+      - ${STARHE_WEIGHTS:-./weights}:/weights:ro
+    environment:
+      # Determinism (already set in the image; repeated here to make the
+      # contract explicit and easy to override for a fast, non-exact run)
+      STARHE_DETERMINISTIC: "1"
+      STARHE_USE_WEASIS: "0"
+      C3D_BACKEND: "pytorch"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+      PYTHONHASHSEED: "0"
+      # Model thresholds (defaults shown — DETECT stays at 0.70)
+      STARHE_DETECT_SCORE_THRESHOLD: "0.70"
+      STARHE_DETECT_EVERY_N: "4"
+      STARHE_RISK_THRESHOLD: "0.50"
+    command: ["--input", "/data/in", "--output", "/data/out", "--weights", "/weights"]
+
+  # ── CI gate: run the pipeline and compare against a golden hash file ──────
+  golden-hash:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: starhe-pipeline:1.0
+    platform: linux/amd64
+    volumes:
+      - ${STARHE_IN:-./data/in}:/data/in:ro
+      - ${STARHE_OUT:-./data/out}:/data/out
+      - ${STARHE_WEIGHTS:-./weights}:/weights:ro
+      - ./docker/golden:/golden          # expected hashes live here (committed)
+      - ./scripts/check_golden_hash.py:/app/scripts/check_golden_hash.py:ro
+    environment:
+      STARHE_DETERMINISTIC: "1"
+      STARHE_USE_WEASIS: "0"
+      C3D_BACKEND: "pytorch"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+      PYTHONHASHSEED: "0"
+    entrypoint: ["python", "/app/scripts/check_golden_hash.py"]
+    command: ["--input", "/data/in", "--weights", "/weights",
+              "--golden", "/golden/golden_hashes.json", "--work", "/data/out"]

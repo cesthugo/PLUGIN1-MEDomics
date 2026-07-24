@@ -278,6 +278,57 @@ ipcMain.handle('open-dicom-files', async () => {
   return canceled ? [] : filePaths;
 });
 
+/** Extensions commonly used for DICOM files. */
+const DICOM_EXTS = new Set(['.dcm', '.dicom', '.dic', '.ima', '.img']);
+
+/** Authoritative DICOM test: "DICM" magic number at byte offset 128 (PS3.10
+ *  preamble). Extension-agnostic, matching how pydicom identifies a DICOM. */
+function hasDicmMagic(file: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(4);
+    const read = fs.readSync(fd, buf, 0, 4, 128);
+    return read === 4 && buf.toString('latin1') === 'DICM';
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* ignore */ } }
+  }
+}
+
+/** Recursively collects every DICOM file under `dir` (depth-capped). */
+function scanDicomFolder(dir: string, out: string[] = [], depth = 0): string[] {
+  if (depth > 6) return out;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) { scanDicomFolder(full, out, depth + 1); continue; }
+    if (!e.isFile()) continue;
+    const lower = e.name.toLowerCase();
+    if (lower.startsWith('.') || lower === 'dicomdir' || lower === 'thumbs.db') continue;
+    // Explicit DICOM extension, or magic number for extension-less files.
+    if (DICOM_EXTS.has(path.extname(lower)) || hasDicmMagic(full)) out.push(full);
+  }
+  return out;
+}
+
+// Opens a native folder dialog and returns every DICOM file it contains.
+ipcMain.handle('open-dicom-folder', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title:       'Ouvrir un dossier DICOM',
+    buttonLabel: 'Ouvrir',
+    properties:  ['openDirectory'],
+  });
+  if (canceled || filePaths.length === 0) return [];
+  return scanDicomFolder(filePaths[0]).sort();
+});
+
 // ── IPC: local AI model weights (loaded from the user's computer) ──────────────
 
 /** Per-model presence status for the whole model registry. */

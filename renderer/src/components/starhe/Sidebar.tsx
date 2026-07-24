@@ -152,10 +152,6 @@ export interface SidebarProps {
   onLoadDicom:      () => void;
   /** Manual selection of individual DICOM files */
   onLoadDicomFiles: () => void;
-  /** Direct loading of an MP4 file */
-  onLoadMp4?:       () => void;
-  /** Direct loading by absolute path (browser dev mode, outside Electron) */
-  onLoadPath:       (path: string) => void;
   onPrevFrame:      () => void;
   onNextFrame:      () => void;
   onTogglePlay:     () => void;
@@ -165,6 +161,8 @@ export interface SidebarProps {
   onLoopChange:     (v: boolean) => void;
   onResetVideo:     () => void;
   onRunPipeline:    () => void;
+  /** Opens the model-weights menu (load .pth from the user's machine) */
+  onOpenWeights:    () => void;
   onResetAnalysis:  () => void;
   onOpenLive:       () => void;
   onOpenBatch:      () => void;
@@ -183,8 +181,6 @@ export function Sidebar({
   onAnalysisModeChange,
   onLoadDicom,
   onLoadDicomFiles,
-  onLoadMp4,
-  onLoadPath,
   onPrevFrame,
   onNextFrame,
   onTogglePlay,
@@ -194,18 +190,14 @@ export function Sidebar({
   onLoopChange,
   onResetVideo,
   onRunPipeline,
+  onOpenWeights,
   onResetAnalysis,
   onOpenLive,
   onOpenBatch,
   onGotoFrame,
   onToggleTheme,
 }: SidebarProps) {
-  const [pathInput,       setPathInput]       = useState('');
   const [showModelPicker, setShowModelPicker] = useState(false);
-  // Electron detection: via the preload API (reliable method with contextIsolation)
-  const isElectron = typeof window !== 'undefined' &&
-    (window.electronAPI !== undefined ||
-     navigator.userAgent.includes('Electron'));
   const data      = tab?.data ?? null;
   const frameIdx  = tab?.frameIdx ?? 0;
   const frameCount = data?.frameCount ?? 0;
@@ -269,60 +261,7 @@ export function Sidebar({
             <span style={{ fontSize: 9, color: '#475569', flex: 1, textAlign: 'center' }}>Entire folder</span>
             <span style={{ fontSize: 9, color: '#475569', width: 36, textAlign: 'center' }}>Files</span>
           </div>
-          {/* Bouton MP4 */}
-          {onLoadMp4 && (
-            <div style={{ marginTop: 5 }}>
-              <button
-                onClick={onLoadMp4}
-                title="Load an MP4 file directly (without DICOM)"
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-                  background: '#141e14', border: '1px solid #1e3d1e',
-                  borderRadius: 5, color: '#7ed87e', fontSize: 12, fontWeight: 600,
-                  padding: '6px 10px', cursor: 'pointer',
-                  transition: 'background 0.12s, border-color 0.12s',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#1a3020'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#22c55e'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#141e14'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#1e3d1e'; }}
-              >
-                <span style={{ fontSize: 14 }}>📹</span> Load MP4
-              </button>
-            </div>
-          )}
         </div>
-        {/* Saisie chemin direct — visible uniquement hors Electron (dev navigateur) */}
-        {!isElectron && (
-          <div style={{ padding: '2px 10px 6px' }}>
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                const p = pathInput.trim();
-                if (p) { onLoadPath(p); setPathInput(''); }
-              }}
-              style={{ display: 'flex', gap: 4 }}
-            >
-              <input
-                value={pathInput}
-                onChange={e => setPathInput(e.target.value)}
-                placeholder="/absolute/path/file.dcm"
-                style={{
-                  flex: 1, background: '#0d0d14', border: '1px solid #2a3245',
-                  borderRadius: 3, color: SBAR_FG, fontSize: 10,
-                  padding: '3px 6px', outline: 'none',
-                }}
-                title="Dev mode — enter the absolute path of the DICOM file"
-              />
-              <button
-                type="submit"
-                style={{
-                  background: '#1a2240', border: '1px solid #2a3245',
-                  borderRadius: 3, color: SBAR_FG, cursor: 'pointer',
-                  fontSize: 11, padding: '2px 7px',
-                }}
-              >↵</button>
-            </form>
-          </div>
-        )}
         <div style={{ padding: '2px 14px 0', fontSize: 11, color: data ? SBAR_FG : SBAR_MUTED, wordBreak: 'break-all' }}>
           {data ? data.fileName : 'No file selected'}
         </div>
@@ -475,6 +414,11 @@ export function Sidebar({
             {analysisMode === 'both'        ? 'Run STARHE RISK + DETECT' :
              analysisMode === 'risk_only'   ? 'Run STARHE RISK' :
                                              'Run STARHE DETECT'}
+          </SBtn>
+        </div>
+        <div style={{ padding: '0 10px 4px' }}>
+          <SBtn onClick={onOpenWeights} small>
+            {'⚖️'}   Model weights…
           </SBtn>
         </div>
         <div style={{ padding: '0 10px 4px' }}>

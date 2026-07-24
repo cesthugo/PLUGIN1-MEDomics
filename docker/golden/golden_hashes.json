@@ -1,0 +1,10 @@
+{
+  "entries": {
+    "01-0046-R-M.dcm": {
+      "crop_sha256": "a0d43d0344c140b5c95da8f0a02e9ee853922f330efea8492efd434a1c47b874",
+      "frames_with_detection": 0,
+      "risk_score": 0.7172470341334668
+    }
+  },
+  "version": 1
+}

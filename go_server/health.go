@@ -19,17 +19,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
-
-// requiredWeights — checkpoints required by both STARHE models.
-var requiredWeights = []string{
-	"best_acc_mean_cls_f1_epoch_14.pth",   // STARHE-RISK (C3D / mmaction2)
-	"best_coco_bbox_mAP_50_iter_2100.pth", // STARHE-DETECT (RTMDet)
-}
 
 // criticalImports — Python modules without which the pipeline cannot run.
 // Reproduces the pipeline's actual imports (including the exact C3D import
@@ -51,9 +44,9 @@ var health healthState
 // flip /health back to "ok" without a restart.
 func missingWeights() []string {
 	missing := []string{}
-	for _, name := range requiredWeights {
-		if _, err := os.Stat(filepath.Join(cfg.WeightsDir, name)); err != nil {
-			missing = append(missing, name)
+	for _, m := range weightModels {
+		if !weightPresent(m) {
+			missing = append(missing, m.File)
 		}
 	}
 	return missing
@@ -68,7 +61,7 @@ func runStartupCheck() {
 	if m := missingWeights(); len(m) > 0 {
 		log.Printf("ATTENTION — checkpoints manquants : %v (lancez scripts/download_models.py)", m)
 	} else {
-		log.Printf("Checkpoints IA : OK (%d fichiers)", len(requiredWeights))
+		log.Printf("Checkpoints IA : OK (%d fichiers)", len(weightModels))
 	}
 
 	go func() {

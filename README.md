@@ -3,7 +3,7 @@
 > **STARHE** = **S**tratification of risk and de**T**ection of **H**epatocellular carcinoma by **E**chography.  
 > Python/Go extension of the [MEDomics](https://medomicslab.gitbook.io/medomics-docs) platform.
 
-*Version `0.7.0-beta.6` — Last updated: July 16, 2026*
+
 
 ---
 
@@ -74,14 +74,14 @@ The plugin is distributed as a **standalone Electron application** (same approac
 
 | File | Role |
 |---|---|
-| [renderer/electron/main.ts](renderer/electron/main.ts) | Main process: splash → spawn `go_server` (auto-sélection binaire par plateforme) → wait `/health` 200 → main window |
+| [renderer/electron/main.ts](renderer/electron/main.ts) | Main process: splash → spawn `go_server` (per-platform binary auto-selection) → wait `/health` 200 → main window |
 | [renderer/electron/preload.ts](renderer/electron/preload.ts) | Minimal `contextBridge`: native `openDicomFiles()` + `apiBase` |
 | [renderer/electron/splash.html](renderer/electron/splash.html) | 480×280 splash shown while the Go server starts |
-| [renderer/build-resources/](renderer/build-resources/) | Binaires Go cross-compilés, JREs, bundle PyInstaller, JAR weasis, icônes |
+| [renderer/build-resources/](renderer/build-resources/) | Cross-compiled Go binaries, JREs, PyInstaller bundle, weasis JAR, icons |
 
 `main.ts`:
-- **Dev mode** : auto-sélectionne `renderer/build-resources/go-server/go-server-{os}-{arch}[.exe]` depuis `process.platform` + `process.arch` (mac-arm64, mac-x64, linux-x64, win-x64)
-- **Packaged mode** : utilise `go_server/go_server[.exe]` depuis `process.resourcesPath` (copié par electron-builder)
+- **Dev mode**: auto-selects `renderer/build-resources/go-server/go-server-{os}-{arch}[.exe]` from `process.platform` + `process.arch` (mac-arm64, mac-x64, linux-x64, win-x64)
+- **Packaged mode**: uses `go_server/go_server[.exe]` from `process.resourcesPath` (copied by electron-builder)
 - Spawns `go_server` with env `PORT=8082` + `STARHE_WEASIS_DIR` pointing to the packaged resources
 - **Healthcheck**: pings `GET /health` every 300 ms, 30 s timeout — on failure, shows "Retry / Quit" dialog with MongoDB hint
 - **Exponential backoff**: auto-restarts the Go server on crash (1s → 2s → 5s → 10s → 30s)
@@ -90,12 +90,12 @@ The plugin is distributed as a **standalone Electron application** (same approac
 ### Bundled Resources (`extraResources`)
 
 Copied into `STARHE.app/Contents/Resources/` (macOS) or `resources/` (Linux/Windows).  
-Toutes les ressources sont dans `renderer/build-resources/` — plus aucune référence extérieure à `renderer/` dans `package.json` :
+All resources live in `renderer/build-resources/` — no external reference to `renderer/` remains in `package.json`:
 
-| Source (`renderer/build-resources/`) | Destination dans le paquet | Taille |
+| Source (`renderer/build-resources/`) | Destination in the package | Size |
 |---|---|---|
-| `go-server/go-server-{os}-{arch}[.exe]` | `go_server/go_server[.exe]` | ~13 MB par plateforme (4 binaires cross-compilés, **committés dans le repo**) |
-| `weasis-dcm2png/` | `weasis-dcm2png/` | ~31 MB JAR + libs OpenCV natives (macOS — rebuild Maven sur Linux/Windows) |
+| `go-server/go-server-{os}-{arch}[.exe]` | `go_server/go_server[.exe]` | ~13 MB per platform (4 cross-compiled binaries, **committed in the repo**) |
+| `weasis-dcm2png/` | `weasis-dcm2png/` | ~31 MB JAR + native OpenCV libs (macOS — Maven rebuild on Linux/Windows) |
 | `starhe_worker/` | `starhe_worker/` | ~568 MB (Python + torch + mmdet — PyInstaller, **gitignored**, rebuild via `make build-worker`) |
 | `jre-{os}-{arch}/` | `jre/` | ~130–151 MB Temurin 17 JRE (**gitignored**, fetch via `scripts/fetch_jre.sh`) |
 
@@ -152,15 +152,13 @@ The Go server automatically detects which Python to use via the `STARHE_WORKER_B
 - **Dev mode** (`STARHE_WORKER_BIN` not set): `python -m starhe_plugin.<module>` from the local venv
 - **Packaged mode** (`STARHE_WORKER_BIN=/path/to/starhe_worker`): `starhe_worker --module <name>` — standalone PyInstaller bundle
 
-Electron automatically passes this variable when spawning the Go server (see [renderer/electron/main.ts](renderer/electron/main.ts)). The 5 entry points are dispatched by [pythonCode/modules/starhe_plugin/starhe_worker.py](pythonCode/modules/starhe_plugin/starhe_worker.py) via `runpy.run_module()`:
+Electron automatically passes this variable when spawning the Go server (see [renderer/electron/main.ts](renderer/electron/main.ts)). The 3 entry points are dispatched by [pythonCode/modules/starhe_plugin/starhe_worker.py](pythonCode/modules/starhe_plugin/starhe_worker.py) via `runpy.run_module()`:
 
-| `--module` | Module Python invoqué |
+| `--module` | Python module invoked |
 |---|---|
-| `pipeline` | `starhe_plugin.pipeline` (analyse DICOM SSE) |
-| `pipeline_mp4` | `starhe_plugin.pipeline_mp4` (analyse MP4 SSE) |
-| `ai.run_live` | `starhe_plugin.ai.run_live` (mode live cstore/folder/hdmi) |
-| `dicom.loader_cli` | `starhe_plugin.dicom.loader_cli` (extraction frames DICOM) |
-| `dicom.loader_mp4_cli` | `starhe_plugin.dicom.loader_mp4_cli` (extraction frames MP4) |
+| `pipeline` | `starhe_plugin.pipeline` (DICOM SSE analysis) |
+| `ai.run_live` | `starhe_plugin.ai.run_live` (live mode cstore/folder/hdmi) |
+| `dicom.loader_cli` | `starhe_plugin.dicom.loader_cli` (DICOM frame extraction) |
 
 ### Bundled Temurin JRE (Phase 3)
 
@@ -183,14 +181,16 @@ Electron sets both variables only in packaged mode. In dev mode, PATH fallback i
 
 To keep the `.dmg` small (325 MB instead of ~1 GB), the two C3D + RTMDet checkpoints are **not bundled** in the installer. On the first launch of a packaged build, Electron opens a "Downloading STARHE models" window that fetches the files and stores them in the app's `userData` folder.
 
-| Fichier | Taille | Modèle |
+> **In-app weights menu (primary path).** Independently of this Electron download, the React UI now provides a **Model weights** menu (`WeightsModal.tsx`) that lets the user load each model's `.pth` **from their own machine** — the intended flow when the weights are confidential and not hosted. It works in **both** browser and Electron modes by uploading through the Go server (`POST /starhe/weights/upload`) into the same `WeightsDir` the pipeline reads. It opens automatically when an analysis is launched with a missing weight, and on demand via the **⚖️ Model weights** sidebar button. See the *Model-weights menu* row in the React UI feature table.
+
+| File | Size | Model |
 |---|---|---|
 | `best_acc_mean_cls_f1_epoch_14.pth` | 312 MB | C3D — STARHE-RISK (best validation mean-class-F1 checkpoint) |
 | `best_coco_bbox_mAP_50_iter_2100.pth` | 439 MB | RTMDet — STARHE-DETECT |
 
-**Emplacement** : `app.getPath('userData')/models/` — sur macOS : `~/Library/Application Support/starhe-plugin/models/`.
+**Location**: `app.getPath('userData')/models/` — on macOS: `~/Library/Application Support/starhe-plugin/models/`.
 
-Le module [renderer/electron/download-models.ts](renderer/electron/download-models.ts) résout l'URL de téléchargement dans cet ordre :
+The [renderer/electron/download-models.ts](renderer/electron/download-models.ts) module resolves the download URL in this order:
 
 | Priority | Condition | Source |
 |---|---|---|
@@ -613,7 +613,7 @@ renderer/build-resources/→ go-server/ · starhe_worker/ · weasis-dcm2png/ · 
 |---|---|
 | **Multi-tab / multi-file** | Load N DICOM files concurrently; each tab stores its own independent state (frames, zoom, measures, contrast, analysis results…); analysis results are injected into the tab that launched the analysis, regardless of which tab is active when results arrive |
 | **DICOM loading** | Via absolute path (Electron / MEDomics) or file upload drag-and-drop / file picker (`DicomUploader.tsx` component) |
-| **Frame viewer** | Hardware-accelerated canvas, `letter-box` fit, smooth scroll / keyboard navigation |
+| **Frame viewer** | Hardware-accelerated canvas, `letter-box` fit, smooth scroll / keyboard navigation. Frames are served at the DICOM's **native resolution** (JPEG q=92, `max_dim` 4096 acting only as a safety bound) and the canvas backing store is allocated in **physical pixels** (`× devicePixelRatio`), so the image stays sharp on HiDPI/Retina displays |
 | **Playback** | Variable-speed loop (0.25×→3.0×) calibrated from DICOM `FrameTime` |
 | **Pan / Zoom** | Mouse wheel zoom, middle-click drag, Ctrl+0/+/- shortcuts |
 | **Measure tool** | Multi-segment mm measurements; draggable endpoints + whole segment; label auto-placed perpendicularly with draggable position; dashed leader line |
@@ -627,6 +627,7 @@ renderer/build-resources/→ go-server/ · starhe_worker/ · weasis-dcm2png/ · 
 | **Live analysis modal** | 3 sources (C-STORE, folder, HDMI), real-time RTMDet overlay, risk score; backed by `run_live.py` subprocess launched by the Go server; preview frames streamed before inference → surveillance-camera behaviour |
 | **MongoDB cache** | Cached results restored instantly on re-open; "Reset analysis" clears the server cache |
 | **Batch analysis modal** | Multi-file sequential analysis; results table with risk score + bbox count per file; export to JSON (with full `detections_per_frame`) or CSV; import a previous JSON to reload results without re-running inference; checkboxes to open one, several, or all files directly in viewer tabs with detections pre-injected |
+| **Model-weights menu** | `WeightsModal.tsx` — the `.pth` checkpoints are **not bundled**; the user loads each STARHE model's weight from their own machine. RISK and DETECT are two independent files, listed with a present/missing badge, a `.pth` file picker, and a **Load** button (progress bar). Opens automatically when an analysis is launched while a required weight is missing, and on demand via the **⚖️ Model weights** sidebar button (between *Run* and *Reset analysis*). Works identically in browser and Electron — the upload goes through the Go server into `WeightsDir` |
 | **Folder loading** | "📁 Load a DICOM folder" — `webkitdirectory` picker; auto-detects `.dcm`, `.dicom`, and extension-less files |
 | **Theme** | Dark theme by default; sidebar and background colors fully configurable from Settings |
 | **Keyboard shortcuts** | Space (play/pause), ←/→ (±1 frame), Shift+←/→ (±10), Home, P/M/S/R/C/L, `+`/`-` (±speed without modifier), `Cmd+`/`Cmd-`/`Cmd+0` (zoom only), B (loop), Ctrl+Tab / Ctrl+W |
@@ -669,7 +670,9 @@ cd renderer && npm run build
 | `GET` | `/starhe/results` | List MongoDB results (`?limit=N`) |
 | `GET` | `/starhe/results/{id}` | One result by ObjectId |
 | `DELETE` | `/starhe/results/{id}` | Delete cached result (reset) |
-| `GET` | `/health` | Healthcheck |
+| `GET` | `/health` | Healthcheck (also reports `missing` weights) |
+| `GET` | `/starhe/weights/status` | Per-model weight presence → `[{id,name,file,present}]` |
+| `POST` | `/starhe/weights/upload` | Upload a `.pth` (multipart `{id,file}`) → written into `WeightsDir` under the canonical name |
 | `POST` | `/starhe/live/start` | Launch `run_live.py` subprocess → SSE stream of preview frames + detections |
 | `POST` | `/starhe/live/stop` | Stop the running live subprocess |
 | `GET` | `/starhe/live/stream` | SSE: live preview frames (base64) + detection + risk score events |
@@ -1577,8 +1580,9 @@ becomes deterministic.
 | Included | Excluded (on purpose) |
 |---|---|
 | Python 3.13 + fully pinned deps (`docker/requirements.txt`) | **Model weights (`.pth`)** — mounted at run time |
-| `ffmpeg` (intermediate encoding), OpenCV **headless** | Java / Weasis (no JVM; DICOM is decoded with pydicom) |
+| `ffmpeg` (intermediate encoding), OpenCV (pinned, see note below) | Java / Weasis (no JVM; DICOM is decoded with pydicom) |
 | `starhe_plugin` package + vendored `prepUS` | Go server, React/Electron renderer |
+| Reproducibility tooling (`check_golden_hash.py`, `test_encoding_roundtrip.py`, `diag_stage_hashes.py`) | — |
 | CLI entry point `scripts/starhe_pipeline_cli.py` | mmaction2 (the CPU **pytorch** C3D backend is used instead) |
 
 Weights stay outside the image because the React UI already provides them; this
@@ -1589,18 +1593,39 @@ keeps the image ~3× smaller and lets you swap checkpoints without rebuilding.
 ```
 DICOM (.dcm)
   → decode                      pydicom (pure Python, no JVM)
-  → intermediate MP4            ffmpeg  H.264 CRF 0  ← mathematically LOSSLESS
+  → intermediate MP4            ffmpeg  H.264 CRF 0 RGB  ← BIT-EXACT roundtrip
   → prepUS                      UI removal + US-cone crop (reads that MP4)
   → STARHE-RISK  (C3D)          CPU · float64 · 1 thread
   → STARHE-DETECT (RTMDet)      CPU · float64 · 1 thread
   → results.json + results.csv  (+ SHA-256 of every crop)
 ```
 
-**Why H.264 CRF 0?** `-crf 0` puts libx264 in *lossless* mode: the frames prepUS
-decodes are exactly the frames we encoded. Even if two ffmpeg builds emit
-different bitstream bytes, the **decoded pixels are identical** — which is all
-the models see. (Verified in `test_encodage_impact_30.csv`: `h264_crf0` scores
-were strictly equal to `orig` and `ffv1_lossless`.)
+**Why H.264 CRF 0 — and why `libx264rgb`.** `-crf 0` is lossless *for the pixel
+format the encoder receives*; it does not undo a colour conversion applied
+before it. Handing RGB frames to `libx264 -pix_fmt yuv420p` inserts an
+RGB → YUV 4:2:0 step (chroma subsampling + matrix rounding) whose output depends
+on the swscale build, so **two hosts decode different pixels from the same
+recipe**. Measured with `scripts/test_encoding_roundtrip.py` on the same clip:
+
+| encoder settings | macOS host | Linux container | bit-exact |
+|---|---|---|---|
+| `libx264 -crf 0 -pix_fmt yuv420p` | mean err 1.7075 | mean err 0.4647 | ✗ |
+| `libx264 -crf 0 -pix_fmt yuv444p` | mean err 0.1341 | mean err 0.1341 | ✗ |
+| **`libx264rgb -crf 0 -pix_fmt rgb24`** | **0.0000** | **0.0000** | **✓** |
+
+That drift is not cosmetic: with `yuv420p` the prepUS cone crop came out
+`(139, 678, 990)` natively but `(139, 678, 992)` in the container — a different
+array, hence a different hash and a different risk score. `libx264rgb` encodes
+RGB directly, so the decoded frames are the encoded array byte-for-byte on any
+host. Files are ~3× larger, which is irrelevant for a temporary intermediate.
+
+Run the check yourself:
+
+```bash
+python scripts/test_encoding_roundtrip.py                      # on the host
+docker compose run --rm --entrypoint python starhe \
+  /app/scripts/test_encoding_roundtrip.py                      # in the container
+```
 
 ### Build
 
@@ -1657,6 +1682,64 @@ editing code. Defaults below are what the image sets.
 | `STARHE_RISK_THRESHOLD` | `0.50` (default) | High/low risk decision threshold |
 | `OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS` | `1` | Fixes the floating-point accumulation order |
 | `PYTHONHASHSEED` | `0` | Removes hash-ordering non-determinism |
+
+### Scope of the guarantee — what is measured, what is not
+
+Be precise about what "identical results" has actually been shown to mean.
+
+**Measured and confirmed**
+
+| Claim | Evidence |
+|---|---|
+| Same image, same host → bit-identical | Three independent full runs returned the same `crop_sha256` (`a0d43d03…`) and the same `risk_score` (`0.7172470341334668`) to the last digit; the golden-hash gate exits 0 |
+| The intermediate encoding no longer contributes any divergence | prepUS receives byte-identical frames on macOS/arm64 and Linux/x86_64: stage `1_dicom_decode` and stage `3_mp4_decoded` hash to `31a208c8…` on both |
+| DICOM decoding is platform-independent | Same hash on both platforms (pydicom + pylibjpeg, no JVM) |
+| Pinned dependency versions are actually the ones imported | Build-time pin guard (`docker/Dockerfile`) asserts cv2/numpy/scipy/torch/torchvision |
+
+**Known residual divergence — this is why the container matters**
+
+Running the *same code on a different instruction set* still changes the prepUS
+output: from byte-identical input, macOS/arm64 (NEON) and Linux/x86_64 (AVX2)
+produce crops differing on 48.5 % of pixels (`crop_sha256` `91cb7d4b…` vs
+`a0d43d03…`, mean 26.675 vs 27.381). Library versions are identical (numpy
+2.4.4, scipy 1.17.1, OpenCV 4.13.0, sonocrop 0.56), the crop geometry is
+identical, and the prepUS variance threshold agrees exactly
+(`0.1172661870503597`). Reproduce it with:
+
+```bash
+python scripts/diag_stage_hashes.py --input case.dcm --dump-crop /tmp/a.npy
+docker compose run --rm --entrypoint python starhe \
+  /app/scripts/diag_stage_hashes.py --input /data/in/case.dcm --dump-crop /data/out/b.npy
+python scripts/compare_crops.py /tmp/a.npy ./data/out/b.npy
+```
+
+**What that 48.5 % actually is.** A later measurement isolated the two causes.
+The crop above is read back from the `video.mp4` that prepUS writes with the
+**lossy `mp4v` codec**, and two builds of that encoder lose different pixels.
+Running the *same* preprocessing with no video anywhere in the chain (the
+`Docker Numpy` variant in `TEST_PIPELINE/`) and comparing arm64 against amd64
+over 49 files gives only **0.18 % differing pixels, with 13/49 bit-identical**.
+
+So the split is: the **codec accounts for essentially all** of the 48.5 %, and
+the **instruction set for 0.18 %**. Removing the video roundtrip is the dominant
+fix; pinning the architecture is a real but second-order one.
+
+Pinning everyone to **one architecture (linux/amd64)** is what removes the
+remaining term — which is the reason the image is single-platform rather than a
+multi-arch manifest. Do not publish an arm64 variant: it would silently return
+different numbers.
+
+**Not yet verified**
+
+Whether two *different x86-64 CPUs* (e.g. AVX2-only vs AVX-512) agree when
+running this image has **not** been tested here — this machine is Apple Silicon
+running amd64 under Rosetta, and numpy's `NPY_DISABLE_CPU_FEATURES` knob is
+inert in this build (an invalid feature name raises no error, and AVX2/FMA3 stay
+enabled at runtime), so a weaker CPU cannot be simulated locally. numpy and
+OpenCV both select SIMD kernels at run time, so a residual difference is
+possible in principle. The golden-hash gate below is precisely the check for
+this: record the reference on one machine, run the gate on the CI x86 runner,
+and any disagreement surfaces immediately.
 
 ### Docker Compose
 

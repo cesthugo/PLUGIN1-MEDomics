@@ -1,0 +1,44 @@
+# Keep the build context small and the image weight-free.
+
+# Model weights are mounted at run time, never baked in
+**/*.pth
+**/*.pt
+
+# Virtualenvs & caches
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Electron / React (not used by the Python pipeline image)
+renderer/
+node_modules/
+**/node_modules/
+**/dist/
+**/release/
+**/build-resources/
+
+# Go server (out of scope for this image)
+go_server/
+
+# Java / Weasis (the container decodes with pydicom, no JVM)
+third_party/weasis-dcm2png/
+
+# Data, results and scratch
+data/
+temp/
+**/temp/
+*.mp4
+*.dcm
+*.csv
+*.pkl
+
+# VCS / IDE / OS
+.git/
+.github/
+.gitignore
+.idea/
+.vscode/
+**/.DS_Store

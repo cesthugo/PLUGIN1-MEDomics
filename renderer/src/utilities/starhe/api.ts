@@ -34,10 +34,17 @@ export interface DicomLoadResponse {
   error?:             string;
 }
 
+// Frames are served at the DICOM's native resolution: MAX_DIM is an upper
+// safety bound (the Go server rejects anything above 4096), not a downscale
+// target — a 890×1280 clip is encoded untouched. Lowering it makes the viewer
+// upscale a smaller JPEG and look blurry.
+const FRAME_QUALITY = 92;
+const FRAME_MAX_DIM = 4096;
+
 export async function loadDicom(
   dicomPath: string,
-  quality  = 70,
-  maxDim   = 640,
+  quality  = FRAME_QUALITY,
+  maxDim   = FRAME_MAX_DIM,
 ): Promise<DicomData> {
   const res = await fetch(`${getApiBase()}/starhe/dicom/load`, {
     method:  'POST',
@@ -63,8 +70,8 @@ export async function loadDicom(
  */
 export async function loadDicomFile(
   file:    File,
-  quality = 70,
-  maxDim  = 640,
+  quality = FRAME_QUALITY,
+  maxDim  = FRAME_MAX_DIM,
 ): Promise<DicomData> {
   const form = new FormData();
   form.append('file', file);
@@ -107,61 +114,58 @@ function mapDicomResponse(json: DicomLoadResponse): DicomData {
   };
 }
 
-/**
- * Loads an MP4 file from a File object (standard browser).
- * Uploads the bytes as multipart/form-data → the Go server writes a
- * temporary file and returns the base64 JPEG-encoded frames.
- */
-export async function loadMp4File(
-  file:    File,
-  quality = 70,
-  maxDim  = 640,
-): Promise<DicomData> {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('quality', String(quality));
-  form.append('max_dim', String(maxDim));
-
-  const res = await fetch(`${getApiBase()}/starhe/mp4/load`, {
-    method: 'POST',
-    body:   form,
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => `HTTP ${res.status}`);
-    throw new Error(txt);
-  }
-
-  const json: DicomLoadResponse = await res.json();
-  if (json.error) throw new Error(json.error);
-
-  return mapDicomResponse(json);
-}
-
 // ── MongoDB cache deletion ────────────────────────────────────────────────────
 
-/** Reloads an MP4 already present on the server from its absolute path.
- *  Used by openBatchResultAsTab to reopen an MP4 analysis result. */
-export async function loadMp4(
-  mp4Path: string,
-  quality = 70,
-  maxDim  = 640,
-): Promise<DicomData> {
-  const res = await fetch(`${getApiBase()}/starhe/mp4/load`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ mp4_path: mp4Path, quality, max_dim: maxDim }),
+// ── AI model weights (local provisioning) ─────────────────────────────────────
+
+export interface WeightStatus {
+  id:      string;   // 'risk' | 'detect'
+  name:    string;   // human-readable model name
+  file:    string;   // canonical .pth file name
+  present: boolean;  // true if the weight is available server-side
+}
+
+/** Per-model presence of the STARHE weights on the server. */
+export async function getWeightsStatus(): Promise<WeightStatus[]> {
+  const res = await fetch(`${getApiBase()}/starhe/weights/status`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export interface WeightUploadResult {
+  ok: boolean; id: string; file?: string; warning?: string; error?: string;
+}
+
+/**
+ * Uploads a user-picked .pth for one model. Uses XMLHttpRequest to report
+ * upload progress (checkpoints are 300–440 MB). Resolves on success, rejects
+ * with the server error message otherwise.
+ */
+export function uploadWeight(
+  modelId: string,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<WeightUploadResult> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('id', modelId);
+    form.append('file', file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${getApiBase()}/starhe/weights/upload`);
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      let body: WeightUploadResult;
+      try { body = JSON.parse(xhr.responseText); }
+      catch { body = { ok: false, id: modelId, error: `HTTP ${xhr.status}` }; }
+      if (xhr.status >= 200 && xhr.status < 300 && body.ok) resolve(body);
+      else reject(new Error(body.error || `HTTP ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.send(form);
   });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => `HTTP ${res.status}`);
-    throw new Error(txt);
-  }
-
-  const json: DicomLoadResponse = await res.json();
-  if (json.error) throw new Error(json.error);
-
-  return mapDicomResponse(json);
 }
 
 export async function deleteCache(dicomPath: string): Promise<{ deleted: number }> {
@@ -180,8 +184,6 @@ export async function deleteCache(dicomPath: string): Promise<{ deleted: number 
 
 export interface AnalyzeRequest {
   dicomPath?:          string;
-  /** Server path of a temporary MP4 file — uses /starhe/mp4/analyze */
-  mp4Path?:            string;
   anonMode?:          string;
   runRisk?:           boolean;
   runDetection?:      boolean;
@@ -208,28 +210,16 @@ export function streamAnalysis(
 
   (async () => {
     try {
-      const isMp4 = !!req.mp4Path;
-      const url   = isMp4
-        ? `${getApiBase()}/starhe/mp4/analyze`
-        : `${getApiBase()}/starhe/analyze`;
-      const body  = isMp4
-        ? JSON.stringify({
-            mp4_path:             req.mp4Path,
-            run_risk:             req.runRisk ?? true,
-            run_detection:        req.runDetection ?? true,
-            back_scan_conversion: req.backScanConversion ?? true,
-            backscan_width:       req.backscanWidth ?? 512,
-            backscan_height:      req.backscanHeight ?? 512,
-          })
-        : JSON.stringify({
-            dicom_path:           req.dicomPath,
-            anon_mode:            req.anonMode ?? 'hash',
-            run_risk:             req.runRisk ?? true,
-            run_detection:        req.runDetection ?? true,
-            back_scan_conversion: req.backScanConversion ?? true,
-            backscan_width:       req.backscanWidth ?? 512,
-            backscan_height:      req.backscanHeight ?? 512,
-          });
+      const url  = `${getApiBase()}/starhe/analyze`;
+      const body = JSON.stringify({
+        dicom_path:           req.dicomPath,
+        anon_mode:            req.anonMode ?? 'hash',
+        run_risk:             req.runRisk ?? true,
+        run_detection:        req.runDetection ?? true,
+        back_scan_conversion: req.backScanConversion ?? true,
+        backscan_width:       req.backscanWidth ?? 512,
+        backscan_height:      req.backscanHeight ?? 512,
+      });
       const res = await fetch(url, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },

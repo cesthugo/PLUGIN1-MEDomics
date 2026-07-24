@@ -21,6 +21,8 @@ interface Window {
   electronAPI?: {
     /** Opens a native DICOM file selection dialog. */
     openDicomFiles: () => Promise<string[]>;
+    /** Opens a native folder dialog → every DICOM file inside (recursive). */
+    openDicomFolder?: () => Promise<string[]>;
     /** Per-model presence status of the AI weights (one entry per model). */
     weightsStatus?: () => Promise<Array<{ id: string; name: string; file: string; present: boolean }>>;
     /** Opens a dialog to pick the `.pth` weight for ONE model (by id) and installs it. */

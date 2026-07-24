@@ -7,6 +7,34 @@ centralized here to ease maintenance.
 
 import os
 
+
+# ── Environment overrides ─────────────────────────────────────────────────────
+# Every tunable below can be overridden by an environment variable, so a
+# container (or CI job) configures the pipeline without editing this file.
+# Unset variables keep the Python default declared here.
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Reads a boolean env var ('1/true/yes/on' → True, '0/false/no/off' → False)."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
 # ── Base paths ────────────────────────────────────────────────────────────────
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 
@@ -67,13 +95,14 @@ STARHE_DINO_CHECKPOINT = os.path.join(WEIGHTS_DIR, "best_coco_bbox_mAP_50_iter_2
 # Contains: vendor/starhe/__init__.py
 STARHE_SHARE_ROOT = VENDOR_DIR
 
-# Minimum confidence score to display a detection
-DETECT_SCORE_THRESHOLD = 0.70
+# Minimum confidence score to display a detection.
+# Override: STARHE_DETECT_SCORE_THRESHOLD
+DETECT_SCORE_THRESHOLD = _env_float("STARHE_DETECT_SCORE_THRESHOLD", 0.70)
 
 # DETECT temporal subsampling: 1 frame analyzed out of every N
 # The N-1 intermediate frames inherit the detections of the analyzed frame
 # 1 = every frame (disabled), 4 = ×4 speedup (recommended)
-DETECT_EVERY_N = 4
+DETECT_EVERY_N = _env_int("STARHE_DETECT_EVERY_N", 4)
 
 # RTMDet batch inference size.
 # "auto" = detect hardware (VRAM/RAM) and compute optimal batch size.
@@ -108,7 +137,7 @@ INFERENCE_DEVICE = "auto"
 # ⚠️  Set to False to reproduce Jérémy's native environment (Linux + GPU,
 #     float32): forcing CPU/float64 MOVES AWAY from his distribution. Switch back
 #     to True for bit-exact reproducibility across OSes.
-DETERMINISTIC_INFERENCE: bool = True
+DETERMINISTIC_INFERENCE: bool = _env_bool("STARHE_DETERMINISTIC", True)
 
 # ── MP4 roundtrip bypass in prepUS ───────────────────────────────────────────
 # `cv2.VideoWriter(mp4v)` produces a bitstream that depends on the FFmpeg binary
@@ -124,7 +153,7 @@ DETERMINISTIC_INFERENCE: bool = True
 #
 # ⚠️  Set to False to reproduce Jérémy: the mp4v roundtrip is what the models
 #     saw during training. Switch back to True for cross-OS portability.
-PREPUS_BYPASS_MP4: bool = True
+PREPUS_BYPASS_MP4: bool = _env_bool("STARHE_PREPUS_BYPASS_MP4", True)
 
 # ── DICOM decoding via weasis-dcm2png ────────────────────────────────────────
 # `pydicom.pixel_array` applies neither the DICOM's Modality LUT nor its VOI LUT,
@@ -138,7 +167,7 @@ PREPUS_BYPASS_MP4: bool = True
 #         fails (e.g. JPEG 2000 not supported by the current JAR).
 # False : direct pydicom via extract_frames(ds) — historical behavior,
 #         no LUT applied, no Java subprocess.
-USE_WEASIS_EXPORT: bool = True
+USE_WEASIS_EXPORT: bool = _env_bool("STARHE_USE_WEASIS", True)
 
 # ── STARHE-RISK decision threshold ───────────────────────────────────────────
 # Minimum probability (class 1 = high risk) to classify a patient
@@ -151,7 +180,7 @@ USE_WEASIS_EXPORT: bool = True
 #   Threshold 0.50 → Sens=90.9%  Spec=52.0%  Acc=70.2%  F1=0.741
 #   Threshold 0.60 → Sens=77.3%  Spec=64.0%  Acc=70.2%  F1=0.708
 #   C3D ref        → Sens=77.3%  Spec=72.0%  Acc=74.5%
-RISK_THRESHOLD: float = 0.50
+RISK_THRESHOLD: float = _env_float("STARHE_RISK_THRESHOLD", 0.50)
 
 # ── DICOM preprocessing parameters ───────────────────────────────────────────
 CROP_BLACK_THRESHOLD   = 10

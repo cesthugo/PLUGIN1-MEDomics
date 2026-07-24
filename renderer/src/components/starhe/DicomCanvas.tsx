@@ -160,6 +160,18 @@ export function DicomCanvas({
   const canvasSizeRef = useRef({ w: 640, h: 480 });
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 480 });
 
+  // Screen pixel density (2 on Retina). The canvas backing store must be
+  // allocated in physical pixels, otherwise the frame is upscaled from half
+  // the resolution and looks blurry.
+  const [dpr, setDpr] = useState(
+    () => (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1),
+  );
+  useEffect(() => {
+    const update = () => setDpr(window.devicePixelRatio || 1);
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
   // Size observer
   useLayoutEffect(() => {
     const el = wrapRef.current;
@@ -254,6 +266,12 @@ export function DicomCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // HiDPI/Retina: the backing store is in physical pixels
+    // (canvas.width = CSS × dpr), but setTransform keeps the whole drawing API
+    // in CSS pixels → no other coordinate computation needs to change.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingQuality = 'high';
+
     ctx.clearRect(0, 0, canvasSize.w, canvasSize.h);
     ctx.fillStyle = CANVAS_BG;
     ctx.fillRect(0, 0, canvasSize.w, canvasSize.h);
@@ -302,7 +320,13 @@ export function DicomCanvas({
         const rw = Math.min(canvasSize.w, Math.round(t.offX + iw * t.scale)) - rx;
         const rh = Math.min(canvasSize.h, Math.round(t.offY + ih * t.scale)) - ry;
         if (rw > 0 && rh > 0) {
-          const imgData = ctx.getImageData(rx, ry, rw, rh);
+          // getImageData/putImageData ignore the context transform and address
+          // the backing store directly → convert CSS px to physical px.
+          const px = Math.round(rx * dpr);
+          const py = Math.round(ry * dpr);
+          const pw = Math.round(rw * dpr);
+          const ph = Math.round(rh * dpr);
+          const imgData = ctx.getImageData(px, py, pw, ph);
           const d = imgData.data;
           const c = contrast;
           const b = brightness; // −100 … +100
@@ -314,7 +338,7 @@ export function DicomCanvas({
             d[i+1] = Math.max(0, Math.min(255, c * d[i+1] + b));
             d[i+2] = Math.max(0, Math.min(255, c * d[i+2] + b));
           }
-          ctx.putImageData(imgData, rx, ry);
+          ctx.putImageData(imgData, px, py);
         }
       }
 
@@ -355,7 +379,7 @@ export function DicomCanvas({
       img.src = `data:image/jpeg;base64,${b64}`;
     }
   }, [
-    tab, canvasSize, measurePreview,
+    tab, canvasSize, dpr, measurePreview,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     tab?.frameIdx, tab?.zoom, tab?.panX, tab?.panY,
     tab?.contrast, tab?.brightness, tab?.selectedMeasure,
@@ -421,8 +445,8 @@ export function DicomCanvas({
 
       <canvas
         ref={canvasRef}
-        width={canvasSize.w}
-        height={canvasSize.h}
+        width={Math.round(canvasSize.w * dpr)}
+        height={Math.round(canvasSize.h * dpr)}
         tabIndex={0}
         style={{
           outline: 'none',

@@ -1,0 +1,45 @@
+# STARHE containerised pipeline — fully pinned dependency set.
+# Versions are the ones validated on the reference environment; do not bump
+# without re-running the golden-hash check (see README).
+#
+# torch / torchvision are installed separately from the CPU-only index in the
+# Dockerfile (they must not pull CUDA wheels).
+
+# ── Numerics ────────────────────────────────────────────────────────────────
+numpy==2.4.4
+scipy==1.17.1
+
+# ── Imaging / video ─────────────────────────────────────────────────────────
+# The headless variant would be the natural choice for a container, but mmcv-lite,
+# mmengine and sonocrop all declare a hard, UNPINNED dependency on `opencv-python`.
+# pip would therefore install it on top of the headless build: two copies of cv2,
+# and the version silently floating to whatever is latest on the build date.
+# Pinning `opencv-python` itself leaves exactly one cv2, fully frozen.
+opencv-python==4.13.0.92
+pillow==12.2.0
+
+# ── DICOM ───────────────────────────────────────────────────────────────────
+pydicom==3.0.2
+pylibjpeg==2.1.0
+pylibjpeg-libjpeg==2.4.0
+pylibjpeg-openjpeg==2.5.0
+
+# ── prepUS runtime dependency (prepUS itself is installed from third_party/) ─
+sonocrop==0.56
+fire==0.7.1
+rich==14.3.3
+
+# ── STARHE-DETECT (RTMDet / mmdet stack) ────────────────────────────────────
+# mmcv-lite: no compiled C extension — the runner stubs mmcv._ext and routes
+# NMS through torchvision, which keeps the image small and portable.
+mmcv-lite==2.1.0
+mmengine==0.10.7
+mmdet==3.3.0
+pycocotools==2.0.11
+shapely==2.1.2
+terminaltables==3.1.10
+addict==2.4.0
+yapf==0.43.0
+
+# ── Hardware probing (optional batch-size heuristic) ────────────────────────
+psutil==7.1.2

@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openDicomFiles: (): Promise<string[]> =>
     ipcRenderer.invoke('open-dicom-files'),
 
+  // Picks a folder and returns every DICOM file found inside (recursive).
+  openDicomFolder: (): Promise<string[]> =>
+    ipcRenderer.invoke('open-dicom-folder'),
+
   /** Per-model presence status of the AI weights (one entry per model). */
   weightsStatus: (): Promise<Array<{ id: string; name: string; file: string; present: boolean }>> =>
     ipcRenderer.invoke('models:status'),
